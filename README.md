@@ -99,6 +99,15 @@ MARKET_DATA_MAX_ATTEMPTS=3
 MARKET_DATA_RETRY_BACKOFF_SECONDS=1.5
 ```
 
+Runtime budgets:
+
+```bash
+PROVIDER_CALL_BUDGET=1000
+OPENAI_CALL_BUDGET=50
+PLAYWRIGHT_PAGE_BUDGET=20
+TELEGRAM_SEND_BUDGET=200
+```
+
 Runtime logs are emitted as JSON lines to stderr from the API, CLI, persistence, and Telegram loops.
 
 Telegram bot settings:

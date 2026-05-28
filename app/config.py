@@ -27,6 +27,10 @@ class Settings(BaseModel):
     market_data_timeout_seconds: float = Field(default=20.0)
     market_data_max_attempts: int = Field(default=3)
     market_data_retry_backoff_seconds: float = Field(default=1.5)
+    provider_call_budget: int = Field(default=1000)
+    openai_call_budget: int = Field(default=50)
+    playwright_page_budget: int = Field(default=20)
+    telegram_send_budget: int = Field(default=200)
     telegram_bot_token: str | None = Field(default=None)
     telegram_default_tickers: str = Field(
         default="AAPL,MSFT,NVDA,TSLA,AMD,AMZN,GOOGL,META"
@@ -152,6 +156,30 @@ def get_settings() -> Settings:
             env_name="MARKET_DATA_RETRY_BACKOFF_SECONDS",
             default=1.5,
             minimum=0.0,
+        ),
+        provider_call_budget=_parse_int(
+            os.getenv("PROVIDER_CALL_BUDGET"),
+            env_name="PROVIDER_CALL_BUDGET",
+            default=1000,
+            minimum=0,
+        ),
+        openai_call_budget=_parse_int(
+            os.getenv("OPENAI_CALL_BUDGET"),
+            env_name="OPENAI_CALL_BUDGET",
+            default=50,
+            minimum=0,
+        ),
+        playwright_page_budget=_parse_int(
+            os.getenv("PLAYWRIGHT_PAGE_BUDGET"),
+            env_name="PLAYWRIGHT_PAGE_BUDGET",
+            default=20,
+            minimum=0,
+        ),
+        telegram_send_budget=_parse_int(
+            os.getenv("TELEGRAM_SEND_BUDGET"),
+            env_name="TELEGRAM_SEND_BUDGET",
+            default=200,
+            minimum=0,
         ),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
         telegram_default_tickers=os.getenv(

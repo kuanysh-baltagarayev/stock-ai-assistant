@@ -60,6 +60,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 40 tests after runtime budget updates.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after runtime budget updates.
+- 2026-05-28: `scripts/check.sh` passed after runtime budget updates, with `ruff`, 40 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 40 tests after live network guard updates.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after live network guard updates.
 - 2026-05-28: `scripts/check.sh` passed after live network guard updates, with `ruff`, 40 coverage-wrapped tests, coverage report, and compile check.
@@ -377,7 +380,7 @@ Status: in progress.
 5. Done: add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
 6. Done: add local runtime notes for Telegram bot operation, logs, restart, env setup, and database location.
 7. Done: add clear live-smoke environment flags so offline tests never depend on network access.
-8. Add provider-call, OpenAI-call, Playwright-page, and Telegram-send runtime budgets.
+8. Done: add provider-call, OpenAI-call, Playwright-page, and Telegram-send runtime budgets.
 9. Done: add backup/restore notes for the local SQLite database.
 
 ## Phase 3: Improve Data and Persistence

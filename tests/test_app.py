@@ -237,6 +237,25 @@ class ConfigurationTests(unittest.TestCase):
 
         self.assertIn("APP_PORT must be an integer", str(exc.exception))
 
+    def test_get_settings_parses_runtime_budgets(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PROVIDER_CALL_BUDGET": "321",
+                "OPENAI_CALL_BUDGET": "12",
+                "PLAYWRIGHT_PAGE_BUDGET": "7",
+                "TELEGRAM_SEND_BUDGET": "44",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        self.assertEqual(settings.provider_call_budget, 321)
+        self.assertEqual(settings.openai_call_budget, 12)
+        self.assertEqual(settings.playwright_page_budget, 7)
+        self.assertEqual(settings.telegram_send_budget, 44)
+
     def test_startup_diagnostics_warn_on_remote_api_without_policy(self) -> None:
         with patch.dict(
             os.environ,
