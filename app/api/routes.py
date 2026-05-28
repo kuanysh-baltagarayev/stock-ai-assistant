@@ -75,7 +75,7 @@ def analyze(ticker: str, db: Session = Depends(get_db)) -> AnalyzeResponse:
     try:
         return analyze_ticker(ticker, db=db, use_ai_explanation=True)
     except MarketDataError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -17,6 +17,9 @@ class Settings(BaseModel):
     database_url: str = Field(default="sqlite:///./stock_ai_assistant.db")
     openai_api_key: str | None = Field(default=None)
     openai_model: str = Field(default="gpt-4.1-mini")
+    market_data_timeout_seconds: float = Field(default=20.0)
+    market_data_max_attempts: int = Field(default=3)
+    market_data_retry_backoff_seconds: float = Field(default=1.5)
     telegram_bot_token: str | None = Field(default=None)
     telegram_default_tickers: str = Field(
         default="AAPL,MSFT,NVDA,TSLA,AMD,AMZN,GOOGL,META"
@@ -47,6 +50,13 @@ def get_settings() -> Settings:
         ),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        market_data_timeout_seconds=float(
+            os.getenv("MARKET_DATA_TIMEOUT_SECONDS", "20")
+        ),
+        market_data_max_attempts=int(os.getenv("MARKET_DATA_MAX_ATTEMPTS", "3")),
+        market_data_retry_backoff_seconds=float(
+            os.getenv("MARKET_DATA_RETRY_BACKOFF_SECONDS", "1.5")
+        ),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
         telegram_default_tickers=os.getenv(
             "TELEGRAM_DEFAULT_TICKERS",

@@ -24,6 +24,7 @@ from app.schemas import (
     Scores,
     TechnicalIndicators,
 )
+from app.services import market_data
 from app.services.scanner import analyze_ticker, scan_tickers
 
 
@@ -79,6 +80,36 @@ class AppSmokeTests(unittest.TestCase):
 
         self.assertTrue(resolved.startswith("sqlite:///"))
         self.assertIn(str(Path(PROJECT_ROOT / "stock_ai_assistant.db").resolve()), resolved)
+
+    def test_market_data_retries_download_before_succeeding(self) -> None:
+        history = pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0]},
+            index=pd.date_range("2026-05-25", periods=3, tz="UTC"),
+        )
+
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=3,
+            market_data_retry_backoff_seconds=0.0,
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download", side_effect=[RuntimeError("temporary"), history]),
+            patch("app.services.market_data.yf.Ticker", return_value=SimpleNamespace()),
+            patch("app.services.market_data._safe_info", return_value={}),
+            patch("app.services.market_data._safe_fast_info", return_value={}),
+            patch("app.services.market_data.time.sleep"),
+        ):
+            data = market_data.get_market_data("aapl")
+
+        self.assertEqual(data["ticker"], "AAPL")
+        self.assertEqual(data["price"], 102.0)
+        self.assertEqual(len(data["history"]), 3)
+
+    def test_market_data_rejects_empty_ticker(self) -> None:
+        with self.assertRaises(market_data.InvalidTickerError):
+            market_data.normalize_ticker("   ")
 
     def test_analyze_ticker_builds_response_without_network(self) -> None:
         market = {
@@ -191,6 +222,21 @@ class ApiRouteTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["ticker"], "AAPL")
         self.assertEqual(body["scores"]["final_score"], 77.7)
+
+    def test_analyze_endpoint_uses_market_data_status_code(self) -> None:
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch(
+                "app.api.routes.analyze_ticker",
+                side_effect=market_data.MarketDataError("provider down", status_code=503),
+            ),
+            TestClient(app) as client,
+        ):
+            response = client.get("/analyze/AAPL")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "provider down")
 
     def test_scan_endpoint_serializes_sorted_results(self) -> None:
         scan_response = SimpleNamespace(

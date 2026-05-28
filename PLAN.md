@@ -69,7 +69,7 @@ Status: in progress.
 
 1. Done: add a live smoke script for real `yfinance` analyze and scan paths without requiring OpenAI or Telegram.
 2. Done: add readiness behavior for database availability.
-3. Improve market-data error handling with timeouts, bounded retries, and clearer user-facing errors.
+3. Done: improve market-data error handling with timeouts, bounded retries, and clearer user-facing errors.
 4. Add basic structured logging setup for API, scanner, persistence, and Telegram background loops.
 5. Add OpenAI live smoke guarded by `OPENAI_API_KEY`, without making OpenAI required for normal operation.
 6. Add Telegram live check that verifies token/config safely without sending accidental spam.

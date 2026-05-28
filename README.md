@@ -61,6 +61,14 @@ OPENAI_API_KEY=your_key_here
 
 If `OPENAI_API_KEY` is empty, the app still works and returns a rule-based explanation.
 
+Market-data resilience settings:
+
+```bash
+MARKET_DATA_TIMEOUT_SECONDS=20
+MARKET_DATA_MAX_ATTEMPTS=3
+MARKET_DATA_RETRY_BACKOFF_SECONDS=1.5
+```
+
 Telegram bot settings:
 
 ```bash
