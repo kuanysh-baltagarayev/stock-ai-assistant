@@ -46,6 +46,12 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+For development checks, install the development tools too:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 Create local env file:
 
 ```bash
@@ -107,6 +113,14 @@ http://127.0.0.1:8000/
 ```bash
 python -m unittest discover -v
 ```
+
+Full local verification:
+
+```bash
+scripts/check.sh
+```
+
+This runs `ruff`, coverage-wrapped unit tests, a coverage report, and `compileall`.
 
 ## Check Health
 

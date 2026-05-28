@@ -43,6 +43,9 @@ Implemented:
 - readiness endpoint with a database probe.
 - Smoke tests for API routes, persistence, scanner behavior, and CLI scripts.
 - SQLite path resolution relative to the project root.
+- Development requirements file for lint and coverage tooling.
+- `ruff` and coverage configuration in `pyproject.toml`.
+- One-command local verification script at `scripts/check.sh`.
 
 ## Commit History Baseline Before This Split
 
@@ -59,6 +62,7 @@ Implemented:
 - 2026-05-28: offline test suite passed with 22 tests after plan-scope update.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after plan-scope update.
 - 2026-05-28: live `yfinance` smoke passed with `scripts/live_smoke.py --ticker AAPL --scan AAPL`.
+- 2026-05-28: `scripts/check.sh` passed with `ruff`, 22 coverage-wrapped tests, coverage report, and compile check.
 
 ## Known Limits
 
@@ -348,7 +352,7 @@ Status: in progress.
 1. Pin or constrain Python dependencies.
 2. Document the supported Python version.
 3. Add CI for tests and compile checks.
-4. Add a one-command local verification entrypoint, such as `make test` or `scripts/check.sh`.
+4. Done: add a one-command local verification entrypoint at `scripts/check.sh`.
 5. Add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
 6. Add local runtime notes for Telegram bot operation, logs, restart, env setup, and database location.
 7. Add clear live-smoke environment flags so offline tests never depend on network access.

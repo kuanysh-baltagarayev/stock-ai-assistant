@@ -34,6 +34,12 @@ When asked to continue, make concrete progress: inspect state, implement the nex
 Run these before calling implementation work complete:
 
 ```bash
+scripts/check.sh
+```
+
+If development dependencies are missing, install `requirements-dev.txt` or fall back to:
+
+```bash
 .venv/bin/python -m unittest discover -v
 .venv/bin/python -m compileall app scripts tests
 ```

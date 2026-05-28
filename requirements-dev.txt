@@ -1,0 +1,4 @@
+-r requirements.txt
+
+coverage[toml]>=7.6.0
+ruff>=0.8.0

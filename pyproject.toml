@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 100
+extend-exclude = [
+    ".venv",
+]
+
+[tool.coverage.run]
+branch = true
+source = [
+    "app",
+    "scripts",
+]
+
+[tool.coverage.report]
+fail_under = 0
+show_missing = true
+skip_covered = true
