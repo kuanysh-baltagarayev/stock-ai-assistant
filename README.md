@@ -163,6 +163,12 @@ Default tickers:
 AAPL, MSFT, NVDA, TSLA, AMD, AMZN, GOOGL, META
 ```
 
+You can also pass custom tickers and get JSON output:
+
+```bash
+python scripts/scan_market.py AAPL MSFT NVDA --json
+```
+
 The script prints:
 
 ```text
@@ -174,6 +180,8 @@ ticker, price, final_score, recommendation, short_reason
 ```bash
 python scripts/run_telegram_bot.py
 ```
+
+If Telegram is disabled or the token is missing, the script exits with a clear error message.
 
 Available commands:
 

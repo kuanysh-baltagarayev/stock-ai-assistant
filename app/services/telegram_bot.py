@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -11,6 +12,9 @@ from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import TelegramSubscription
 from app.services.scanner import analyze_ticker, scan_tickers
+
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramBotService:
@@ -114,8 +118,8 @@ class TelegramBotService:
                     await self._handle_update(update)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # pragma: no cover - resilience path
-                print(f"[telegram] polling error: {exc}")
+            except Exception:  # pragma: no cover - resilience path
+                logger.exception("Telegram polling loop failed")
                 await asyncio.sleep(5)
 
     async def _digest_loop(self) -> None:
@@ -126,8 +130,8 @@ class TelegramBotService:
                 await self._send_digest_to_active_subscribers()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # pragma: no cover - resilience path
-                print(f"[telegram] digest error: {exc}")
+            except Exception:  # pragma: no cover - resilience path
+                logger.exception("Telegram digest loop failed")
 
     async def _handle_update(self, update: dict[str, Any]) -> None:
         message = update.get("message") or update.get("edited_message")

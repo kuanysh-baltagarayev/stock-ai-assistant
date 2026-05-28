@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import logging
 
 from sqlalchemy.orm import Session
 
@@ -8,6 +9,9 @@ from app.services.ai_explainer import explain_analysis, rule_based_explanation
 from app.services.indicators import calculate_indicators
 from app.services.market_data import MarketDataError, extract_fundamentals, get_market_data
 from app.services.scoring import score_stock
+
+
+logger = logging.getLogger(__name__)
 
 
 def analyze_ticker(
@@ -88,6 +92,7 @@ def _save_snapshot(db: Session, response: AnalyzeResponse) -> None:
         db.commit()
     except Exception:
         db.rollback()
+        logger.exception("Failed to persist analysis snapshot for %s", response.ticker)
 
 
 def _json_ready(payload: dict) -> dict:

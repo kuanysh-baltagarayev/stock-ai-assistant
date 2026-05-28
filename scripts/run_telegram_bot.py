@@ -1,6 +1,7 @@
-from pathlib import Path
 import asyncio
+from pathlib import Path
 import sys
+import traceback
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -11,7 +12,14 @@ from app.services.telegram_bot import run_telegram_bot  # noqa: E402
 
 
 def main() -> int:
-    asyncio.run(run_telegram_bot())
+    try:
+        asyncio.run(run_telegram_bot())
+    except RuntimeError as exc:
+        print(f"Telegram bot could not start: {exc}", file=sys.stderr)
+        return 1
+    except Exception:
+        traceback.print_exc()
+        return 1
     return 0
 
 
