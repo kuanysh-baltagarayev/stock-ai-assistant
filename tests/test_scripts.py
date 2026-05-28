@@ -24,7 +24,7 @@ class ScanMarketScriptTests(unittest.TestCase):
                     ticker="AAPL",
                     price=189.12,
                     final_score=77.7,
-                    recommendation="HOLD",
+                    recommendation="NEUTRAL",
                     short_reason="AAPL short reason",
                 )
             ],
@@ -133,7 +133,7 @@ class OpenAISmokeScriptTests(unittest.TestCase):
             ticker="AAPL",
             price=189.12,
             scores=SimpleNamespace(final_score=77.7),
-            recommendation="HOLD",
+            recommendation="NEUTRAL",
             explanation="LLM explanation",
         )
 
@@ -161,14 +161,14 @@ class LiveSmokeScriptTests(unittest.TestCase):
             ticker="AAPL",
             price=189.12,
             scores=SimpleNamespace(final_score=77.7),
-            recommendation="HOLD",
+            recommendation="NEUTRAL",
         )
         fake_scan = SimpleNamespace(
             results=[
                 SimpleNamespace(
                     ticker="MSFT",
                     final_score=80.0,
-                    recommendation="HOLD",
+                    recommendation="NEUTRAL",
                 )
             ],
             errors=[],

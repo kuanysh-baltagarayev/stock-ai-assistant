@@ -268,16 +268,15 @@ The score is deterministic and calculated by code:
 - `risk_score`: volatility, max drawdown, overbought RSI, unusually large daily move.
 - `final_score`: weighted combination of momentum, valuation, and inverse risk.
 
-Recommendation categories:
+Research labels:
 
-- `STRONG_BUY_CANDIDATE`
-- `BUY_WATCHLIST`
-- `HOLD`
-- `WAIT`
-- `REDUCE`
-- `AVOID`
+- `HIGH_INTEREST`
+- `WATCH`
+- `NEUTRAL`
+- `CAUTION`
+- `HIGH_RISK`
 
-These are analytical signals for research workflow, not guaranteed recommendations.
+These are neutral research labels for workflow triage, not financial advice or guaranteed recommendations.
 
 ## Disclaimer
 

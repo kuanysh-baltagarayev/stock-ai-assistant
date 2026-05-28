@@ -1,16 +1,14 @@
 from dataclasses import dataclass
 
 from app.schemas import Fundamentals, Scores, TechnicalIndicators
+from app.services.research_labels import (
+    NEUTRAL_RESEARCH_LABELS,
+    research_label_for_score,
+    research_label_to_title,
+)
 
 
-RECOMMENDATIONS = {
-    "STRONG_BUY_CANDIDATE",
-    "BUY_WATCHLIST",
-    "HOLD",
-    "WAIT",
-    "REDUCE",
-    "AVOID",
-}
+RESEARCH_LABELS = set(NEUTRAL_RESEARCH_LABELS)
 
 
 @dataclass(frozen=True)
@@ -36,7 +34,7 @@ def score_stock(
         + (100 - risk_score) * 0.20
     )
     final_score = round(_clamp(final_score), 2)
-    recommendation = _recommendation(final_score, risk_score)
+    recommendation = research_label_for_score(final_score, risk_score)
     reasons = momentum_reasons + valuation_reasons + risk_reasons
 
     scores = Scores(
@@ -213,21 +211,11 @@ def _risk_score(technicals: TechnicalIndicators) -> tuple[float, list[str]]:
 
 
 def _recommendation(final_score: float, risk_score: float) -> str:
-    if final_score >= 80 and risk_score <= 55:
-        return "STRONG_BUY_CANDIDATE"
-    if final_score >= 68 and risk_score <= 70:
-        return "BUY_WATCHLIST"
-    if final_score >= 52:
-        return "HOLD"
-    if final_score >= 40:
-        return "WAIT"
-    if final_score >= 28:
-        return "REDUCE"
-    return "AVOID"
+    return research_label_for_score(final_score, risk_score)
 
 
 def _short_reason(recommendation: str, reasons: list[str]) -> str:
-    base = recommendation.replace("_", " ").title()
+    base = research_label_to_title(recommendation)
     if not reasons:
         return f"{base}: not enough strong signals; review manually."
     return f"{base}: " + "; ".join(reasons[:3]) + "."

@@ -60,6 +60,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 31 tests after neutral research-label migration.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after neutral research-label migration.
+- 2026-05-28: `scripts/check.sh` passed after neutral research-label migration, with `ruff`, 31 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 28 tests after log redaction updates.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after log redaction updates.
 - 2026-05-28: `scripts/check.sh` passed after log redaction updates, with `ruff`, 28 coverage-wrapped tests, coverage report, and compile check.
@@ -347,7 +350,7 @@ Status: in progress.
 9. Done: add config validation and startup diagnostics for env settings.
 10. Done: add explicit local-only API exposure policy for the MVP.
 11. Done: add basic secret/log redaction checks for env values, Telegram token, and provider credentials.
-12. Add neutral research-label migration plan and tests before changing user-facing recommendation labels.
+12. Done: add neutral research-label migration plan and tests before changing user-facing recommendation labels.
 13. Keep README, AGENTS, and this plan synchronized.
 
 ## Phase 2: Make Builds Reproducible
@@ -389,7 +392,7 @@ Status: in progress.
 8. Add Telegram chat allowlist or admin-approved onboarding before practical bot usage.
 9. Add per-chat data deletion or cleanup behavior.
 10. Add alert deduplication, per-chat daily caps, confidence thresholds, and market-hours-only mode.
-11. Replace buy/sell-like labels with neutral research labels in API, CLI, Telegram, docs, and tests.
+11. Done: replace buy/sell-like labels with neutral research labels in API, CLI, Telegram, docs, and tests.
 12. Add contextual disclaimer behavior for first use, high-risk events, and major alerts.
 13. Do not add a web UI unless the user explicitly changes direction; Telegram is the primary user interface.
 

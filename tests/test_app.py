@@ -44,7 +44,7 @@ def make_analysis(ticker: str, final_score: float) -> AnalyzeResponse:
             risk_score=50.0,
             final_score=final_score,
         ),
-        recommendation="HOLD",
+        recommendation="NEUTRAL",
         short_reason=f"{ticker} short reason",
         explanation=f"{ticker} explanation",
     )
@@ -130,8 +130,8 @@ class AppSmokeTests(unittest.TestCase):
                 risk_score=35.0,
                 final_score=62.5,
             ),
-            recommendation="HOLD",
-            short_reason="HOLD: sample reason.",
+            recommendation="NEUTRAL",
+            short_reason="Neutral: sample reason.",
             reasons=["price is above MA50"],
         )
 
@@ -166,8 +166,8 @@ class AppSmokeTests(unittest.TestCase):
                 risk_score=35.0,
                 final_score=62.5,
             ),
-            recommendation="HOLD",
-            short_reason="HOLD: sample reason.",
+            recommendation="NEUTRAL",
+            short_reason="Neutral: sample reason.",
             reasons=["price is above MA50"],
         )
 
@@ -303,7 +303,7 @@ class ApiRouteTests(unittest.TestCase):
                     momentum_score=60.0,
                     valuation_score=55.0,
                     risk_score=40.0,
-                    recommendation="HOLD",
+                    recommendation="NEUTRAL",
                     short_reason="MSFT short reason",
                 )
             ],
@@ -330,7 +330,7 @@ class ApiRouteTests(unittest.TestCase):
             company_name="Apple Inc.",
             price=189.12,
             final_score=77.7,
-            recommendation="HOLD",
+            recommendation="NEUTRAL",
             created_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
         )
 

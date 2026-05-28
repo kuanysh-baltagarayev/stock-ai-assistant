@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from app.config import get_settings
+from app.services.research_labels import research_label_to_russian
 
 
 def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str]) -> str:
@@ -22,7 +23,7 @@ def rule_based_explanation(analysis_payload: dict[str, Any], reasons: list[str])
     recommendation = analysis_payload["recommendation"]
     reason_text = "; ".join(reasons[:5]) if reasons else "недостаточно сильных количественных сигналов"
     return (
-        f"{ticker}: аналитический сигнал { _translate_recommendation(recommendation) } "
+        f"{ticker}: исследовательский сигнал { research_label_to_russian(recommendation) } "
         f"с итоговой оценкой {final_score}/100. "
         f"Основные факторы: {_translate_reason_text(reason_text)}. "
         f"Это исследовательский сигнал, а не финансовый совет."
@@ -72,18 +73,6 @@ def _openai_explanation(analysis_payload: dict[str, Any], reasons: list[str]) ->
     if not text:
         return rule_based_explanation(analysis_payload, reasons)
     return text.strip()
-
-
-def _translate_recommendation(recommendation: str) -> str:
-    mapping = {
-        "STRONG_BUY_CANDIDATE": "Сильный кандидат на покупку",
-        "BUY_WATCHLIST": "Кандидат в список наблюдения",
-        "HOLD": "Держать",
-        "WAIT": "Ждать",
-        "REDUCE": "Сократить",
-        "AVOID": "Избегать",
-    }
-    return mapping.get(recommendation, recommendation)
 
 
 def _translate_reason_text(text: str) -> str:

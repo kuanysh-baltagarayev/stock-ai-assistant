@@ -11,6 +11,7 @@ from urllib import parse, request
 from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import TelegramSubscription
+from app.services.research_labels import research_label_to_russian
 from app.services.scanner import analyze_ticker, scan_tickers
 
 
@@ -524,15 +525,7 @@ class TelegramBotService:
         return self._trim_message("\n".join(lines))
 
     def _translate_recommendation(self, recommendation: str) -> str:
-        mapping = {
-            "STRONG_BUY_CANDIDATE": "Сильный кандидат на покупку",
-            "BUY_WATCHLIST": "Кандидат в список наблюдения",
-            "HOLD": "Держать",
-            "WAIT": "Ждать",
-            "REDUCE": "Сократить",
-            "AVOID": "Избегать",
-        }
-        return mapping.get(recommendation, recommendation)
+        return research_label_to_russian(recommendation)
 
     def _translate_text(self, text: str) -> str:
         replacements = {
