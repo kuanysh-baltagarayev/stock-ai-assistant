@@ -19,6 +19,7 @@ from app.database import Base
 from app.diagnostics import build_startup_diagnostics, enforce_local_api_policy
 from app.models import AnalysisSnapshot
 from app.models import InstrumentRegistry
+from app.models import ProviderRegistry
 from app.main import app
 from app.schemas import (
     AnalyzeResponse,
@@ -70,6 +71,8 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(root_response.app, "Stock AI Assistant")
         self.assertIn("/analyze/{ticker}", root_response.endpoints)
         self.assertIn("/ready", root_response.endpoints)
+        self.assertIn("/providers", root_response.endpoints)
+        self.assertIn("/providers/{name}", root_response.endpoints)
         self.assertEqual(health_response.status, "ok")
         self.assertEqual(health_response.app, "Stock AI Assistant")
 
@@ -109,6 +112,60 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(data["ticker"], "AAPL")
         self.assertEqual(data["price"], 102.0)
         self.assertEqual(len(data["history"]), 3)
+
+    def test_market_data_records_provider_success(self) -> None:
+        history = pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0]},
+            index=pd.date_range("2026-05-25", periods=3, tz="UTC"),
+        )
+
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=3,
+            market_data_retry_backoff_seconds=0.0,
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download", return_value=history),
+            patch("app.services.market_data.yf.Ticker", return_value=SimpleNamespace()),
+            patch("app.services.market_data._safe_info", return_value={}),
+            patch("app.services.market_data._safe_fast_info", return_value={}),
+            patch("app.services.market_data.record_provider_success") as record_success,
+            patch("app.services.market_data.record_provider_failure") as record_failure,
+        ):
+            data = market_data.get_market_data("aapl", db=SimpleNamespace())
+
+        self.assertEqual(data["ticker"], "AAPL")
+        record_success.assert_called_once()
+        record_failure.assert_not_called()
+        self.assertEqual(record_success.call_args.kwargs["name"], "yfinance")
+        self.assertEqual(record_success.call_args.kwargs["source_tier"], "Tier 2")
+        self.assertEqual(
+            record_success.call_args.kwargs["capability_list"],
+            ["historical_prices", "company_profile", "fast_info"],
+        )
+
+    def test_market_data_records_provider_failure(self) -> None:
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=1,
+            market_data_retry_backoff_seconds=0.0,
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download", side_effect=RuntimeError("temporary")),
+            patch("app.services.market_data.record_provider_success") as record_success,
+            patch("app.services.market_data.record_provider_failure") as record_failure,
+        ):
+            with self.assertRaises(market_data.MarketDataError):
+                market_data.get_market_data("aapl", db=SimpleNamespace())
+
+        record_success.assert_not_called()
+        record_failure.assert_called_once()
+        self.assertEqual(record_failure.call_args.kwargs["name"], "yfinance")
+        self.assertEqual(record_failure.call_args.kwargs["failure_mode"], "unavailable")
 
     def test_market_data_rejects_empty_ticker(self) -> None:
         with self.assertRaises(market_data.InvalidTickerError):
@@ -191,7 +248,19 @@ class AppSmokeTests(unittest.TestCase):
 
             with Session() as db:
                 with (
-                    patch("app.services.scanner.get_market_data", return_value=market),
+                    patch(
+                        "app.services.market_data.get_settings",
+                        return_value=SimpleNamespace(
+                            market_data_timeout_seconds=5.0,
+                            market_data_max_attempts=3,
+                            market_data_retry_backoff_seconds=0.0,
+                        ),
+                    ),
+                    patch("app.services.market_data.yf.download", return_value=market["history"]),
+                    patch("app.services.market_data.yf.Ticker", return_value=SimpleNamespace()),
+                    patch("app.services.market_data._safe_info", return_value=market["info"]),
+                    patch("app.services.market_data._safe_fast_info", return_value={}),
+                    patch("app.services.market_data.time.sleep"),
                     patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
                     patch("app.services.scanner.calculate_indicators", return_value=technicals),
                     patch("app.services.scanner.score_stock", return_value=scoring),
@@ -210,6 +279,11 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(instruments[0].asset_type, "equity")
         self.assertEqual(instruments[0].exchange_code, "NMS")
         self.assertEqual(instruments[0].provider_aliases[0], "AAPL")
+        providers = db.query(ProviderRegistry).all()
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0].name, "yfinance")
+        self.assertEqual(providers[0].source_tier, "Tier 2")
+        self.assertIsNotNone(providers[0].last_success_at)
 
     def test_scan_tickers_sorts_results_and_collects_errors(self) -> None:
         analysis_high = make_analysis("MSFT", 82.0)
@@ -494,6 +568,73 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(body["symbol"], "AAPL")
         self.assertEqual(body["asset_type"], "equity")
         self.assertEqual(body["provider_aliases"], ["AAPL", "Apple Inc."])
+
+    def test_provider_index_endpoint_serializes_registry(self) -> None:
+        row = SimpleNamespace(
+            id=11,
+            name="yfinance",
+            source_url="https://github.com/ranaroussi/yfinance",
+            source_tier="Tier 2",
+            data_category="market_data",
+            capability_list=["historical_prices", "company_profile", "fast_info"],
+            legal_terms_note="Respect upstream terms and rate limits; no login bypass.",
+            cache_ttl_seconds=3600,
+            retry_attempts=3,
+            failure_taxonomy=["unavailable", "stale", "rate_limited"],
+            last_seen_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            last_success_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            last_failure_at=None,
+            last_failure_mode=None,
+            created_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+        )
+
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.list_providers", return_value=[row]),
+            TestClient(app) as client,
+        ):
+            response = client.get("/providers")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body[0]["name"], "yfinance")
+        self.assertEqual(body[0]["source_tier"], "Tier 2")
+        self.assertEqual(body[0]["failure_taxonomy"], ["unavailable", "stale", "rate_limited"])
+
+    def test_provider_detail_endpoint_serializes_registry(self) -> None:
+        row = SimpleNamespace(
+            id=11,
+            name="yfinance",
+            source_url="https://github.com/ranaroussi/yfinance",
+            source_tier="Tier 2",
+            data_category="market_data",
+            capability_list=["historical_prices", "company_profile", "fast_info"],
+            legal_terms_note="Respect upstream terms and rate limits; no login bypass.",
+            cache_ttl_seconds=3600,
+            retry_attempts=3,
+            failure_taxonomy=["unavailable", "stale", "rate_limited"],
+            last_seen_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            last_success_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            last_failure_at=None,
+            last_failure_mode=None,
+            created_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+        )
+
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.get_provider_by_name", return_value=row),
+            TestClient(app) as client,
+        ):
+            response = client.get("/providers/yfinance")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["name"], "yfinance")
+        self.assertEqual(body["cache_ttl_seconds"], 3600)
 
     def test_ready_endpoint_reports_database_ok(self) -> None:
         with (

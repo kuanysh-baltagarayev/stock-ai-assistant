@@ -39,6 +39,12 @@ def _upgrade_0002_instrument_registry(connection: Connection) -> None:
     Base.metadata.create_all(bind=connection, tables=[app.models.InstrumentRegistry.__table__])
 
 
+def _upgrade_0003_provider_registry(connection: Connection) -> None:
+    import app.models  # noqa: F401 - registers SQLAlchemy models before create_all
+
+    Base.metadata.create_all(bind=connection, tables=[app.models.ProviderRegistry.__table__])
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -49,6 +55,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0002_instrument_registry",
         description="Create the instrument registry table.",
         upgrade=_upgrade_0002_instrument_registry,
+    ),
+    Migration(
+        revision="0003_provider_registry",
+        description="Create the provider registry table.",
+        upgrade=_upgrade_0003_provider_registry,
     ),
 )
 

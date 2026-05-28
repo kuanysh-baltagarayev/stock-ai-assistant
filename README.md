@@ -14,10 +14,12 @@ This is an MVP for private research. It is not a public investment advisory serv
 - `GET /analyses/recent` returns the latest stored analyses from SQLite.
 - `GET /analyses/{analysis_id}` returns a saved analysis with its full payload.
 - `GET /instruments/{symbol}` returns the saved instrument registry entry for a symbol.
+- `GET /providers` and `GET /providers/{name}` expose provider registry entries and health.
 - CLI scanner for a default watchlist.
 - Telegram bot with `/analyze`, `/scan`, and scheduled digests.
 - SQLite snapshot storage for completed analyses.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
+- SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
 - Works without `OPENAI_API_KEY`; falls back to rule-based explanations.
 
 ## Stack
@@ -142,6 +144,7 @@ The default SQLite database path is resolved relative to the project root, so th
 - Restore by replacing the file and restarting the app.
 - Schema migrations run automatically at startup and are recorded in the `schema_migrations` table.
 - Analysis snapshots are cleaned up automatically to keep the latest per-ticker history within the configured retention policy.
+- Provider health is stored in `provider_registry` and updated when market data requests succeed or fail.
 
 ## Security Checklist
 

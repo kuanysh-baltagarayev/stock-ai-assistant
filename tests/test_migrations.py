@@ -20,6 +20,7 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("analysis_snapshots", inspector.get_table_names())
             self.assertIn("telegram_subscriptions", inspector.get_table_names())
             self.assertIn("instrument_registry", inspector.get_table_names())
+            self.assertIn("provider_registry", inspector.get_table_names())
             self.assertIn("schema_migrations", inspector.get_table_names())
 
             with engine.connect() as connection:
@@ -29,7 +30,11 @@ class MigrationTests(unittest.TestCase):
 
             self.assertEqual(
                 [row[0] for row in revisions],
-                ["0001_initial_schema", "0002_instrument_registry"],
+                [
+                    "0001_initial_schema",
+                    "0002_instrument_registry",
+                    "0003_provider_registry",
+                ],
             )
 
     def test_apply_migrations_is_idempotent(self) -> None:
@@ -45,7 +50,7 @@ class MigrationTests(unittest.TestCase):
                     text("SELECT COUNT(*) FROM schema_migrations")
                 ).scalar_one()
 
-            self.assertEqual(revision_count, 2)
+            self.assertEqual(revision_count, 3)
 
     def test_init_db_uses_migrations(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

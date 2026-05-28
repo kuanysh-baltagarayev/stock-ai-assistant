@@ -56,6 +56,36 @@ class InstrumentRegistry(Base):
     )
 
 
+class ProviderRegistry(Base):
+    __tablename__ = "provider_registry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    source_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_tier: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    data_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    capability_list: Mapped[list[str]] = mapped_column(JSON, default=list)
+    legal_terms_note: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    cache_ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retry_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    failure_taxonomy: Mapped[list[str]] = mapped_column(JSON, default=list)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+
+
 class TelegramSubscription(Base):
     __tablename__ = "telegram_subscriptions"
 

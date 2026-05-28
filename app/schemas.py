@@ -136,6 +136,25 @@ class InstrumentRead(BaseModel):
     updated_at: datetime
 
 
+class ProviderRead(BaseModel):
+    id: int
+    name: str
+    source_url: str | None = None
+    source_tier: str | None = None
+    data_category: str | None = None
+    capability_list: list[str]
+    legal_terms_note: str | None = None
+    cache_ttl_seconds: int | None = None
+    retry_attempts: int | None = None
+    failure_taxonomy: list[str]
+    last_seen_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    last_failure_mode: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class HealthResponse(BaseModel):
     status: str
     app: str

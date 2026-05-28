@@ -23,7 +23,7 @@ def analyze_ticker(
     use_ai_explanation: bool = True,
 ) -> AnalyzeResponse:
     logger.debug("analysis_started", extra={"component": "scanner", "ticker": ticker})
-    market = get_market_data(ticker)
+    market = get_market_data(ticker, db=db)
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
     scoring = score_stock(market["price"], technicals, fundamentals)

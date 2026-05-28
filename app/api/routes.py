@@ -11,6 +11,7 @@ from app.schemas import (
     AnalyzeResponse,
     HealthResponse,
     InstrumentRead,
+    ProviderRead,
     ReadinessResponse,
     RootResponse,
     ScanRequest,
@@ -19,6 +20,7 @@ from app.schemas import (
 from app.services.history import get_snapshot_by_id, list_recent_snapshots
 from app.services.market_data import MarketDataError
 from app.services.instruments import get_instrument_by_symbol
+from app.services.providers import get_provider_by_name, list_providers
 from app.services.scanner import analyze_ticker, scan_tickers
 
 
@@ -40,6 +42,8 @@ def root() -> RootResponse:
             "/analyses/recent",
             "/analyses/{analysis_id}",
             "/instruments/{symbol}",
+            "/providers",
+            "/providers/{name}",
         ],
         docs_url="/docs",
         health_url="/health",
@@ -162,4 +166,56 @@ def instrument_detail(symbol: str, db: Session = Depends(get_db)) -> InstrumentR
         last_seen_at=instrument.last_seen_at,
         created_at=instrument.created_at,
         updated_at=instrument.updated_at,
+    )
+
+
+@router.get("/providers", response_model=list[ProviderRead])
+def provider_index(db: Session = Depends(get_db)) -> list[ProviderRead]:
+    providers = list_providers(db)
+    return [
+        ProviderRead(
+            id=provider.id,
+            name=provider.name,
+            source_url=provider.source_url,
+            source_tier=provider.source_tier,
+            data_category=provider.data_category,
+            capability_list=provider.capability_list or [],
+            legal_terms_note=provider.legal_terms_note,
+            cache_ttl_seconds=provider.cache_ttl_seconds,
+            retry_attempts=provider.retry_attempts,
+            failure_taxonomy=provider.failure_taxonomy or [],
+            last_seen_at=provider.last_seen_at,
+            last_success_at=provider.last_success_at,
+            last_failure_at=provider.last_failure_at,
+            last_failure_mode=provider.last_failure_mode,
+            created_at=provider.created_at,
+            updated_at=provider.updated_at,
+        )
+        for provider in providers
+    ]
+
+
+@router.get("/providers/{name}", response_model=ProviderRead)
+def provider_detail(name: str, db: Session = Depends(get_db)) -> ProviderRead:
+    provider = get_provider_by_name(db, name)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"Provider {name} not found")
+
+    return ProviderRead(
+        id=provider.id,
+        name=provider.name,
+        source_url=provider.source_url,
+        source_tier=provider.source_tier,
+        data_category=provider.data_category,
+        capability_list=provider.capability_list or [],
+        legal_terms_note=provider.legal_terms_note,
+        cache_ttl_seconds=provider.cache_ttl_seconds,
+        retry_attempts=provider.retry_attempts,
+        failure_taxonomy=provider.failure_taxonomy or [],
+        last_seen_at=provider.last_seen_at,
+        last_success_at=provider.last_success_at,
+        last_failure_at=provider.last_failure_at,
+        last_failure_mode=provider.last_failure_mode,
+        created_at=provider.created_at,
+        updated_at=provider.updated_at,
     )

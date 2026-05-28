@@ -1,13 +1,20 @@
-from collections.abc import Callable
-from typing import Any, TypeVar
 import logging
 import time
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import pandas as pd
 import yfinance as yf
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.schemas import Fundamentals
+from app.services.providers import (
+    DEFAULT_PROVIDER_NAME,
+    provider_registry_payload,
+    record_provider_failure,
+    record_provider_success,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -33,59 +40,87 @@ def normalize_ticker(ticker: str) -> str:
     return symbol
 
 
-def get_market_data(ticker: str) -> dict[str, Any]:
+def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
     symbol = normalize_ticker(ticker)
     settings = get_settings()
+    provider_profile = provider_registry_payload(DEFAULT_PROVIDER_NAME)
 
-    history = _with_retries(
-        f"download market history for {symbol}",
-        symbol,
-        lambda: _download_history(symbol, settings.market_data_timeout_seconds),
-        settings.market_data_max_attempts,
-        settings.market_data_retry_backoff_seconds,
-    )
-
-    if history is None or history.empty or "Close" not in history.columns:
-        raise MarketDataError(f"No historical price data returned for {symbol}.", status_code=404)
-
-    history = history.dropna(subset=["Close"]).copy()
-    if history.empty:
-        raise MarketDataError(
-            f"Historical price data for {symbol} has no valid close prices.",
-            status_code=404,
+    try:
+        history = _with_retries(
+            f"download market history for {symbol}",
+            symbol,
+            lambda: _download_history(symbol, settings.market_data_timeout_seconds),
+            settings.market_data_max_attempts,
+            settings.market_data_retry_backoff_seconds,
         )
 
-    stock = yf.Ticker(symbol)
+        if history is None or history.empty or "Close" not in history.columns:
+            raise MarketDataError(
+                f"No historical price data returned for {symbol}.", status_code=404
+            )
 
-    info = _safe_info(
-        stock,
-        symbol=symbol,
-        attempts=settings.market_data_max_attempts,
-        retry_backoff_seconds=settings.market_data_retry_backoff_seconds,
-    )
-    fast_info = _safe_fast_info(stock)
-    price = _first_number(
-        _fast_info_value(fast_info, "last_price"),
-        info.get("currentPrice"),
-        info.get("regularMarketPrice"),
-        history["Close"].iloc[-1],
-    )
-    if price is None:
-        raise MarketDataError(f"Could not determine current price for {symbol}.")
+        history = history.dropna(subset=["Close"]).copy()
+        if history.empty:
+            raise MarketDataError(
+                f"Historical price data for {symbol} has no valid close prices.",
+                status_code=404,
+            )
 
-    currency = (
-        _fast_info_value(fast_info, "currency")
-        or info.get("currency")
-        or info.get("financialCurrency")
-    )
+        stock = yf.Ticker(symbol)
 
-    return {
-        "ticker": symbol,
-        "price": price,
-        "currency": currency,
-        "history": history,
-        "info": info,
-    }
+        info = _safe_info(
+            stock,
+            symbol=symbol,
+            attempts=settings.market_data_max_attempts,
+            retry_backoff_seconds=settings.market_data_retry_backoff_seconds,
+        )
+        fast_info = _safe_fast_info(stock)
+        price = _first_number(
+            _fast_info_value(fast_info, "last_price"),
+            info.get("currentPrice"),
+            info.get("regularMarketPrice"),
+            history["Close"].iloc[-1],
+        )
+        if price is None:
+            raise MarketDataError(f"Could not determine current price for {symbol}.")
+
+        currency = (
+            _fast_info_value(fast_info, "currency")
+            or info.get("currency")
+            or info.get("financialCurrency")
+        )
+
+        if db is not None:
+            try:
+                record_provider_success(db=db, name=DEFAULT_PROVIDER_NAME, **provider_profile)
+            except Exception:
+                logger.exception(
+                    "provider_registry_success_record_failed",
+                    extra={"component": "persistence", "provider": DEFAULT_PROVIDER_NAME},
+                )
+
+        return {
+            "ticker": symbol,
+            "price": price,
+            "currency": currency,
+            "history": history,
+            "info": info,
+        }
+    except MarketDataError:
+        if db is not None:
+            try:
+                record_provider_failure(
+                    db=db,
+                    name=DEFAULT_PROVIDER_NAME,
+                    failure_mode="unavailable",
+                    **provider_profile,
+                )
+            except Exception:
+                logger.exception(
+                    "provider_registry_failure_record_failed",
+                    extra={"component": "persistence", "provider": DEFAULT_PROVIDER_NAME},
+                )
+        raise
 
 
 def _download_history(symbol: str, timeout_seconds: float) -> pd.DataFrame:

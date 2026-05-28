@@ -38,6 +38,7 @@ Implemented:
 - Optional OpenAI explanation with rule-based fallback.
 - SQLite snapshot persistence.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
+- SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
 - Telegram bot service and entrypoint.
 - CLI scanner with default watchlist, custom tickers, and JSON output.
 - live smoke script for real market data checks without OpenAI or Telegram.
@@ -62,6 +63,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 54 tests after provider registry support was introduced.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after provider registry support was introduced.
+- 2026-05-28: `scripts/check.sh` passed after provider registry support was introduced, with `ruff`, 54 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 50 tests after instrument registry support was introduced.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after instrument registry support was introduced.
 - 2026-05-28: `scripts/check.sh` passed after instrument registry support was introduced, with `ruff`, 50 coverage-wrapped tests, coverage report, and compile check.
@@ -411,10 +415,10 @@ Status: in progress.
 3. Done: add retention or cleanup rules for old snapshots.
 4. Done: improve reporting around partial scan failures.
 5. Done: add an instrument registry for symbol, exchange, MIC, country, timezone, currency, asset type, provider aliases, and stable identifiers.
-6. Add a provider registry with source tier, capability list, legal/terms note, cache TTL, retry policy, and failure taxonomy.
+6. Done: add a provider registry with source tier, capability list, legal/terms note, cache TTL, retry policy, and failure taxonomy.
 7. Persist raw source snapshots separately from normalized analysis outputs.
 8. Persist source URLs, timestamps, extraction method, parser version, confidence, and content hashes.
-9. Add provider health and last-success records.
+9. Done: add provider health and last-success records.
 10. Add corporate-action and adjusted-price policy before using expanded historical analysis.
 11. Add stale, delayed, estimated, missing, and source-disagreed data-quality flags.
 12. Add FX normalization fields before supporting non-USD instruments.
