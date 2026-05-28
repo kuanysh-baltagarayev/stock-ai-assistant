@@ -60,7 +60,7 @@ Implemented:
 - Network-heavy operations still need bounded retry/backoff policy.
 - Config validation is partial; startup diagnostics should make invalid env settings obvious.
 - Secrets hygiene is implicit through `.gitignore`, but there is no explicit security checklist yet.
-- Packaging and deployment are not defined yet.
+- Local runtime notes for Telegram bot operation are not defined yet.
 - No user-facing UI exists yet; API, CLI, and Telegram flows are the current product surface.
 
 ## Phase 1: Finish MVP Hardening
@@ -84,7 +84,7 @@ Status: in progress.
 3. Add CI for tests and compile checks.
 4. Add a one-command local verification entrypoint, such as `make test` or `scripts/check.sh`.
 5. Add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
-6. Add packaging or deployment notes, including production run command and environment checklist.
+6. Add local runtime notes for Telegram bot operation, logs, restart, env setup, and database location.
 
 ## Phase 3: Improve Data and Persistence
 
@@ -117,7 +117,7 @@ Before calling the MVP complete, verify all of the following:
 10. Dependencies are pinned or constrained enough for repeatable setup.
 11. Secrets are not committed and are not printed in logs.
 12. README, AGENTS, and PLAN match the actual commands and behavior.
-13. Deployment or production-run notes exist.
+13. Local runtime notes exist for Telegram bot operation, logs, restart, env setup, and database location.
 14. Final git status is clean after the completion commit.
 
 ## Definition of Done
