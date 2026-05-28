@@ -45,6 +45,12 @@ def _upgrade_0003_provider_registry(connection: Connection) -> None:
     Base.metadata.create_all(bind=connection, tables=[app.models.ProviderRegistry.__table__])
 
 
+def _upgrade_0004_source_snapshots(connection: Connection) -> None:
+    import app.models  # noqa: F401 - registers SQLAlchemy models before create_all
+
+    Base.metadata.create_all(bind=connection, tables=[app.models.SourceSnapshot.__table__])
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -60,6 +66,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0003_provider_registry",
         description="Create the provider registry table.",
         upgrade=_upgrade_0003_provider_registry,
+    ),
+    Migration(
+        revision="0004_source_snapshots",
+        description="Create the raw source snapshots table.",
+        upgrade=_upgrade_0004_source_snapshots,
     ),
 )
 

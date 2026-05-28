@@ -37,6 +37,7 @@ Implemented:
 - Market data retrieval through `yfinance`.
 - Optional OpenAI explanation with rule-based fallback.
 - SQLite snapshot persistence.
+- SQLite raw source snapshot persistence with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
 - Telegram bot service and entrypoint.
@@ -63,6 +64,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 55 tests after raw source snapshot, data-quality, and FX metadata support was introduced.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after raw source snapshot, data-quality, and FX metadata support was introduced.
+- 2026-05-28: `scripts/check.sh` passed after raw source snapshot, data-quality, and FX metadata support was introduced, with `ruff`, 55 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 54 tests after provider registry support was introduced.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after provider registry support was introduced.
 - 2026-05-28: `scripts/check.sh` passed after provider registry support was introduced, with `ruff`, 54 coverage-wrapped tests, coverage report, and compile check.
@@ -131,11 +135,12 @@ Implemented:
 - Telegram UX is still basic: it lacks per-chat watchlists, alert preferences, source-backed signal explanations, quiet hours, and guided decision flows.
 - Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, does not flag stale/low-confidence data prominently, and does not show source coverage gaps in every Telegram answer.
 - Instrument identity exists for the U.S.-centric MVP, but cross-listing mapping, provider aliases, and global identifier coverage remain incomplete.
-- Corporate actions and adjusted-price policy are not defined yet.
+- Corporate actions are currently represented as a raw-close policy with no auto-adjustment, and broader adjusted-price handling is still limited.
 - OpenAI explanations do not yet have a dedicated prompt-injection and source-grounding safety layer for future web/news ingestion.
 - Telegram access control is not defined yet; any chat that reaches the bot can currently subscribe.
 - Scheduler behavior is basic and not yet session-aware, idempotent, or protected by per-chat alert budgets.
 - The current recommendation labels include buy/sell-like language and should be replaced with neutral research labels before wider practical use.
+- FX normalization metadata is stored, but no live FX conversion provider is wired in yet.
 
 ## Scope And Coverage Boundaries
 
@@ -416,12 +421,12 @@ Status: in progress.
 4. Done: improve reporting around partial scan failures.
 5. Done: add an instrument registry for symbol, exchange, MIC, country, timezone, currency, asset type, provider aliases, and stable identifiers.
 6. Done: add a provider registry with source tier, capability list, legal/terms note, cache TTL, retry policy, and failure taxonomy.
-7. Persist raw source snapshots separately from normalized analysis outputs.
-8. Persist source URLs, timestamps, extraction method, parser version, confidence, and content hashes.
+7. Done: persist raw source snapshots separately from normalized analysis outputs.
+8. Done: persist source URLs, timestamps, extraction method, parser version, confidence, and content hashes.
 9. Done: add provider health and last-success records.
-10. Add corporate-action and adjusted-price policy before using expanded historical analysis.
-11. Add stale, delayed, estimated, missing, and source-disagreed data-quality flags.
-12. Add FX normalization fields before supporting non-USD instruments.
+10. Done: add corporate-action and adjusted-price policy before using expanded historical analysis.
+11. Done: add stale, delayed, estimated, missing, and source-disagreed data-quality flags.
+12. Done: add FX normalization fields before supporting non-USD instruments.
 
 ## Phase 4: Productize User Workflows
 

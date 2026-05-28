@@ -86,6 +86,35 @@ class ProviderRegistry(Base):
     )
 
 
+class SourceSnapshot(Base):
+    __tablename__ = "source_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    provider_name: Mapped[str] = mapped_column(String(64), index=True)
+    source_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_tier: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    data_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    extraction_method: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    price_adjustment_policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+
+
 class TelegramSubscription(Base):
     __tablename__ = "telegram_subscriptions"
 

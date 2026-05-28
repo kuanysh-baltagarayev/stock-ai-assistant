@@ -4,13 +4,27 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.models import AnalysisSnapshot
-from app.schemas import AnalyzeResponse, ScanError, ScanResponse, ScanResult, ScanSummary
+from app.schemas import (
+    AnalyzeResponse,
+    DataQualityFlags,
+    FXNormalization,
+    ScanError,
+    ScanResponse,
+    ScanResult,
+    ScanSummary,
+    SourceProvenance,
+)
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
 from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
 from app.config import get_settings
-from app.services.market_data import MarketDataError, extract_fundamentals, get_market_data
+from app.services.market_data import (
+    MarketDataError,
+    extract_fundamentals,
+    get_market_data,
+)
+from app.services.source_snapshots import upsert_source_snapshot
 from app.services.scoring import score_stock
 
 
@@ -24,6 +38,8 @@ def analyze_ticker(
 ) -> AnalyzeResponse:
     logger.debug("analysis_started", extra={"component": "scanner", "ticker": ticker})
     market = get_market_data(ticker, db=db)
+    if db is not None:
+        _save_source_snapshot(db, market)
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
     scoring = score_stock(market["price"], technicals, fundamentals)
@@ -35,11 +51,15 @@ def analyze_ticker(
         "generated_at": datetime.now(timezone.utc),
         "price": market["price"],
         "currency": market["currency"],
+        "price_adjustment_policy": market.get("price_adjustment_policy"),
         "fundamentals": fundamentals.model_dump(),
         "technicals": technicals.model_dump(),
         "scores": scoring.scores.model_dump(),
         "recommendation": scoring.recommendation,
         "short_reason": scoring.short_reason,
+        "source_provenance": _build_source_provenance(market),
+        "data_quality": _build_data_quality(market),
+        "fx": _build_fx_normalization(market),
     }
 
     if use_ai_explanation:
@@ -205,12 +225,78 @@ def _save_instrument(db: Session, symbol: str, info: dict, currency: str | None)
     )
 
 
+def _save_source_snapshot(db: Session, market: dict) -> None:
+    try:
+        snapshot = upsert_source_snapshot(db, market=market)
+    except Exception:
+        logger.exception(
+            "source_snapshot_persist_failed",
+            extra={"component": "persistence", "ticker": market.get("ticker")},
+        )
+        return
+
+    logger.info(
+        "source_snapshot_saved",
+        extra={
+            "component": "persistence",
+            "ticker": snapshot.ticker,
+            "provider_name": snapshot.provider_name,
+            "source_tier": snapshot.source_tier,
+        },
+    )
+
+
 def _json_ready(payload: dict) -> dict:
     converted = payload.copy()
     generated_at = converted.get("generated_at")
     if isinstance(generated_at, datetime):
         converted["generated_at"] = generated_at.isoformat()
     return converted
+
+
+def _build_source_provenance(market: dict) -> dict:
+    provenance = market.get("source_provenance") or {}
+    return SourceProvenance(
+        provider_name=provenance.get("provider_name") or market.get("provider_name") or "yfinance",
+        source_url=provenance.get("source_url") or market.get("source_url"),
+        source_tier=provenance.get("source_tier") or market.get("source_tier"),
+        data_category=provenance.get("data_category") or market.get("data_category"),
+        extraction_method=provenance.get("extraction_method") or market.get("extraction_method"),
+        parser_version=provenance.get("parser_version") or market.get("parser_version"),
+        observed_at=provenance.get("observed_at") or market.get("observed_at"),
+        published_at=provenance.get("published_at") or market.get("published_at"),
+        fetched_at=provenance.get("fetched_at") or market.get("fetched_at"),
+        confidence=provenance.get("confidence") or market.get("data_quality", {}).get("confidence"),
+        content_hash=provenance.get("content_hash"),
+    ).model_dump(mode="json")
+
+
+def _build_data_quality(market: dict) -> dict:
+    data_quality = market.get("data_quality") or {}
+    return DataQualityFlags(
+        stale=bool(data_quality.get("stale", False)),
+        delayed=bool(data_quality.get("delayed", False)),
+        estimated=bool(data_quality.get("estimated", False)),
+        missing=bool(data_quality.get("missing", False)),
+        source_disagreed=bool(data_quality.get("source_disagreed", False)),
+        confidence=float(data_quality.get("confidence", 1.0)),
+        summary=data_quality.get("summary"),
+    ).model_dump(mode="json")
+
+
+def _build_fx_normalization(market: dict) -> dict | None:
+    fx = market.get("fx")
+    if not fx:
+        return None
+
+    return FXNormalization(
+        base_currency=fx.get("base_currency"),
+        quote_currency=fx.get("quote_currency"),
+        fx_rate_to_usd=fx.get("fx_rate_to_usd"),
+        fx_source=fx.get("fx_source"),
+        fx_timestamp=fx.get("fx_timestamp"),
+        fx_assumption_note=fx.get("fx_assumption_note"),
+    ).model_dump(mode="json")
 
 
 def _build_scan_summary(

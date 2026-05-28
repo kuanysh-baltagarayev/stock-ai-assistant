@@ -41,12 +41,16 @@ class AnalyzeResponse(BaseModel):
     generated_at: datetime
     price: float
     currency: str | None = None
+    price_adjustment_policy: str | None = None
     fundamentals: Fundamentals
     technicals: TechnicalIndicators
     scores: Scores
     recommendation: Recommendation
     short_reason: str
     explanation: str
+    source_provenance: "SourceProvenance | None" = None
+    data_quality: "DataQualityFlags" = Field(default_factory=lambda: DataQualityFlags())
+    fx: "FXNormalization | None" = None
 
 
 class ScanRequest(BaseModel):
@@ -155,6 +159,39 @@ class ProviderRead(BaseModel):
     updated_at: datetime
 
 
+class SourceProvenance(BaseModel):
+    provider_name: str
+    source_url: str | None = None
+    source_tier: str | None = None
+    data_category: str | None = None
+    extraction_method: str | None = None
+    parser_version: str | None = None
+    observed_at: datetime | None = None
+    published_at: datetime | None = None
+    fetched_at: datetime | None = None
+    confidence: float | None = None
+    content_hash: str | None = None
+
+
+class DataQualityFlags(BaseModel):
+    stale: bool = False
+    delayed: bool = False
+    estimated: bool = False
+    missing: bool = False
+    source_disagreed: bool = False
+    confidence: float = 1.0
+    summary: str | None = None
+
+
+class FXNormalization(BaseModel):
+    base_currency: str | None = None
+    quote_currency: str | None = None
+    fx_rate_to_usd: float | None = None
+    fx_source: str | None = None
+    fx_timestamp: datetime | None = None
+    fx_assumption_note: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str
     app: str
@@ -181,3 +218,6 @@ class RootResponse(BaseModel):
 
 
 JsonDict = dict[str, Any]
+
+
+AnalyzeResponse.model_rebuild()

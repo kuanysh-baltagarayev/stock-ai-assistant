@@ -18,6 +18,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - CLI scanner for a default watchlist.
 - Telegram bot with `/analyze`, `/scan`, and scheduled digests.
 - SQLite snapshot storage for completed analyses.
+- SQLite raw source snapshot storage with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
 - Works without `OPENAI_API_KEY`; falls back to rule-based explanations.
@@ -144,7 +145,9 @@ The default SQLite database path is resolved relative to the project root, so th
 - Restore by replacing the file and restarting the app.
 - Schema migrations run automatically at startup and are recorded in the `schema_migrations` table.
 - Analysis snapshots are cleaned up automatically to keep the latest per-ticker history within the configured retention policy.
+- Raw provider snapshots are stored separately from normalized analyses with source URLs, timestamps, parser version, confidence, and content hashes.
 - Provider health is stored in `provider_registry` and updated when market data requests succeed or fail.
+- Analysis responses include explicit data-quality flags and FX assumption metadata. Non-USD FX conversion is not applied yet, so values remain in the reported trading currency.
 
 ## Security Checklist
 

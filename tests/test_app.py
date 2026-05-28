@@ -20,6 +20,7 @@ from app.diagnostics import build_startup_diagnostics, enforce_local_api_policy
 from app.models import AnalysisSnapshot
 from app.models import InstrumentRegistry
 from app.models import ProviderRegistry
+from app.models import SourceSnapshot
 from app.main import app
 from app.schemas import (
     AnalyzeResponse,
@@ -167,6 +168,43 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(record_failure.call_args.kwargs["name"], "yfinance")
         self.assertEqual(record_failure.call_args.kwargs["failure_mode"], "unavailable")
 
+    def test_market_data_flags_stale_and_disagreement(self) -> None:
+        history = pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0]},
+            index=pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"], utc=True),
+        )
+
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=1,
+            market_data_retry_backoff_seconds=0.0,
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download", return_value=history),
+            patch("app.services.market_data.yf.Ticker", return_value=SimpleNamespace()),
+            patch(
+                "app.services.market_data._safe_info",
+                return_value={
+                    "currentPrice": 122.0,
+                    "regularMarketPrice": 121.5,
+                    "currency": "USD",
+                },
+            ),
+            patch("app.services.market_data._safe_fast_info", return_value={"last_price": 120.0}),
+        ):
+            data = market_data.get_market_data("aapl")
+
+        self.assertEqual(data["price"], 120.0)
+        self.assertEqual(data["price_source"], "fast_info.last_price")
+        self.assertTrue(data["data_quality"]["stale"])
+        self.assertTrue(data["data_quality"]["delayed"])
+        self.assertTrue(data["data_quality"]["source_disagreed"])
+        self.assertEqual(data["data_quality"]["confidence"], 0.5)
+        self.assertEqual(data["price_adjustment_policy"], "raw_close")
+        self.assertEqual(data["fx"]["base_currency"], "USD")
+
     def test_market_data_rejects_empty_ticker(self) -> None:
         with self.assertRaises(market_data.InvalidTickerError):
             market_data.normalize_ticker("   ")
@@ -269,6 +307,7 @@ class AppSmokeTests(unittest.TestCase):
 
                 rows = db.query(AnalysisSnapshot).all()
                 instruments = db.query(InstrumentRegistry).all()
+                sources = db.query(SourceSnapshot).all()
 
         self.assertEqual(response.ticker, "AAPL")
         self.assertEqual(len(rows), 1)
@@ -284,6 +323,17 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(providers[0].name, "yfinance")
         self.assertEqual(providers[0].source_tier, "Tier 2")
         self.assertIsNotNone(providers[0].last_success_at)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].ticker, "AAPL")
+        self.assertEqual(sources[0].provider_name, "yfinance")
+        self.assertEqual(sources[0].price_adjustment_policy, "raw_close")
+        self.assertEqual(sources[0].payload["provider_name"], "yfinance")
+        self.assertIsNotNone(sources[0].content_hash)
+        self.assertEqual(response.price_adjustment_policy, "raw_close")
+        self.assertEqual(response.source_provenance.provider_name, "yfinance")
+        self.assertFalse(response.data_quality.stale)
+        self.assertIsNotNone(response.fx)
+        self.assertEqual(response.fx.base_currency, "USD")
 
     def test_scan_tickers_sorts_results_and_collects_errors(self) -> None:
         analysis_high = make_analysis("MSFT", 82.0)
