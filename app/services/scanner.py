@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models import AnalysisSnapshot
 from app.schemas import AnalyzeResponse, ScanError, ScanResponse, ScanResult, ScanSummary
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
+from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
 from app.config import get_settings
@@ -26,6 +27,8 @@ def analyze_ticker(
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
     scoring = score_stock(market["price"], technicals, fundamentals)
+    if db is not None:
+        _save_instrument(db, market["ticker"], market["info"], market["currency"])
 
     payload = {
         "ticker": market["ticker"],
@@ -178,6 +181,28 @@ def _save_snapshot(db: Session, response: AnalyzeResponse) -> None:
                 "retention_deleted_count": deleted_count,
             },
         )
+
+
+def _save_instrument(db: Session, symbol: str, info: dict, currency: str | None) -> None:
+    try:
+        instrument = upsert_instrument(db, symbol=symbol, info=info, currency=currency)
+    except Exception:
+        logger.exception(
+            "instrument_registry_upsert_failed",
+            extra={"component": "persistence", "ticker": symbol},
+        )
+        return
+
+    logger.info(
+        "instrument_registry_saved",
+        extra={
+            "component": "persistence",
+            "ticker": symbol,
+            "asset_type": instrument.asset_type,
+            "exchange_code": instrument.exchange_code,
+            "currency": instrument.currency,
+        },
+    )
 
 
 def _json_ready(payload: dict) -> dict:

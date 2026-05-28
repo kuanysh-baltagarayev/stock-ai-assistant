@@ -114,6 +114,28 @@ class AnalysisSnapshotDetail(AnalysisSnapshotRead):
     payload: dict[str, Any]
 
 
+class InstrumentRead(BaseModel):
+    id: int
+    symbol: str
+    provider_symbol: str | None = None
+    exchange_code: str | None = None
+    mic: str | None = None
+    country: str | None = None
+    timezone: str | None = None
+    currency: str | None = None
+    asset_type: str | None = None
+    company_name: str | None = None
+    sector: str | None = None
+    industry: str | None = None
+    primary_listing: str | None = None
+    isin: str | None = None
+    figi: str | None = None
+    provider_aliases: list[str]
+    last_seen_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class HealthResponse(BaseModel):
     status: str
     app: str

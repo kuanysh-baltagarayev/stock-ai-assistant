@@ -23,6 +23,39 @@ class AnalysisSnapshot(Base):
     )
 
 
+class InstrumentRegistry(Base):
+    __tablename__ = "instrument_registry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    provider_symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    exchange_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    mic: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    asset_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sector: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    primary_listing: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    isin: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    figi: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+
+
 class TelegramSubscription(Base):
     __tablename__ = "telegram_subscriptions"
 

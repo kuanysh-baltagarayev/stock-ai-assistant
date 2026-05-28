@@ -37,6 +37,7 @@ Implemented:
 - Market data retrieval through `yfinance`.
 - Optional OpenAI explanation with rule-based fallback.
 - SQLite snapshot persistence.
+- SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - Telegram bot service and entrypoint.
 - CLI scanner with default watchlist, custom tickers, and JSON output.
 - live smoke script for real market data checks without OpenAI or Telegram.
@@ -61,6 +62,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 50 tests after instrument registry support was introduced.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after instrument registry support was introduced.
+- 2026-05-28: `scripts/check.sh` passed after instrument registry support was introduced, with `ruff`, 50 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 49 tests after partial scan failure reporting was introduced.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after partial scan failure reporting was introduced.
 - 2026-05-28: `scripts/check.sh` passed after partial scan failure reporting was introduced, with `ruff`, 49 coverage-wrapped tests, coverage report, and compile check.
@@ -122,7 +126,7 @@ Implemented:
 - Session awareness is missing: the app does not yet model exchange open/close hours or news freshness windows for economy and politics.
 - Telegram UX is still basic: it lacks per-chat watchlists, alert preferences, source-backed signal explanations, quiet hours, and guided decision flows.
 - Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, does not flag stale/low-confidence data prominently, and does not show source coverage gaps in every Telegram answer.
-- Instrument identity is too thin for global coverage: ticker strings are not enough to distinguish exchanges, currencies, ADRs, local listings, share classes, ETFs, or duplicate symbols.
+- Instrument identity exists for the U.S.-centric MVP, but cross-listing mapping, provider aliases, and global identifier coverage remain incomplete.
 - Corporate actions and adjusted-price policy are not defined yet.
 - OpenAI explanations do not yet have a dedicated prompt-injection and source-grounding safety layer for future web/news ingestion.
 - Telegram access control is not defined yet; any chat that reaches the bot can currently subscribe.
@@ -406,7 +410,7 @@ Status: in progress.
 2. Done: add endpoints for full saved analysis payloads.
 3. Done: add retention or cleanup rules for old snapshots.
 4. Done: improve reporting around partial scan failures.
-5. Add an instrument registry for symbol, exchange, MIC, country, timezone, currency, asset type, provider aliases, and stable identifiers.
+5. Done: add an instrument registry for symbol, exchange, MIC, country, timezone, currency, asset type, provider aliases, and stable identifiers.
 6. Add a provider registry with source tier, capability list, legal/terms note, cache TTL, retry policy, and failure taxonomy.
 7. Persist raw source snapshots separately from normalized analysis outputs.
 8. Persist source URLs, timestamps, extraction method, parser version, confidence, and content hashes.

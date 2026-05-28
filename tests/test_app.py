@@ -18,6 +18,7 @@ from app.api.routes import health, root
 from app.database import Base
 from app.diagnostics import build_startup_diagnostics, enforce_local_api_policy
 from app.models import AnalysisSnapshot
+from app.models import InstrumentRegistry
 from app.main import app
 from app.schemas import (
     AnalyzeResponse,
@@ -155,7 +156,18 @@ class AppSmokeTests(unittest.TestCase):
             "price": 189.12,
             "currency": "USD",
             "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
-            "info": {},
+            "info": {
+                "quoteType": "EQUITY",
+                "exchange": "NMS",
+                "exchangeTimezoneName": "America/New_York",
+                "currency": "USD",
+                "longName": "Apple Inc.",
+                "sector": "Technology",
+                "industry": "Consumer Electronics",
+                "primaryExchange": "NASDAQ",
+                "isin": "US0378331005",
+                "figi": "BBG000B9XRY4",
+            },
         }
         fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
         technicals = TechnicalIndicators(change_1d_pct=1.0)
@@ -187,11 +199,17 @@ class AppSmokeTests(unittest.TestCase):
                     response = analyze_ticker("aapl", db=db, use_ai_explanation=False)
 
                 rows = db.query(AnalysisSnapshot).all()
+                instruments = db.query(InstrumentRegistry).all()
 
         self.assertEqual(response.ticker, "AAPL")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].ticker, "AAPL")
         self.assertEqual(rows[0].final_score, 62.5)
+        self.assertEqual(len(instruments), 1)
+        self.assertEqual(instruments[0].symbol, "AAPL")
+        self.assertEqual(instruments[0].asset_type, "equity")
+        self.assertEqual(instruments[0].exchange_code, "NMS")
+        self.assertEqual(instruments[0].provider_aliases[0], "AAPL")
 
     def test_scan_tickers_sorts_results_and_collects_errors(self) -> None:
         analysis_high = make_analysis("MSFT", 82.0)
@@ -439,6 +457,43 @@ class ApiRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "Analysis snapshot 999 not found")
+
+    def test_instrument_detail_endpoint_serializes_registry(self) -> None:
+        row = SimpleNamespace(
+            id=3,
+            symbol="AAPL",
+            provider_symbol="AAPL",
+            exchange_code="NMS",
+            mic="XNGS",
+            country="United States",
+            timezone="America/New_York",
+            currency="USD",
+            asset_type="equity",
+            company_name="Apple Inc.",
+            sector="Technology",
+            industry="Consumer Electronics",
+            primary_listing="NASDAQ",
+            isin="US0378331005",
+            figi="BBG000B9XRY4",
+            provider_aliases=["AAPL", "Apple Inc."],
+            last_seen_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            created_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+        )
+
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.get_instrument_by_symbol", return_value=row),
+            TestClient(app) as client,
+        ):
+            response = client.get("/instruments/AAPL")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["symbol"], "AAPL")
+        self.assertEqual(body["asset_type"], "equity")
+        self.assertEqual(body["provider_aliases"], ["AAPL", "Apple Inc."])
 
     def test_ready_endpoint_reports_database_ok(self) -> None:
         with (

@@ -33,11 +33,22 @@ def _upgrade_0001_initial_schema(connection: Connection) -> None:
     Base.metadata.create_all(bind=connection)
 
 
+def _upgrade_0002_instrument_registry(connection: Connection) -> None:
+    import app.models  # noqa: F401 - registers SQLAlchemy models before create_all
+
+    Base.metadata.create_all(bind=connection, tables=[app.models.InstrumentRegistry.__table__])
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
         description="Create the baseline analysis and Telegram tables.",
         upgrade=_upgrade_0001_initial_schema,
+    ),
+    Migration(
+        revision="0002_instrument_registry",
+        description="Create the instrument registry table.",
+        upgrade=_upgrade_0002_instrument_registry,
     ),
 )
 

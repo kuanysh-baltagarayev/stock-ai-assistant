@@ -13,9 +13,11 @@ This is an MVP for private research. It is not a public investment advisory serv
 - `POST /scan` scans a list of tickers, sorts candidates by `final_score`, and returns a summary when some tickers fail.
 - `GET /analyses/recent` returns the latest stored analyses from SQLite.
 - `GET /analyses/{analysis_id}` returns a saved analysis with its full payload.
+- `GET /instruments/{symbol}` returns the saved instrument registry entry for a symbol.
 - CLI scanner for a default watchlist.
 - Telegram bot with `/analyze`, `/scan`, and scheduled digests.
 - SQLite snapshot storage for completed analyses.
+- SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - Works without `OPENAI_API_KEY`; falls back to rule-based explanations.
 
 ## Stack
