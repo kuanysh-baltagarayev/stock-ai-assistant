@@ -23,8 +23,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db() -> None:
     import app.models  # noqa: F401 - registers SQLAlchemy models
+    from app.migrations import apply_migrations
 
-    Base.metadata.create_all(bind=engine)
+    apply_migrations(engine)
     logger.info("database_initialized", extra={"component": "persistence"})
 
 

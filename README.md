@@ -130,6 +130,7 @@ The default SQLite database path is resolved relative to the project root, so th
 - The SQLite database lives at `stock_ai_assistant.db` in the repository root unless `DATABASE_URL` points elsewhere.
 - Back up the database by copying that file while the app is stopped.
 - Restore by replacing the file and restarting the app.
+- Schema migrations run automatically at startup and are recorded in the `schema_migrations` table.
 
 ## Security Checklist
 

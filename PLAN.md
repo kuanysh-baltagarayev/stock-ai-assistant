@@ -60,6 +60,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 44 tests after baseline migrations were introduced.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after baseline migrations were introduced.
+- 2026-05-28: `scripts/check.sh` passed after baseline migrations were introduced, with `ruff`, 44 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 40 tests after runtime budget updates.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after runtime budget updates.
 - 2026-05-28: `scripts/check.sh` passed after runtime budget updates, with `ruff`, 40 coverage-wrapped tests, coverage report, and compile check.
@@ -385,7 +388,7 @@ Status: in progress.
 
 ## Phase 3: Improve Data and Persistence
 
-1. Introduce migrations before the SQLite schema changes beyond the current tables.
+1. Done: introduce migrations before the SQLite schema changes beyond the current tables.
 2. Add endpoints for full saved analysis payloads.
 3. Add retention or cleanup rules for old snapshots.
 4. Improve reporting around partial scan failures.
