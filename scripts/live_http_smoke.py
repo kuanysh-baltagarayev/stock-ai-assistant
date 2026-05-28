@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.logging_config import configure_logging  # noqa: E402
+from scripts.live_guard import require_live_network  # noqa: E402
 
 
 DEFAULT_TICKER = "AAPL"
@@ -61,6 +62,8 @@ def parse_args() -> Namespace:
 
 def main() -> int:
     configure_logging(force=True)
+    if not require_live_network("HTTP smoke"):
+        return 2
     args = parse_args()
     ticker = args.ticker.strip().upper()
     scan_tickers = [item.strip().upper() for item in args.scan if item.strip()]

@@ -13,10 +13,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.logging_config import configure_logging  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.services.telegram_bot import TelegramBotService  # noqa: E402
+from scripts.live_guard import require_live_network  # noqa: E402
 
 
 def main() -> int:
     configure_logging(force=True)
+    if not require_live_network("Telegram live check"):
+        return 2
     settings = get_settings()
     service = TelegramBotService(settings=settings)
 

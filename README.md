@@ -56,6 +56,23 @@ pip install -r requirements-dev.txt
 
 The dependency files are pinned so repeated installs resolve to the same package versions across machines.
 
+## Live Network Checks
+
+Live smoke scripts are opt-in. Set this flag when you want to contact external services on purpose:
+
+```bash
+ALLOW_LIVE_NETWORK=1
+```
+
+Examples:
+
+```bash
+ALLOW_LIVE_NETWORK=1 python scripts/live_smoke.py
+ALLOW_LIVE_NETWORK=1 python scripts/live_http_smoke.py
+ALLOW_LIVE_NETWORK=1 python scripts/openai_smoke.py
+ALLOW_LIVE_NETWORK=1 python scripts/check_telegram.py
+```
+
 Create local env file:
 
 ```bash
@@ -96,6 +113,22 @@ TELEGRAM_DIGEST_INTERVAL_MINUTES=1440
 The bot stores subscriptions and alert timestamps in SQLite. If `TELEGRAM_ENABLED=1` and `TELEGRAM_BOT_TOKEN` are set, it starts automatically when the app runs.
 
 The default SQLite database path is resolved relative to the project root, so the file stays in this repository even if you launch `uvicorn` from another directory.
+
+## Operational Notes
+
+- Telegram bot output and API logs are JSON lines on stderr.
+- Restart the API or bot by rerunning the relevant script; there is no daemon manager in the repo.
+- The SQLite database lives at `stock_ai_assistant.db` in the repository root unless `DATABASE_URL` points elsewhere.
+- Back up the database by copying that file while the app is stopped.
+- Restore by replacing the file and restarting the app.
+
+## Security Checklist
+
+- Keep `.env` out of git.
+- Verify `git status` before committing.
+- Do not log API keys or Telegram tokens.
+- Use the live network flag only for intentional smoke checks.
+- Rotate tokens if a secret ever appears in shell history, logs, or screenshots.
 
 ## Run API
 

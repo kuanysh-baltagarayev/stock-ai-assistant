@@ -15,6 +15,7 @@ from app.config import get_settings  # noqa: E402
 from app.database import SessionLocal, init_db  # noqa: E402
 from app.logging_config import configure_logging  # noqa: E402
 from app.services.scanner import analyze_ticker  # noqa: E402
+from scripts.live_guard import require_live_network  # noqa: E402
 
 
 DEFAULT_TICKER = "AAPL"
@@ -33,6 +34,8 @@ def parse_args() -> Namespace:
 
 def main() -> int:
     configure_logging(force=True)
+    if not require_live_network("OpenAI smoke"):
+        return 2
     args = parse_args()
     ticker = args.ticker.strip().upper()
     if not ticker:

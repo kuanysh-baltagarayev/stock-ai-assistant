@@ -66,12 +66,13 @@ python scripts/scan_market.py AAPL MSFT NVDA --json
 Live smoke:
 
 ```bash
-python scripts/live_smoke.py
+ALLOW_LIVE_NETWORK=1 python scripts/live_smoke.py
+ALLOW_LIVE_NETWORK=1 python scripts/live_http_smoke.py
 ```
 
 Telegram bot:
 
 ```bash
 python scripts/run_telegram_bot.py
-python scripts/check_telegram.py
+ALLOW_LIVE_NETWORK=1 python scripts/check_telegram.py
 ```

@@ -123,6 +123,7 @@ class CheckTelegramScriptTests(unittest.TestCase):
         stderr = io.StringIO()
 
         with (
+            patch.dict("os.environ", {"ALLOW_LIVE_NETWORK": "1"}, clear=False),
             patch.object(check_telegram, "get_settings", return_value=SimpleNamespace(telegram_bot_token=None, telegram_enabled=True)),
             redirect_stderr(stderr),
         ):
@@ -137,6 +138,7 @@ class CheckTelegramScriptTests(unittest.TestCase):
         stdout = io.StringIO()
 
         with (
+            patch.dict("os.environ", {"ALLOW_LIVE_NETWORK": "1"}, clear=False),
             patch.object(check_telegram, "get_settings", return_value=fake_settings),
             patch.object(check_telegram, "TelegramBotService", return_value=fake_service) as service_ctor,
             patch("sys.stdout", stdout),
@@ -152,10 +154,23 @@ class CheckTelegramScriptTests(unittest.TestCase):
 
 
 class LiveHttpSmokeScriptTests(unittest.TestCase):
+    def test_main_requires_live_network_flag(self) -> None:
+        stderr = io.StringIO()
+
+        with (
+            patch.object(live_http_smoke, "parse_args", return_value=Namespace(ticker="AAPL", scan=["MSFT"])),
+            redirect_stderr(stderr),
+        ):
+            exit_code = live_http_smoke.main()
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("requires ALLOW_LIVE_NETWORK=1", stderr.getvalue())
+
     def test_main_requires_ticker_and_scan_list(self) -> None:
         stderr = io.StringIO()
 
         with (
+            patch.dict("os.environ", {"ALLOW_LIVE_NETWORK": "1"}, clear=False),
             patch.object(live_http_smoke, "parse_args", return_value=Namespace(ticker=" ", scan=[])),
             redirect_stderr(stderr),
         ):
@@ -186,6 +201,7 @@ class LiveHttpSmokeScriptTests(unittest.TestCase):
             raise AssertionError(f"Unexpected URL: {url}")
 
         with (
+            patch.dict("os.environ", {"ALLOW_LIVE_NETWORK": "1"}, clear=False),
             patch.object(
                 live_http_smoke,
                 "parse_args",
@@ -224,6 +240,7 @@ class OpenAISmokeScriptTests(unittest.TestCase):
         stderr = io.StringIO()
 
         with (
+            patch.dict("os.environ", {"ALLOW_LIVE_NETWORK": "1"}, clear=False),
             patch.object(openai_smoke, "parse_args", return_value=Namespace(ticker="aapl")),
             patch.object(openai_smoke, "get_settings", return_value=SimpleNamespace(openai_api_key=None, openai_model="gpt-4.1-mini")),
             redirect_stderr(stderr),
@@ -244,6 +261,7 @@ class OpenAISmokeScriptTests(unittest.TestCase):
         )
 
         with (
+            patch.dict("os.environ", {"ALLOW_LIVE_NETWORK": "1"}, clear=False),
             patch.object(openai_smoke, "parse_args", return_value=Namespace(ticker="aapl")),
             patch.object(openai_smoke, "get_settings", return_value=SimpleNamespace(openai_api_key="sk-test", openai_model="gpt-4.1-mini")),
             patch.object(openai_smoke, "init_db"),
@@ -281,6 +299,7 @@ class LiveSmokeScriptTests(unittest.TestCase):
         )
 
         with (
+            patch.dict("os.environ", {"ALLOW_LIVE_NETWORK": "1"}, clear=False),
             patch.object(live_smoke, "parse_args", return_value=Namespace(ticker="aapl", scan=["msft"])),
             patch.object(live_smoke, "init_db"),
             patch.object(live_smoke, "SessionLocal", return_value=fake_db),
@@ -301,6 +320,7 @@ class LiveSmokeScriptTests(unittest.TestCase):
         stderr = io.StringIO()
 
         with (
+            patch.dict("os.environ", {"ALLOW_LIVE_NETWORK": "1"}, clear=False),
             patch.object(live_smoke, "parse_args", return_value=Namespace(ticker="", scan=[])),
             redirect_stderr(stderr),
         ):
