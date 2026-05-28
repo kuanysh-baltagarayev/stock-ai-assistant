@@ -107,6 +107,14 @@ class HealthResponse(BaseModel):
     database: str
 
 
+class ReadinessResponse(BaseModel):
+    status: str
+    app: str
+    generated_at: datetime
+    database: str
+    checks: dict[str, str]
+
+
 class RootResponse(BaseModel):
     app: str
     status: str

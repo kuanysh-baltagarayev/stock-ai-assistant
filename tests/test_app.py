@@ -65,6 +65,7 @@ class AppSmokeTests(unittest.TestCase):
 
         self.assertEqual(root_response.app, "Stock AI Assistant")
         self.assertIn("/analyze/{ticker}", root_response.endpoints)
+        self.assertIn("/ready", root_response.endpoints)
         self.assertEqual(health_response.status, "ok")
         self.assertEqual(health_response.app, "Stock AI Assistant")
 
@@ -244,3 +245,29 @@ class ApiRouteTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body[0]["ticker"], "AAPL")
         self.assertEqual(body[0]["price"], 189.12)
+
+    def test_ready_endpoint_reports_database_ok(self) -> None:
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.check_database"),
+            TestClient(app) as client,
+        ):
+            response = client.get("/ready")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "ready")
+        self.assertEqual(body["checks"]["database"], "ok")
+
+    def test_ready_endpoint_reports_database_failure(self) -> None:
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.check_database", side_effect=RuntimeError("db down")),
+            TestClient(app) as client,
+        ):
+            response = client.get("/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"]["status"], "not_ready")

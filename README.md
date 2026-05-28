@@ -7,6 +7,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 ## Features
 
 - `GET /health` app health check.
+- `GET /ready` readiness check with database probe.
 - `GET /` quick service index with links.
 - `GET /analyze/{ticker}` analyzes one ticker.
 - `POST /scan` scans a list of tickers and sorts candidates by `final_score`.
@@ -114,6 +115,26 @@ Expected shape:
 }
 ```
 
+Readiness check:
+
+```bash
+curl http://127.0.0.1:8000/ready
+```
+
+Expected ready response:
+
+```json
+{
+  "status": "ready",
+  "app": "Stock AI Assistant",
+  "generated_at": "2026-05-28T00:00:00Z",
+  "database": "sqlite:////absolute/path/to/stock-ai-assistant/stock_ai_assistant.db",
+  "checks": {
+    "database": "ok"
+  }
+}
+```
+
 ## Analyze One Ticker
 
 ```bash
@@ -173,6 +194,15 @@ The script prints:
 
 ```text
 ticker, price, final_score, recommendation, short_reason
+```
+
+## Run Live Smoke Check
+
+This command uses real market data and does not require OpenAI or Telegram:
+
+```bash
+python scripts/live_smoke.py
+python scripts/live_smoke.py --ticker AAPL --scan AAPL MSFT NVDA
 ```
 
 ## Run Telegram Bot

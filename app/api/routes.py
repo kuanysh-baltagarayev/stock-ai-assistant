@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.database import get_db
+from app.database import check_database, get_db
 from app.schemas import (
     AnalysisSnapshotRead,
     AnalyzeResponse,
     HealthResponse,
+    ReadinessResponse,
     RootResponse,
     ScanRequest,
     ScanResponse,
@@ -28,7 +29,7 @@ def root() -> RootResponse:
         app=settings.app_name,
         status="ok",
         version="0.1.0",
-        endpoints=["/health", "/analyze/{ticker}", "/scan", "/analyses/recent"],
+        endpoints=["/health", "/ready", "/analyze/{ticker}", "/scan", "/analyses/recent"],
         docs_url="/docs",
         health_url="/health",
         analyze_url_template="/analyze/{ticker}",
@@ -43,6 +44,29 @@ def health() -> HealthResponse:
         app=settings.app_name,
         generated_at=datetime.now(timezone.utc),
         database=settings.database_url,
+    )
+
+
+@router.get("/ready", response_model=ReadinessResponse)
+def ready() -> ReadinessResponse:
+    settings = get_settings()
+    try:
+        check_database()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "not_ready",
+                "checks": {"database": f"failed: {exc}"},
+            },
+        ) from exc
+
+    return ReadinessResponse(
+        status="ready",
+        app=settings.app_name,
+        generated_at=datetime.now(timezone.utc),
+        database=settings.database_url,
+        checks={"database": "ok"},
     )
 
 
