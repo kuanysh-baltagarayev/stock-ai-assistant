@@ -60,6 +60,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 35 tests after contextual disclaimer updates.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after contextual disclaimer updates.
+- 2026-05-28: `scripts/check.sh` passed after contextual disclaimer updates, with `ruff`, 35 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 31 tests after neutral research-label migration.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after neutral research-label migration.
 - 2026-05-28: `scripts/check.sh` passed after neutral research-label migration, with `ruff`, 31 coverage-wrapped tests, coverage report, and compile check.
@@ -393,7 +396,7 @@ Status: in progress.
 9. Add per-chat data deletion or cleanup behavior.
 10. Add alert deduplication, per-chat daily caps, confidence thresholds, and market-hours-only mode.
 11. Done: replace buy/sell-like labels with neutral research labels in API, CLI, Telegram, docs, and tests.
-12. Add contextual disclaimer behavior for first use, high-risk events, and major alerts.
+12. Done: add contextual disclaimer behavior for first use, high-risk events, and major alerts.
 13. Do not add a web UI unless the user explicitly changes direction; Telegram is the primary user interface.
 
 ## Phase 5: Market Intelligence Layer

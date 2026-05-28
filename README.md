@@ -258,6 +258,7 @@ Available commands:
 - `/scan AAPL MSFT NVDA` to scan a list of tickers.
 
 Scheduled digests use `TELEGRAM_DEFAULT_TICKERS` and send the strongest candidates from that list.
+On first use, and for major or high-risk alerts, Telegram includes a short contextual disclaimer instead of repeating the same warning on every line.
 
 ## Scoring Model
 

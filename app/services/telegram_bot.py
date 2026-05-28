@@ -172,9 +172,10 @@ class TelegramBotService:
         action, args = self._resolve_action(text)
 
         if action == "start":
+            is_first_use = self._subscription_for_chat(int(chat_id)) is None
             await self._send_message(
                 int(chat_id),
-                self._welcome_text(),
+                self._welcome_text(is_first_use=is_first_use),
                 reply_markup=self._main_keyboard(),
             )
             return
@@ -204,10 +205,14 @@ class TelegramBotService:
             return
 
         if action == "subscribe":
+            is_first_use = self._subscription_for_chat(int(chat_id)) is None
             self._upsert_subscription(int(chat_id), username=username, active=True)
+            subscribe_text = "Подписка активирована. Я буду отправлять тебе дайджесты и ответы на кнопки."
+            if is_first_use:
+                subscribe_text = f"{subscribe_text}\n\n{self._first_use_disclaimer()}"
             await self._send_message(
                 int(chat_id),
-                "Подписка активирована. Я буду отправлять тебе дайджесты и ответы на кнопки.",
+                subscribe_text,
                 reply_markup=self._main_keyboard(),
             )
             return
@@ -335,6 +340,17 @@ class TelegramBotService:
                 .filter(TelegramSubscription.is_active.is_(True))
                 .order_by(TelegramSubscription.created_at.asc())
                 .all()
+            )
+        finally:
+            db.close()
+
+    def _subscription_for_chat(self, chat_id: int) -> TelegramSubscription | None:
+        db = SessionLocal()
+        try:
+            return (
+                db.query(TelegramSubscription)
+                .filter(TelegramSubscription.chat_id == chat_id)
+                .one_or_none()
             )
         finally:
             db.close()
@@ -470,11 +486,14 @@ class TelegramBotService:
             "• сканирование рынка по списку из настроек\n"
         )
 
-    def _welcome_text(self) -> str:
-        return (
+    def _welcome_text(self, is_first_use: bool = False) -> str:
+        text = (
             "Привет. Я бот для анализа акций.\n"
             "Нажимай кнопки под сообщением, чтобы не вводить команды вручную."
         )
+        if is_first_use:
+            text = f"{text}\n\n{self._first_use_disclaimer()}"
+        return text
 
     def _analysis_text(self, analysis: Any) -> str:
         recommendation = self._translate_recommendation(analysis.recommendation)
@@ -488,6 +507,9 @@ class TelegramBotService:
             f"Кратко: {self._translate_text(analysis.short_reason)}",
             f"Комментарий: {self._translate_text(analysis.explanation)}",
         ]
+        disclaimer = self._analysis_disclaimer(analysis)
+        if disclaimer:
+            lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
 
     def _scan_text(self, results: list[Any], errors: list[Any]) -> str:
@@ -505,6 +527,9 @@ class TelegramBotService:
             lines.append("Ошибки:")
             for item in errors[:5]:
                 lines.append(f"- {item.ticker}: {item.error}")
+        disclaimer = self._scan_disclaimer(results)
+        if disclaimer:
+            lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
 
     def _digest_text(self, results: list[Any], errors: list[Any]) -> str:
@@ -522,7 +547,65 @@ class TelegramBotService:
             lines.append("Ошибки скана:")
             for item in errors[:3]:
                 lines.append(f"- {item.ticker}: {item.error}")
+        disclaimer = self._scan_disclaimer(top)
+        if disclaimer:
+            lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
+
+    def _first_use_disclaimer(self) -> str:
+        return (
+            "Важно: это исследовательский инструмент, а не финансовый совет. "
+            "Сигналы могут быть неполными, задержанными или устаревшими."
+        )
+
+    def _analysis_disclaimer(self, analysis: Any) -> str:
+        notes: list[str] = []
+        recommendation = str(getattr(analysis, "recommendation", ""))
+        scores = getattr(analysis, "scores", None)
+        final_score = getattr(scores, "final_score", None)
+        risk_score = getattr(scores, "risk_score", None)
+
+        if recommendation == "HIGH_INTEREST" or (isinstance(final_score, (int, float)) and final_score >= 80):
+            notes.append(
+                "Крупный сигнал: перед любыми действиями проверь источники, свежесть данных и контекст события."
+            )
+
+        if recommendation in {"CAUTION", "HIGH_RISK"} or (
+            isinstance(risk_score, (int, float)) and risk_score >= 70
+        ):
+            notes.append(
+                "Высокий риск: не полагайся на оценку без ручной проверки данных и новостей."
+            )
+
+        return "\n".join(notes)
+
+    def _scan_disclaimer(self, results: list[Any]) -> str:
+        if not results:
+            return ""
+
+        major_alerts = 0
+        high_risk_alerts = 0
+        for item in results:
+            recommendation = str(getattr(item, "recommendation", ""))
+            score = getattr(item, "final_score", None)
+            risk = getattr(item, "risk_score", None)
+            if recommendation == "HIGH_INTEREST" or (isinstance(score, (int, float)) and score >= 80):
+                major_alerts += 1
+            if recommendation in {"CAUTION", "HIGH_RISK"} or (
+                isinstance(risk, (int, float)) and risk >= 70
+            ):
+                high_risk_alerts += 1
+
+        notes: list[str] = []
+        if major_alerts:
+            notes.append(
+                f"Крупные сигналы ({major_alerts}) требуют ручной проверки источников и свежести данных."
+            )
+        if high_risk_alerts:
+            notes.append(
+                f"Рискованные сигналы ({high_risk_alerts}) лучше перепроверить по источникам и новостям."
+            )
+        return "\n".join(notes)
 
     def _translate_recommendation(self, recommendation: str) -> str:
         return research_label_to_russian(recommendation)
