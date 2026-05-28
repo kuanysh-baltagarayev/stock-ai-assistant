@@ -357,7 +357,7 @@ Status: in progress.
 10. Done: add explicit local-only API exposure policy for the MVP.
 11. Done: add basic secret/log redaction checks for env values, Telegram token, and provider credentials.
 12. Done: add neutral research-label migration plan and tests before changing user-facing recommendation labels.
-13. Keep README, AGENTS, and this plan synchronized.
+13. Done: keep README, AGENTS, and this plan synchronized.
 
 ## Phase 2: Make Builds Reproducible
 
