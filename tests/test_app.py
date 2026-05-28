@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 import unittest
-from pathlib import Path
 
 import pandas as pd
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.config import PROJECT_ROOT, resolve_database_url
 from app.api.routes import health, root
+from app.database import Base
+from app.models import AnalysisSnapshot
 from app.main import app
 from app.schemas import (
     AnalyzeResponse,
@@ -109,6 +114,50 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(response.price, 189.12)
         self.assertEqual(response.explanation, "Mock explanation")
         self.assertIsNotNone(response.generated_at.tzinfo)
+
+    def test_analyze_ticker_persists_snapshot(self) -> None:
+        market = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "info": {},
+        }
+        fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
+        technicals = TechnicalIndicators(change_1d_pct=1.0)
+        scoring = SimpleNamespace(
+            scores=Scores(
+                momentum_score=60.0,
+                valuation_score=55.0,
+                risk_score=35.0,
+                final_score=62.5,
+            ),
+            recommendation="HOLD",
+            short_reason="HOLD: sample reason.",
+            reasons=["price is above MA50"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "snapshot.db"
+            engine = create_engine(f"sqlite:///{db_path}")
+            Base.metadata.create_all(bind=engine)
+            Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+            with Session() as db:
+                with (
+                    patch("app.services.scanner.get_market_data", return_value=market),
+                    patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
+                    patch("app.services.scanner.calculate_indicators", return_value=technicals),
+                    patch("app.services.scanner.score_stock", return_value=scoring),
+                ):
+                    response = analyze_ticker("aapl", db=db, use_ai_explanation=False)
+
+                rows = db.query(AnalysisSnapshot).all()
+
+        self.assertEqual(response.ticker, "AAPL")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].ticker, "AAPL")
+        self.assertEqual(rows[0].final_score, 62.5)
 
     def test_scan_tickers_sorts_results_and_collects_errors(self) -> None:
         analysis_high = make_analysis("MSFT", 82.0)
