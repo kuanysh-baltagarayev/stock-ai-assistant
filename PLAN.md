@@ -60,6 +60,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 39 tests after dependency pinning updates.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after dependency pinning updates.
+- 2026-05-28: `scripts/check.sh` passed after dependency pinning updates, with `ruff`, 39 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 39 tests after Telegram and HTTP smoke additions.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after Telegram and HTTP smoke additions.
 - 2026-05-28: `scripts/check.sh` passed after Telegram and HTTP smoke additions, with `ruff`, 39 coverage-wrapped tests, coverage report, and compile check.
@@ -82,7 +85,8 @@ Implemented:
 - OpenAI and Telegram live checks are not fully automated yet.
 - The sandbox previously blocked binding `uvicorn` to `127.0.0.1:8000`; API behavior has been validated with `TestClient`.
 - Real HTTP startup through `scripts/run_api.py` still needs a live socket-bound smoke check in an environment where socket binding is allowed.
-- Dependencies are broad ranges in `requirements.txt`; no lockfile or constraints file exists.
+- Dependencies are pinned in `requirements.txt` and `requirements-dev.txt`, but there is still no separate lockfile or constraints file for transitive dependencies.
+- Supported Python version is documented in `README.md`.
 - There is no CI workflow.
 - SQLite schema creation uses `Base.metadata.create_all`; there are no migrations.
 - Network-heavy operations still need bounded retry/backoff policy.
@@ -361,8 +365,8 @@ Status: in progress.
 
 ## Phase 2: Make Builds Reproducible
 
-1. Pin or constrain Python dependencies.
-2. Document the supported Python version.
+1. Done: pin or constrain Python dependencies.
+2. Done: document the supported Python version.
 3. Add CI for tests and compile checks.
 4. Done: add a one-command local verification entrypoint at `scripts/check.sh`.
 5. Add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.

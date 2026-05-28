@@ -40,6 +40,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
+Supported Python: 3.11+.
+
 Install dependencies:
 
 ```bash
@@ -51,6 +53,8 @@ For development checks, install the development tools too:
 ```bash
 pip install -r requirements-dev.txt
 ```
+
+The dependency files are pinned so repeated installs resolve to the same package versions across machines.
 
 Create local env file:
 
