@@ -7,7 +7,9 @@ from fastapi import FastAPI
 from starlette.requests import Request
 
 from app.api.routes import router
+from app.config import get_settings
 from app.database import init_db
+from app.diagnostics import build_startup_diagnostics, enforce_local_api_policy
 from app.logging_config import configure_logging
 from app.services.telegram_bot import TelegramBotService
 
@@ -18,7 +20,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging(force=True)
-    logger.info("app_starting", extra={"component": "api"})
+    settings = get_settings()
+    enforce_local_api_policy(settings)
+    diagnostics = build_startup_diagnostics(settings)
+    logger.info("app_starting", extra={"component": "api", **diagnostics.summary})
+    for warning in diagnostics.warnings:
+        logger.warning("startup_configuration_warning", extra={"component": "api", "warning": warning})
     init_db()
     telegram_bot = TelegramBotService()
     await telegram_bot.start()

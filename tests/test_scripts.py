@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import unittest
 
+import scripts.run_api as run_api
 import scripts.run_telegram_bot as run_telegram_bot
 import scripts.openai_smoke as openai_smoke
 import scripts.live_smoke as live_smoke
@@ -44,6 +45,58 @@ class ScanMarketScriptTests(unittest.TestCase):
         self.assertTrue(fake_db.close.called)
         payload = json.loads(print_mock.call_args.args[0])
         self.assertEqual(payload["results"][0]["ticker"], "AAPL")
+
+
+class RunApiScriptTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        run_api.get_settings.cache_clear()
+
+    def test_main_starts_uvicorn_with_local_host(self) -> None:
+        fake_settings = SimpleNamespace(
+            api_host="127.0.0.1",
+            api_port=8000,
+            allow_remote_api=False,
+        )
+
+        with (
+            patch.object(run_api, "parse_args", return_value=Namespace(reload=True)),
+            patch.object(run_api, "get_settings", return_value=fake_settings),
+            patch.object(run_api, "enforce_local_api_policy") as policy_mock,
+            patch.object(run_api, "build_startup_diagnostics", return_value=SimpleNamespace(warnings=())),
+            patch.object(run_api.uvicorn, "run") as uvicorn_run,
+        ):
+            exit_code = run_api.main()
+
+        self.assertEqual(exit_code, 0)
+        policy_mock.assert_called_once_with(fake_settings)
+        uvicorn_run.assert_called_once_with(
+            "app.main:app",
+            host="127.0.0.1",
+            port=8000,
+            reload=True,
+        )
+
+    def test_main_rejects_remote_host_without_policy(self) -> None:
+        fake_settings = SimpleNamespace(
+            api_host="0.0.0.0",
+            api_port=8000,
+            allow_remote_api=False,
+        )
+
+        stderr = io.StringIO()
+
+        with (
+            patch.object(run_api, "parse_args", return_value=Namespace(reload=False)),
+            patch.object(run_api, "get_settings", return_value=fake_settings),
+            patch.object(run_api, "enforce_local_api_policy", side_effect=RuntimeError("blocked")),
+            patch.object(run_api, "build_startup_diagnostics", return_value=SimpleNamespace(warnings=())),
+            patch.object(run_api.uvicorn, "run") as uvicorn_run,
+            redirect_stderr(stderr),
+        ):
+            with self.assertRaises(RuntimeError):
+                run_api.main()
+
+        uvicorn_run.assert_not_called()
 
 
 class RunTelegramBotScriptTests(unittest.TestCase):

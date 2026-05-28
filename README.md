@@ -58,6 +58,9 @@ Create local env file:
 cp .env.example .env
 ```
 
+The API runs locally by default. Keep `APP_HOST=127.0.0.1` unless you have
+added the public-facing controls called out in `PLAN.md`.
+
 Optional OpenAI setup:
 
 ```bash
@@ -93,7 +96,7 @@ The default SQLite database path is resolved relative to the project root, so th
 ## Run API
 
 ```bash
-uvicorn app.main:app --reload
+python scripts/run_api.py --reload
 ```
 
 OpenAPI docs:

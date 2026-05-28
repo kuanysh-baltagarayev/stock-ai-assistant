@@ -52,7 +52,7 @@ If API behavior changes, add or update `TestClient` coverage.
 API:
 
 ```bash
-uvicorn app.main:app --reload
+python scripts/run_api.py --reload
 ```
 
 CLI scan:

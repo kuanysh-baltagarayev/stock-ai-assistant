@@ -46,6 +46,7 @@ Implemented:
 - Development requirements file for lint and coverage tooling.
 - `ruff` and coverage configuration in `pyproject.toml`.
 - One-command local verification script at `scripts/check.sh`.
+- Local-only API runner at `scripts/run_api.py` with config validation and startup diagnostics.
 
 ## Commit History Baseline Before This Split
 
@@ -59,21 +60,20 @@ Implemented:
 
 ## Latest Verification
 
-- 2026-05-28: offline test suite passed with 22 tests after plan-scope update.
-- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after plan-scope update.
+- 2026-05-28: offline test suite passed with 27 tests after API runner and config diagnostics updates.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after API runner and config diagnostics updates.
 - 2026-05-28: live `yfinance` smoke passed with `scripts/live_smoke.py --ticker AAPL --scan AAPL`.
-- 2026-05-28: `scripts/check.sh` passed with `ruff`, 22 coverage-wrapped tests, coverage report, and compile check.
+- 2026-05-28: `scripts/check.sh` passed after API runner and config diagnostics updates, with `ruff`, 27 coverage-wrapped tests, coverage report, and compile check.
 
 ## Known Limits
 
 - OpenAI and Telegram live checks are not fully automated yet.
 - The sandbox previously blocked binding `uvicorn` to `127.0.0.1:8000`; API behavior has been validated with `TestClient`.
-- Real HTTP startup through `uvicorn` still needs to be verified in an environment where socket binding is allowed.
+- Real HTTP startup through `scripts/run_api.py` still needs a live socket-bound smoke check in an environment where socket binding is allowed.
 - Dependencies are broad ranges in `requirements.txt`; no lockfile or constraints file exists.
 - There is no CI workflow.
 - SQLite schema creation uses `Base.metadata.create_all`; there are no migrations.
 - Network-heavy operations still need bounded retry/backoff policy.
-- Config validation is partial; startup diagnostics should make invalid env settings obvious.
 - Secrets hygiene is implicit through `.gitignore`, but there is no explicit security checklist yet.
 - Local runtime notes for Telegram bot operation are not defined yet.
 - No user-facing UI exists yet; API, CLI, and Telegram flows are the current product surface.
@@ -340,9 +340,9 @@ Status: in progress.
 5. Done: add OpenAI live smoke guarded by `OPENAI_API_KEY`, without making OpenAI required for normal operation.
 6. Done: document practical coverage boundaries, source tiers, data-quality rules, LLM safety, Telegram security, scheduler requirements, and testing gaps in this plan.
 7. Add Telegram live check that verifies token/config safely without sending accidental spam.
-8. Verify real `uvicorn` HTTP startup in an environment where socket binding is allowed.
-9. Add config validation and startup diagnostics for env settings.
-10. Add explicit local-only API exposure policy for the MVP.
+8. Verify real `uvicorn` HTTP startup through the local-only API runner in an environment where socket binding is allowed.
+9. Done: add config validation and startup diagnostics for env settings.
+10. Done: add explicit local-only API exposure policy for the MVP.
 11. Add basic secret/log redaction checks for env values, Telegram token, and provider credentials.
 12. Add neutral research-label migration plan and tests before changing user-facing recommendation labels.
 13. Keep README, AGENTS, and this plan synchronized.

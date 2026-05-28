@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -12,9 +13,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.config import PROJECT_ROOT, resolve_database_url
+from app.config import ConfigurationError, PROJECT_ROOT, get_settings, resolve_database_url
 from app.api.routes import health, root
 from app.database import Base
+from app.diagnostics import build_startup_diagnostics, enforce_local_api_policy
 from app.models import AnalysisSnapshot
 from app.main import app
 from app.schemas import (
@@ -204,6 +206,59 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual([item.ticker for item in response.results], ["MSFT", "AAPL"])
         self.assertEqual(response.results[0].final_score, 82.0)
         self.assertEqual(response.errors[0].ticker, "NVDA")
+
+
+class ConfigurationTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        get_settings.cache_clear()
+
+    def test_get_settings_parses_api_settings(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "APP_HOST": "127.0.0.1",
+                "APP_PORT": "9100",
+                "ALLOW_REMOTE_API": "0",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        self.assertEqual(settings.api_host, "127.0.0.1")
+        self.assertEqual(settings.api_port, 9100)
+        self.assertFalse(settings.allow_remote_api)
+
+    def test_get_settings_rejects_invalid_port(self) -> None:
+        with patch.dict(os.environ, {"APP_PORT": "not-a-number"}, clear=False):
+            get_settings.cache_clear()
+            with self.assertRaises(ConfigurationError) as exc:
+                get_settings()
+
+        self.assertIn("APP_PORT must be an integer", str(exc.exception))
+
+    def test_startup_diagnostics_warn_on_remote_api_without_policy(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "APP_HOST": "0.0.0.0",
+                "ALLOW_REMOTE_API": "0",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        diagnostics = build_startup_diagnostics(settings)
+
+        self.assertTrue(
+            any(
+                "remote API exposure is disabled by policy" in warning
+                for warning in diagnostics.warnings
+            )
+        )
+        with self.assertRaises(ConfigurationError):
+            enforce_local_api_policy(settings)
 
 
 class ApiRouteTests(unittest.TestCase):
