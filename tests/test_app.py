@@ -123,3 +123,75 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual([item.ticker for item in response.results], ["MSFT", "AAPL"])
         self.assertEqual(response.results[0].final_score, 82.0)
         self.assertEqual(response.errors[0].ticker, "NVDA")
+
+
+class ApiRouteTests(unittest.TestCase):
+    def test_analyze_endpoint_serializes_response(self) -> None:
+        analysis = make_analysis("AAPL", 77.7)
+
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.analyze_ticker", return_value=analysis),
+            TestClient(app) as client,
+        ):
+            response = client.get("/analyze/AAPL")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["ticker"], "AAPL")
+        self.assertEqual(body["scores"]["final_score"], 77.7)
+
+    def test_scan_endpoint_serializes_sorted_results(self) -> None:
+        scan_response = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="MSFT",
+                    price=101.0,
+                    final_score=80.0,
+                    momentum_score=60.0,
+                    valuation_score=55.0,
+                    risk_score=40.0,
+                    recommendation="HOLD",
+                    short_reason="MSFT short reason",
+                )
+            ],
+            errors=[],
+        )
+
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.scan_tickers", return_value=scan_response),
+            TestClient(app) as client,
+        ):
+            response = client.post("/scan", json={"tickers": ["msft"]})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["results"][0]["ticker"], "MSFT")
+        self.assertEqual(body["results"][0]["final_score"], 80.0)
+
+    def test_recent_analyses_endpoint_serializes_rows(self) -> None:
+        row = SimpleNamespace(
+            id=1,
+            ticker="AAPL",
+            company_name="Apple Inc.",
+            price=189.12,
+            final_score=77.7,
+            recommendation="HOLD",
+            created_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+        )
+
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.list_recent_snapshots", return_value=[row]),
+            TestClient(app) as client,
+        ):
+            response = client.get("/analyses/recent")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body[0]["ticker"], "AAPL")
+        self.assertEqual(body[0]["price"], 189.12)
