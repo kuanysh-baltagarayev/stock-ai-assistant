@@ -60,6 +60,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 39 tests after CI workflow addition.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after CI workflow addition.
+- 2026-05-28: `scripts/check.sh` passed after CI workflow addition, with `ruff`, 39 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 39 tests after dependency pinning updates.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after dependency pinning updates.
 - 2026-05-28: `scripts/check.sh` passed after dependency pinning updates, with `ruff`, 39 coverage-wrapped tests, coverage report, and compile check.
@@ -87,7 +90,6 @@ Implemented:
 - Real HTTP startup through `scripts/run_api.py` still needs a live socket-bound smoke check in an environment where socket binding is allowed.
 - Dependencies are pinned in `requirements.txt` and `requirements-dev.txt`, but there is still no separate lockfile or constraints file for transitive dependencies.
 - Supported Python version is documented in `README.md`.
-- There is no CI workflow.
 - SQLite schema creation uses `Base.metadata.create_all`; there are no migrations.
 - Network-heavy operations still need bounded retry/backoff policy.
 - Secrets hygiene is implicit through `.gitignore`, but there is no explicit security checklist yet.
@@ -367,7 +369,7 @@ Status: in progress.
 
 1. Done: pin or constrain Python dependencies.
 2. Done: document the supported Python version.
-3. Add CI for tests and compile checks.
+3. Done: add CI for tests and compile checks.
 4. Done: add a one-command local verification entrypoint at `scripts/check.sh`.
 5. Add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
 6. Add local runtime notes for Telegram bot operation, logs, restart, env setup, and database location.
