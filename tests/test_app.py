@@ -4,10 +4,12 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 import unittest
+from pathlib import Path
 
 import pandas as pd
 from fastapi.testclient import TestClient
 
+from app.config import PROJECT_ROOT, resolve_database_url
 from app.api.routes import health, root
 from app.main import app
 from app.schemas import (
@@ -65,6 +67,12 @@ class AppSmokeTests(unittest.TestCase):
         request = ScanRequest(tickers=[" aapl ", "MSFT", "aapl", "", "  nvda "])
 
         self.assertEqual(request.tickers, ["AAPL", "MSFT", "NVDA"])
+
+    def test_resolve_database_url_uses_project_root_for_relative_sqlite_paths(self) -> None:
+        resolved = resolve_database_url("sqlite:///./stock_ai_assistant.db")
+
+        self.assertTrue(resolved.startswith("sqlite:///"))
+        self.assertIn(str(Path(PROJECT_ROOT / "stock_ai_assistant.db").resolve()), resolved)
 
     def test_analyze_ticker_builds_response_without_network(self) -> None:
         market = {

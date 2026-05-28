@@ -26,11 +26,25 @@ class Settings(BaseModel):
     telegram_enabled: bool = Field(default=False)
 
 
+def resolve_database_url(database_url: str) -> str:
+    if not database_url.startswith("sqlite:///"):
+        return database_url
+
+    raw_path = database_url.removeprefix("sqlite:///")
+    if raw_path.startswith("/"):
+        return database_url
+
+    resolved_path = (PROJECT_ROOT / raw_path).resolve()
+    return f"sqlite:///{resolved_path.as_posix()}"
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
         app_name=os.getenv("APP_NAME", "Stock AI Assistant"),
-        database_url=os.getenv("DATABASE_URL", "sqlite:///./stock_ai_assistant.db"),
+        database_url=resolve_database_url(
+            os.getenv("DATABASE_URL", "sqlite:///./stock_ai_assistant.db")
+        ),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,

@@ -71,6 +71,8 @@ TELEGRAM_DIGEST_INTERVAL_MINUTES=1440
 
 The bot stores subscriptions and alert timestamps in SQLite. If `TELEGRAM_ENABLED=1` and `TELEGRAM_BOT_TOKEN` are set, it starts automatically when the app runs.
 
+The default SQLite database path is resolved relative to the project root, so the file stays in this repository even if you launch `uvicorn` from another directory.
+
 ## Run API
 
 ```bash
@@ -108,7 +110,7 @@ Expected shape:
   "status": "ok",
   "app": "Stock AI Assistant",
   "generated_at": "2026-05-28T00:00:00Z",
-  "database": "sqlite:///./stock_ai_assistant.db"
+  "database": "sqlite:////absolute/path/to/stock-ai-assistant/stock_ai_assistant.db"
 }
 ```
 
