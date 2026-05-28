@@ -99,6 +99,12 @@ The default SQLite database path is resolved relative to the project root, so th
 python scripts/run_api.py --reload
 ```
 
+Real HTTP smoke:
+
+```bash
+python scripts/live_http_smoke.py
+```
+
 OpenAPI docs:
 
 ```text
@@ -248,6 +254,12 @@ python scripts/run_telegram_bot.py
 ```
 
 If Telegram is disabled or the token is missing, the script exits with a clear error message.
+
+Telegram config smoke:
+
+```bash
+python scripts/check_telegram.py
+```
 
 Available commands:
 

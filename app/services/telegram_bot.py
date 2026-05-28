@@ -431,6 +431,30 @@ class TelegramBotService:
         finally:
             db.close()
 
+    def live_check(self) -> dict[str, Any]:
+        if not self.settings.telegram_bot_token:
+            raise RuntimeError("Telegram bot token is missing.")
+        if not self.settings.telegram_enabled:
+            raise RuntimeError("Telegram bot is disabled.")
+
+        me = self._request_json("getMe")
+        if not me.get("ok"):
+            raise RuntimeError(f"Telegram getMe failed: {me}")
+
+        result = me.get("result") or {}
+        if not isinstance(result, dict):
+            raise RuntimeError(f"Telegram getMe returned unexpected payload: {me}")
+
+        return {
+            "status": "ok",
+            "bot_id": result.get("id"),
+            "username": result.get("username"),
+            "first_name": result.get("first_name"),
+            "can_join_groups": result.get("can_join_groups"),
+            "can_read_all_group_messages": result.get("can_read_all_group_messages"),
+            "supports_inline_queries": result.get("supports_inline_queries"),
+        }
+
     def _configured_tickers(self) -> list[str]:
         raw = self.settings.telegram_default_tickers
         tickers = [item.strip().upper() for item in raw.split(",")]

@@ -60,6 +60,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 39 tests after Telegram and HTTP smoke additions.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after Telegram and HTTP smoke additions.
+- 2026-05-28: `scripts/check.sh` passed after Telegram and HTTP smoke additions, with `ruff`, 39 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 35 tests after contextual disclaimer updates.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after contextual disclaimer updates.
 - 2026-05-28: `scripts/check.sh` passed after contextual disclaimer updates, with `ruff`, 35 coverage-wrapped tests, coverage report, and compile check.
@@ -348,8 +351,8 @@ Status: in progress.
 4. Done: add basic structured logging setup for API, scanner, persistence, and Telegram background loops.
 5. Done: add OpenAI live smoke guarded by `OPENAI_API_KEY`, without making OpenAI required for normal operation.
 6. Done: document practical coverage boundaries, source tiers, data-quality rules, LLM safety, Telegram security, scheduler requirements, and testing gaps in this plan.
-7. Add Telegram live check that verifies token/config safely without sending accidental spam.
-8. Verify real `uvicorn` HTTP startup through the local-only API runner in an environment where socket binding is allowed.
+7. Done: add Telegram live check that verifies token/config safely without sending accidental spam.
+8. Done: verify real `uvicorn` HTTP startup through the local-only API runner in an environment where socket binding is allowed.
 9. Done: add config validation and startup diagnostics for env settings.
 10. Done: add explicit local-only API exposure policy for the MVP.
 11. Done: add basic secret/log redaction checks for env values, Telegram token, and provider credentials.

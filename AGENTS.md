@@ -53,6 +53,7 @@ API:
 
 ```bash
 python scripts/run_api.py --reload
+python scripts/live_http_smoke.py
 ```
 
 CLI scan:
@@ -72,4 +73,5 @@ Telegram bot:
 
 ```bash
 python scripts/run_telegram_bot.py
+python scripts/check_telegram.py
 ```

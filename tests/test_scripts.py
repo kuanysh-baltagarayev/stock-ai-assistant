@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 import unittest
 
 import scripts.run_api as run_api
+import scripts.check_telegram as check_telegram
+import scripts.live_http_smoke as live_http_smoke
 import scripts.run_telegram_bot as run_telegram_bot
 import scripts.openai_smoke as openai_smoke
 import scripts.live_smoke as live_smoke
@@ -111,6 +113,110 @@ class RunTelegramBotScriptTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertIn("missing token", stderr.getvalue())
+
+
+class CheckTelegramScriptTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        check_telegram.get_settings.cache_clear()
+
+    def test_main_reports_missing_token(self) -> None:
+        stderr = io.StringIO()
+
+        with (
+            patch.object(check_telegram, "get_settings", return_value=SimpleNamespace(telegram_bot_token=None, telegram_enabled=True)),
+            redirect_stderr(stderr),
+        ):
+            exit_code = check_telegram.main()
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("requires TELEGRAM_BOT_TOKEN", stderr.getvalue())
+
+    def test_main_runs_safe_live_check(self) -> None:
+        fake_settings = SimpleNamespace(telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyzABCDEF", telegram_enabled=True)
+        fake_service = SimpleNamespace(live_check=MagicMock(return_value={"status": "ok", "username": "stock_bot"}))
+        stdout = io.StringIO()
+
+        with (
+            patch.object(check_telegram, "get_settings", return_value=fake_settings),
+            patch.object(check_telegram, "TelegramBotService", return_value=fake_service) as service_ctor,
+            patch("sys.stdout", stdout),
+        ):
+            exit_code = check_telegram.main()
+
+        self.assertEqual(exit_code, 0)
+        service_ctor.assert_called_once_with(settings=fake_settings)
+        fake_service.live_check.assert_called_once()
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["username"], "stock_bot")
+
+
+class LiveHttpSmokeScriptTests(unittest.TestCase):
+    def test_main_requires_ticker_and_scan_list(self) -> None:
+        stderr = io.StringIO()
+
+        with (
+            patch.object(live_http_smoke, "parse_args", return_value=Namespace(ticker=" ", scan=[])),
+            redirect_stderr(stderr),
+        ):
+            exit_code = live_http_smoke.main()
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("requires a ticker", stderr.getvalue())
+
+    def test_main_runs_real_http_smoke_flow(self) -> None:
+        fake_process = SimpleNamespace()
+        stdout = io.StringIO()
+
+        def fake_get_json(url: str) -> object:
+            if url.endswith("/health"):
+                return {"status": "ok"}
+            if url.endswith("/ready"):
+                return {"status": "ready"}
+            if "/analyze/" in url:
+                return {
+                    "ticker": "AAPL",
+                    "scores": {"final_score": 77.7},
+                    "recommendation": "NEUTRAL",
+                }
+            if url.endswith("/scan"):
+                return {"results": [{"ticker": "AAPL"}], "errors": []}
+            if url.endswith("/analyses/recent?limit=5"):
+                return [{"ticker": "AAPL"}]
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        with (
+            patch.object(
+                live_http_smoke,
+                "parse_args",
+                return_value=Namespace(host="127.0.0.1", port=18080, timeout=5, ticker="aapl", scan=["msft"]),
+            ),
+            patch.object(live_http_smoke, "_find_free_port", return_value=18080),
+            patch.object(live_http_smoke, "_launch_server", return_value=fake_process) as launch_mock,
+            patch.object(live_http_smoke, "_wait_for_health") as wait_mock,
+            patch.object(live_http_smoke, "_get_json", side_effect=fake_get_json) as get_json_mock,
+            patch.object(live_http_smoke, "_get_text", return_value="<html>swagger</html>"),
+            patch.object(live_http_smoke, "_post_json", return_value={"results": [{"ticker": "AAPL"}], "errors": []}) as post_mock,
+            patch.object(live_http_smoke, "_stop_process") as stop_mock,
+            patch("sys.stdout", stdout),
+        ):
+            exit_code = live_http_smoke.main()
+
+        self.assertEqual(exit_code, 0)
+        launch_mock.assert_called_once()
+        wait_mock.assert_called_once_with("http://127.0.0.1:18080", timeout_seconds=5)
+        get_json_mock.assert_any_call("http://127.0.0.1:18080/health")
+        get_json_mock.assert_any_call("http://127.0.0.1:18080/ready")
+        get_json_mock.assert_any_call("http://127.0.0.1:18080/analyze/AAPL")
+        get_json_mock.assert_any_call("http://127.0.0.1:18080/analyses/recent?limit=5")
+        post_mock.assert_called_once_with(
+            "http://127.0.0.1:18080/scan",
+            {"tickers": ["MSFT"]},
+        )
+        stop_mock.assert_called_once_with(fake_process)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["analysis"]["ticker"], "AAPL")
 
 
 class OpenAISmokeScriptTests(unittest.TestCase):
