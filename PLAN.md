@@ -61,6 +61,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 49 tests after partial scan failure reporting was introduced.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after partial scan failure reporting was introduced.
+- 2026-05-28: `scripts/check.sh` passed after partial scan failure reporting was introduced, with `ruff`, 49 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 49 tests after snapshot retention and cleanup rules were introduced.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after snapshot retention and cleanup rules were introduced.
 - 2026-05-28: `scripts/check.sh` passed after snapshot retention and cleanup rules were introduced, with `ruff`, 49 coverage-wrapped tests, coverage report, and compile check.
@@ -402,7 +405,7 @@ Status: in progress.
 1. Done: introduce migrations before the SQLite schema changes beyond the current tables.
 2. Done: add endpoints for full saved analysis payloads.
 3. Done: add retention or cleanup rules for old snapshots.
-4. Improve reporting around partial scan failures.
+4. Done: improve reporting around partial scan failures.
 5. Add an instrument registry for symbol, exchange, MIC, country, timezone, currency, asset type, provider aliases, and stable identifiers.
 6. Add a provider registry with source tier, capability list, legal/terms note, cache TTL, retry policy, and failure taxonomy.
 7. Persist raw source snapshots separately from normalized analysis outputs.

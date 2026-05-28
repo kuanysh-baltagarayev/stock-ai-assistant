@@ -51,6 +51,7 @@ def main() -> int:
                 {
                     "results": [_serialize(row) for row in response.results],
                     "errors": [_serialize(row) for row in response.errors],
+                    "summary": _serialize(response.summary),
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -58,6 +59,10 @@ def main() -> int:
         )
     else:
         print_table(response.results)
+        print(
+            f"\nSummary: {response.summary.message} "
+            f"(success={response.summary.success_count}, errors={response.summary.error_count})"
+        )
         if response.errors:
             print("\nErrors:")
             for item in response.errors:
@@ -69,6 +74,7 @@ def main() -> int:
             "ticker_count": len(tickers),
             "result_count": len(response.results),
             "error_count": len(response.errors),
+            "partial_failure": response.summary.partial_failure,
         },
     )
     return 0 if response.results else 1

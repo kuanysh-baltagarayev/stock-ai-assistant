@@ -10,7 +10,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - `GET /ready` readiness check with database probe.
 - `GET /` quick service index with links.
 - `GET /analyze/{ticker}` analyzes one ticker.
-- `POST /scan` scans a list of tickers and sorts candidates by `final_score`.
+- `POST /scan` scans a list of tickers, sorts candidates by `final_score`, and returns a summary when some tickers fail.
 - `GET /analyses/recent` returns the latest stored analyses from SQLite.
 - `GET /analyses/{analysis_id}` returns a saved analysis with its full payload.
 - CLI scanner for a default watchlist.

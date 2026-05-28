@@ -206,6 +206,12 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual([item.ticker for item in response.results], ["MSFT", "AAPL"])
         self.assertEqual(response.results[0].final_score, 82.0)
         self.assertEqual(response.errors[0].ticker, "NVDA")
+        self.assertTrue(response.summary.partial_failure)
+        self.assertEqual(response.summary.requested_count, 3)
+        self.assertEqual(response.summary.success_count, 2)
+        self.assertEqual(response.summary.error_count, 1)
+        self.assertEqual(response.summary.failed_tickers, ["NVDA"])
+        self.assertIn("failures", response.summary.message)
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -342,6 +348,14 @@ class ApiRouteTests(unittest.TestCase):
                 )
             ],
             errors=[],
+            summary=SimpleNamespace(
+                requested_count=1,
+                success_count=1,
+                error_count=0,
+                partial_failure=False,
+                message="Scan completed successfully for 1 tickers.",
+                failed_tickers=[],
+            ),
         )
 
         with (
@@ -356,6 +370,8 @@ class ApiRouteTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["results"][0]["ticker"], "MSFT")
         self.assertEqual(body["results"][0]["final_score"], 80.0)
+        self.assertEqual(body["summary"]["success_count"], 1)
+        self.assertFalse(body["summary"]["partial_failure"])
 
     def test_recent_analyses_endpoint_serializes_rows(self) -> None:
         row = SimpleNamespace(

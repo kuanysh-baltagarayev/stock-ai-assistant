@@ -31,6 +31,14 @@ class ScanMarketScriptTests(unittest.TestCase):
                 )
             ],
             errors=[],
+            summary=SimpleNamespace(
+                requested_count=2,
+                success_count=1,
+                error_count=0,
+                partial_failure=False,
+                message="Scan completed successfully for 1 tickers.",
+                failed_tickers=[],
+            ),
         )
 
         with (
@@ -47,6 +55,7 @@ class ScanMarketScriptTests(unittest.TestCase):
         self.assertTrue(fake_db.close.called)
         payload = json.loads(print_mock.call_args.args[0])
         self.assertEqual(payload["results"][0]["ticker"], "AAPL")
+        self.assertEqual(payload["summary"]["success_count"], 1)
 
 
 class RunApiScriptTests(unittest.TestCase):
@@ -296,6 +305,14 @@ class LiveSmokeScriptTests(unittest.TestCase):
                 )
             ],
             errors=[],
+            summary=SimpleNamespace(
+                requested_count=1,
+                success_count=1,
+                error_count=0,
+                partial_failure=False,
+                message="Scan completed successfully for 1 tickers.",
+                failed_tickers=[],
+            ),
         )
 
         with (
@@ -315,6 +332,7 @@ class LiveSmokeScriptTests(unittest.TestCase):
         self.assertTrue(fake_db.close.called)
         payload = json.loads(print_mock.call_args.args[0])
         self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["scan"]["summary"]["success_count"], 1)
 
     def test_main_rejects_empty_input(self) -> None:
         stderr = io.StringIO()

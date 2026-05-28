@@ -71,7 +71,7 @@ def main() -> int:
         db.close()
 
     payload = {
-        "status": "ok" if scan.results else "degraded",
+        "status": "ok" if not scan.summary.partial_failure else "degraded",
         "analysis": {
             "ticker": analysis.ticker,
             "price": analysis.price,
@@ -81,6 +81,7 @@ def main() -> int:
         "scan": {
             "result_count": len(scan.results),
             "error_count": len(scan.errors),
+            "summary": _serialize(scan.summary),
             "top": [
                 {
                     "ticker": item.ticker,
@@ -101,9 +102,18 @@ def main() -> int:
             "scan_ticker_count": len(scan_ticker_list),
             "result_count": len(scan.results),
             "error_count": len(scan.errors),
+            "partial_failure": scan.summary.partial_failure,
         },
     )
-    return 0 if scan.results else 1
+    return 0 if not scan.summary.partial_failure else 1
+
+
+def _serialize(item) -> dict:
+    if hasattr(item, "model_dump"):
+        return item.model_dump()
+    if hasattr(item, "__dict__"):
+        return {key: value for key, value in vars(item).items() if not key.startswith("_")}
+    return {"value": str(item)}
 
 
 if __name__ == "__main__":

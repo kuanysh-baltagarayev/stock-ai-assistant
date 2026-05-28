@@ -85,9 +85,19 @@ class ScanError(BaseModel):
     error: str
 
 
+class ScanSummary(BaseModel):
+    requested_count: int
+    success_count: int
+    error_count: int
+    partial_failure: bool
+    message: str
+    failed_tickers: list[str] = Field(default_factory=list)
+
+
 class ScanResponse(BaseModel):
     results: list[ScanResult]
     errors: list[ScanError] = Field(default_factory=list)
+    summary: ScanSummary
 
 
 class AnalysisSnapshotRead(BaseModel):

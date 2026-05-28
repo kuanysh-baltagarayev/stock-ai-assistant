@@ -4,7 +4,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.models import AnalysisSnapshot
-from app.schemas import AnalyzeResponse, ScanError, ScanResponse, ScanResult
+from app.schemas import AnalyzeResponse, ScanError, ScanResponse, ScanResult, ScanSummary
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
@@ -100,6 +100,19 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
         )
 
     results.sort(key=lambda item: item.final_score, reverse=True)
+    summary = _build_scan_summary(tickers=tickers, results=results, errors=errors)
+
+    if summary.partial_failure:
+        logger.warning(
+            "scan_partial_failure",
+            extra={
+                "component": "scanner",
+                "ticker_count": len(tickers),
+                "result_count": len(results),
+                "error_count": len(errors),
+                "failed_tickers": summary.failed_tickers,
+            },
+        )
     logger.info(
         "scan_finished",
         extra={
@@ -107,9 +120,10 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
             "ticker_count": len(tickers),
             "result_count": len(results),
             "error_count": len(errors),
+            "partial_failure": summary.partial_failure,
         },
     )
-    return ScanResponse(results=results, errors=errors)
+    return ScanResponse(results=results, errors=errors, summary=summary)
 
 
 def _save_snapshot(db: Session, response: AnalyzeResponse) -> None:
@@ -172,3 +186,27 @@ def _json_ready(payload: dict) -> dict:
     if isinstance(generated_at, datetime):
         converted["generated_at"] = generated_at.isoformat()
     return converted
+
+
+def _build_scan_summary(
+    tickers: list[str],
+    results: list[ScanResult],
+    errors: list[ScanError],
+) -> ScanSummary:
+    failed_tickers = [item.ticker for item in errors]
+    success_count = len(results)
+    error_count = len(errors)
+    partial_failure = error_count > 0
+    if partial_failure:
+        message = f"Scan completed with {success_count} successful tickers and {error_count} failures."
+    else:
+        message = f"Scan completed successfully for {success_count} tickers."
+
+    return ScanSummary(
+        requested_count=len(tickers),
+        success_count=success_count,
+        error_count=error_count,
+        partial_failure=partial_failure,
+        message=message,
+        failed_tickers=failed_tickers,
+    )
