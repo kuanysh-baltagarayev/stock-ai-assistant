@@ -3,10 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+import re
 from typing import Any, TextIO
 
 
 _STANDARD_ATTRS = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys())
+_SENSITIVE_KEYWORDS = ("token", "secret", "password", "api_key", "apikey", "authorization")
+_TELEGRAM_TOKEN_RE = re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b")
+_OPENAI_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")
 
 
 class StructuredFormatter(logging.Formatter):
@@ -22,7 +26,7 @@ class StructuredFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in _STANDARD_ATTRS or key.startswith("_"):
                 continue
-            payload[key] = _json_safe(value)
+            payload[key] = _sanitize_field(key, value)
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False, default=_json_default)
@@ -55,6 +59,37 @@ def _json_safe(value: Any) -> Any:
     except TypeError:
         return str(value)
     return value
+
+
+def _sanitize_field(key: str, value: Any) -> Any:
+    if _is_sensitive_key(key):
+        return "[REDACTED]"
+
+    if isinstance(value, str):
+        return _redact_text(value)
+    if isinstance(value, dict):
+        return {
+            item_key: _sanitize_field(str(item_key), item_value)
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_field(key, item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_field(key, item) for item in value)
+    if isinstance(value, set):
+        return [_sanitize_field(key, item) for item in sorted(value, key=str)]
+    return _json_safe(value)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = key.lower()
+    return any(keyword in normalized for keyword in _SENSITIVE_KEYWORDS)
+
+
+def _redact_text(value: str) -> str:
+    redacted = _TELEGRAM_TOKEN_RE.sub("[REDACTED]", value)
+    redacted = _OPENAI_KEY_RE.sub("[REDACTED]", redacted)
+    return redacted
 
 
 def _json_default(value: Any) -> str:

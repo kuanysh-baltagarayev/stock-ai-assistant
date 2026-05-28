@@ -60,6 +60,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 28 tests after log redaction updates.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after log redaction updates.
+- 2026-05-28: `scripts/check.sh` passed after log redaction updates, with `ruff`, 28 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 27 tests after API runner and config diagnostics updates.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after API runner and config diagnostics updates.
 - 2026-05-28: live `yfinance` smoke passed with `scripts/live_smoke.py --ticker AAPL --scan AAPL`.
@@ -343,7 +346,7 @@ Status: in progress.
 8. Verify real `uvicorn` HTTP startup through the local-only API runner in an environment where socket binding is allowed.
 9. Done: add config validation and startup diagnostics for env settings.
 10. Done: add explicit local-only API exposure policy for the MVP.
-11. Add basic secret/log redaction checks for env values, Telegram token, and provider credentials.
+11. Done: add basic secret/log redaction checks for env values, Telegram token, and provider credentials.
 12. Add neutral research-label migration plan and tests before changing user-facing recommendation labels.
 13. Keep README, AGENTS, and this plan synchronized.
 
