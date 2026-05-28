@@ -1,0 +1,98 @@
+from datetime import datetime, timezone
+
+from sqlalchemy.orm import Session
+
+from app.models import AnalysisSnapshot
+from app.schemas import AnalyzeResponse, ScanError, ScanResponse, ScanResult
+from app.services.ai_explainer import explain_analysis, rule_based_explanation
+from app.services.indicators import calculate_indicators
+from app.services.market_data import MarketDataError, extract_fundamentals, get_market_data
+from app.services.scoring import score_stock
+
+
+def analyze_ticker(
+    ticker: str,
+    db: Session | None = None,
+    use_ai_explanation: bool = True,
+) -> AnalyzeResponse:
+    market = get_market_data(ticker)
+    fundamentals = extract_fundamentals(market["info"])
+    technicals = calculate_indicators(market["history"])
+    scoring = score_stock(market["price"], technicals, fundamentals)
+
+    payload = {
+        "ticker": market["ticker"],
+        "generated_at": datetime.now(timezone.utc),
+        "price": market["price"],
+        "currency": market["currency"],
+        "fundamentals": fundamentals.model_dump(),
+        "technicals": technicals.model_dump(),
+        "scores": scoring.scores.model_dump(),
+        "recommendation": scoring.recommendation,
+        "short_reason": scoring.short_reason,
+    }
+
+    if use_ai_explanation:
+        explanation = explain_analysis(_json_ready(payload), scoring.reasons)
+    else:
+        explanation = rule_based_explanation(_json_ready(payload), scoring.reasons)
+
+    response = AnalyzeResponse(**payload, explanation=explanation)
+    if db is not None:
+        _save_snapshot(db, response)
+    return response
+
+
+def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
+    results: list[ScanResult] = []
+    errors: list[ScanError] = []
+
+    for ticker in tickers:
+        try:
+            analysis = analyze_ticker(ticker, db=db, use_ai_explanation=False)
+        except MarketDataError as exc:
+            errors.append(ScanError(ticker=ticker, error=str(exc)))
+            continue
+        except Exception as exc:
+            errors.append(ScanError(ticker=ticker, error=f"Unexpected error: {exc}"))
+            continue
+
+        results.append(
+            ScanResult(
+                ticker=analysis.ticker,
+                price=analysis.price,
+                final_score=analysis.scores.final_score,
+                momentum_score=analysis.scores.momentum_score,
+                valuation_score=analysis.scores.valuation_score,
+                risk_score=analysis.scores.risk_score,
+                recommendation=analysis.recommendation,
+                short_reason=analysis.short_reason,
+            )
+        )
+
+    results.sort(key=lambda item: item.final_score, reverse=True)
+    return ScanResponse(results=results, errors=errors)
+
+
+def _save_snapshot(db: Session, response: AnalyzeResponse) -> None:
+    snapshot = AnalysisSnapshot(
+        ticker=response.ticker,
+        company_name=response.fundamentals.company_name,
+        price=response.price,
+        final_score=response.scores.final_score,
+        recommendation=response.recommendation,
+        payload=response.model_dump(mode="json"),
+    )
+    try:
+        db.add(snapshot)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def _json_ready(payload: dict) -> dict:
+    converted = payload.copy()
+    generated_at = converted.get("generated_at")
+    if isinstance(generated_at, datetime):
+        converted["generated_at"] = generated_at.isoformat()
+    return converted
