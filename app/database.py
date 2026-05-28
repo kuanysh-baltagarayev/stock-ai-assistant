@@ -1,9 +1,13 @@
 from collections.abc import Generator
+import logging
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -21,11 +25,13 @@ def init_db() -> None:
     import app.models  # noqa: F401 - registers SQLAlchemy models
 
     Base.metadata.create_all(bind=engine)
+    logger.info("database_initialized", extra={"component": "persistence"})
 
 
 def check_database() -> None:
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
+    logger.debug("database_checked", extra={"component": "persistence"})
 
 
 def get_db() -> Generator[Session, None, None]:

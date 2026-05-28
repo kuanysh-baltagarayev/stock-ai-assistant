@@ -1,6 +1,7 @@
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 import json
+import logging
 import sys
 
 
@@ -8,11 +9,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.logging_config import configure_logging  # noqa: E402
 from app.database import SessionLocal, init_db  # noqa: E402
 from app.services.scanner import scan_tickers  # noqa: E402
 
 
 DEFAULT_TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "AMZN", "GOOGL", "META"]
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> Namespace:
@@ -31,8 +34,10 @@ def parse_args() -> Namespace:
 
 
 def main() -> int:
+    configure_logging(force=True)
     args = parse_args()
     tickers = [ticker.strip().upper() for ticker in args.tickers if ticker.strip()] or DEFAULT_TICKERS
+    logger.info("scan_script_started", extra={"component": "cli", "ticker_count": len(tickers)})
     init_db()
     db = SessionLocal()
     try:
@@ -57,6 +62,15 @@ def main() -> int:
             print("\nErrors:")
             for item in response.errors:
                 print(f"- {item.ticker}: {item.error}")
+    logger.info(
+        "scan_script_finished",
+        extra={
+            "component": "cli",
+            "ticker_count": len(tickers),
+            "result_count": len(response.results),
+            "error_count": len(response.errors),
+        },
+    )
     return 0 if response.results else 1
 
 

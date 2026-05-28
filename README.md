@@ -69,6 +69,8 @@ MARKET_DATA_MAX_ATTEMPTS=3
 MARKET_DATA_RETRY_BACKOFF_SECONDS=1.5
 ```
 
+Runtime logs are emitted as JSON lines to stderr from the API, CLI, persistence, and Telegram loops.
+
 Telegram bot settings:
 
 ```bash

@@ -19,6 +19,7 @@ def analyze_ticker(
     db: Session | None = None,
     use_ai_explanation: bool = True,
 ) -> AnalyzeResponse:
+    logger.debug("analysis_started", extra={"component": "scanner", "ticker": ticker})
     market = get_market_data(ticker)
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
@@ -44,6 +45,15 @@ def analyze_ticker(
     response = AnalyzeResponse(**payload, explanation=explanation)
     if db is not None:
         _save_snapshot(db, response)
+    logger.debug(
+        "analysis_completed",
+        extra={
+            "component": "scanner",
+            "ticker": response.ticker,
+            "final_score": response.scores.final_score,
+            "recommendation": response.recommendation,
+        },
+    )
     return response
 
 
@@ -51,14 +61,27 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
     results: list[ScanResult] = []
     errors: list[ScanError] = []
 
+    logger.info(
+        "scan_started",
+        extra={"component": "scanner", "ticker_count": len(tickers), "persisting": db is not None},
+    )
+
     for ticker in tickers:
         try:
             analysis = analyze_ticker(ticker, db=db, use_ai_explanation=False)
         except MarketDataError as exc:
             errors.append(ScanError(ticker=ticker, error=str(exc)))
+            logger.warning(
+                "scan_ticker_failed",
+                extra={"component": "scanner", "ticker": ticker, "error": str(exc)},
+            )
             continue
         except Exception as exc:
             errors.append(ScanError(ticker=ticker, error=f"Unexpected error: {exc}"))
+            logger.exception(
+                "scan_ticker_unexpected_failure",
+                extra={"component": "scanner", "ticker": ticker},
+            )
             continue
 
         results.append(
@@ -75,6 +98,15 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
         )
 
     results.sort(key=lambda item: item.final_score, reverse=True)
+    logger.info(
+        "scan_finished",
+        extra={
+            "component": "scanner",
+            "ticker_count": len(tickers),
+            "result_count": len(results),
+            "error_count": len(errors),
+        },
+    )
     return ScanResponse(results=results, errors=errors)
 
 
@@ -90,9 +122,21 @@ def _save_snapshot(db: Session, response: AnalyzeResponse) -> None:
     try:
         db.add(snapshot)
         db.commit()
+        logger.info(
+            "analysis_snapshot_saved",
+            extra={
+                "component": "persistence",
+                "ticker": response.ticker,
+                "final_score": response.scores.final_score,
+                "recommendation": response.recommendation,
+            },
+        )
     except Exception:
         db.rollback()
-        logger.exception("Failed to persist analysis snapshot for %s", response.ticker)
+        logger.exception(
+            "analysis_snapshot_persist_failed",
+            extra={"component": "persistence", "ticker": response.ticker},
+        )
 
 
 def _json_ready(payload: dict) -> dict:

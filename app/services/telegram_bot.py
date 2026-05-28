@@ -94,6 +94,15 @@ class TelegramBotService:
             self._tasks.append(
                 asyncio.create_task(self._digest_loop(), name="telegram-digest-loop")
             )
+        logger.info(
+            "telegram_bot_started",
+            extra={
+                "component": "telegram",
+                "digest_interval_minutes": self.settings.telegram_digest_interval_minutes,
+                "poll_timeout_seconds": self.settings.telegram_poll_timeout_seconds,
+                "task_count": len(self._tasks),
+            },
+        )
 
     async def stop(self) -> None:
         self._running = False
@@ -106,12 +115,21 @@ class TelegramBotService:
                 await task
             except asyncio.CancelledError:
                 pass
+        if tasks:
+            logger.info(
+                "telegram_bot_stopped",
+                extra={"component": "telegram", "task_count": len(tasks)},
+            )
 
     async def _poll_loop(self) -> None:
         while self._running:
             try:
                 updates = await asyncio.to_thread(
                     self._get_updates, self._offset, self.settings.telegram_poll_timeout_seconds
+                )
+                logger.debug(
+                    "telegram_updates_received",
+                    extra={"component": "telegram", "update_count": len(updates)},
                 )
                 for update in updates:
                     self._offset = max(self._offset, int(update["update_id"]) + 1)
@@ -294,6 +312,16 @@ class TelegramBotService:
 
         response = await asyncio.to_thread(scan_tickers, tickers, None)
         digest = self._digest_text(response.results, response.errors)
+        logger.info(
+            "telegram_digest_ready",
+            extra={
+                "component": "telegram",
+                "subscriber_count": len(subscribers),
+                "ticker_count": len(tickers),
+                "result_count": len(response.results),
+                "error_count": len(response.errors),
+            },
+        )
         for subscriber in subscribers:
             await self._send_message(subscriber.chat_id, digest)
             self._mark_last_alert(subscriber.id)
@@ -329,8 +357,20 @@ class TelegramBotService:
                 sub.username = username or sub.username
                 sub.is_active = active
             db.commit()
+            logger.info(
+                "telegram_subscription_updated",
+                extra={
+                    "component": "telegram",
+                    "chat_id": chat_id,
+                    "active": active,
+                },
+            )
         except Exception:
             db.rollback()
+            logger.exception(
+                "telegram_subscription_update_failed",
+                extra={"component": "telegram", "chat_id": chat_id},
+            )
         finally:
             db.close()
 
@@ -342,8 +382,16 @@ class TelegramBotService:
                 return
             sub.last_alert_at = datetime.now(timezone.utc)
             db.commit()
+            logger.debug(
+                "telegram_alert_timestamp_updated",
+                extra={"component": "telegram", "subscription_id": subscription_id},
+            )
         except Exception:
             db.rollback()
+            logger.exception(
+                "telegram_alert_timestamp_update_failed",
+                extra={"component": "telegram", "subscription_id": subscription_id},
+            )
         finally:
             db.close()
 
