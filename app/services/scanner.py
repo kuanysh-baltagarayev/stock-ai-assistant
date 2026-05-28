@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 from app.models import AnalysisSnapshot
 from app.schemas import AnalyzeResponse, ScanError, ScanResponse, ScanResult
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
+from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
+from app.config import get_settings
 from app.services.market_data import MarketDataError, extract_fundamentals, get_market_data
 from app.services.scoring import score_stock
 
@@ -136,6 +138,31 @@ def _save_snapshot(db: Session, response: AnalyzeResponse) -> None:
         logger.exception(
             "analysis_snapshot_persist_failed",
             extra={"component": "persistence", "ticker": response.ticker},
+        )
+        return
+
+    settings = get_settings()
+    try:
+        deleted_count = cleanup_old_snapshots(
+            db,
+            retention_count=settings.analysis_snapshot_retention_count,
+            retention_days=settings.analysis_snapshot_retention_days,
+        )
+    except Exception:
+        logger.exception(
+            "analysis_snapshot_retention_cleanup_failed",
+            extra={"component": "persistence", "ticker": response.ticker},
+        )
+        return
+
+    if deleted_count:
+        logger.info(
+            "analysis_snapshot_retention_cleanup",
+            extra={
+                "component": "persistence",
+                "ticker": response.ticker,
+                "retention_deleted_count": deleted_count,
+            },
         )
 
 

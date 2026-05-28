@@ -256,6 +256,21 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.playwright_page_budget, 7)
         self.assertEqual(settings.telegram_send_budget, 44)
 
+    def test_get_settings_parses_snapshot_retention_policy(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "ANALYSIS_SNAPSHOT_RETENTION_COUNT": "17",
+                "ANALYSIS_SNAPSHOT_RETENTION_DAYS": "90",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        self.assertEqual(settings.analysis_snapshot_retention_count, 17)
+        self.assertEqual(settings.analysis_snapshot_retention_days, 90)
+
     def test_startup_diagnostics_warn_on_remote_api_without_policy(self) -> None:
         with patch.dict(
             os.environ,

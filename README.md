@@ -109,6 +109,13 @@ PLAYWRIGHT_PAGE_BUDGET=20
 TELEGRAM_SEND_BUDGET=200
 ```
 
+Snapshot retention:
+
+```bash
+ANALYSIS_SNAPSHOT_RETENTION_COUNT=50
+ANALYSIS_SNAPSHOT_RETENTION_DAYS=365
+```
+
 Runtime logs are emitted as JSON lines to stderr from the API, CLI, persistence, and Telegram loops.
 
 Telegram bot settings:
@@ -132,6 +139,7 @@ The default SQLite database path is resolved relative to the project root, so th
 - Back up the database by copying that file while the app is stopped.
 - Restore by replacing the file and restarting the app.
 - Schema migrations run automatically at startup and are recorded in the `schema_migrations` table.
+- Analysis snapshots are cleaned up automatically to keep the latest per-ticker history within the configured retention policy.
 
 ## Security Checklist
 

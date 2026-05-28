@@ -21,6 +21,10 @@ def build_startup_diagnostics(settings: Settings) -> StartupDiagnostics:
         "openai_call_budget": str(settings.openai_call_budget),
         "playwright_page_budget": str(settings.playwright_page_budget),
         "telegram_send_budget": str(settings.telegram_send_budget),
+        "analysis_snapshot_retention_count": str(
+            settings.analysis_snapshot_retention_count
+        ),
+        "analysis_snapshot_retention_days": str(settings.analysis_snapshot_retention_days),
         "openai_enabled": str(bool(settings.openai_api_key)),
         "telegram_enabled": str(bool(settings.telegram_enabled and settings.telegram_bot_token)),
         "allow_remote_api": str(settings.allow_remote_api),

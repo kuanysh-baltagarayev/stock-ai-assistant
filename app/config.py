@@ -38,6 +38,8 @@ class Settings(BaseModel):
     telegram_digest_interval_minutes: int = Field(default=1440)
     telegram_poll_timeout_seconds: int = Field(default=30)
     telegram_enabled: bool = Field(default=False)
+    analysis_snapshot_retention_count: int = Field(default=50)
+    analysis_snapshot_retention_days: int = Field(default=365)
 
 
 def resolve_database_url(database_url: str) -> str:
@@ -202,5 +204,17 @@ def get_settings() -> Settings:
             os.getenv("TELEGRAM_ENABLED"),
             env_name="TELEGRAM_ENABLED",
             default=False,
+        ),
+        analysis_snapshot_retention_count=_parse_int(
+            os.getenv("ANALYSIS_SNAPSHOT_RETENTION_COUNT"),
+            env_name="ANALYSIS_SNAPSHOT_RETENTION_COUNT",
+            default=50,
+            minimum=1,
+        ),
+        analysis_snapshot_retention_days=_parse_int(
+            os.getenv("ANALYSIS_SNAPSHOT_RETENTION_DAYS"),
+            env_name="ANALYSIS_SNAPSHOT_RETENTION_DAYS",
+            default=365,
+            minimum=0,
         ),
     )
