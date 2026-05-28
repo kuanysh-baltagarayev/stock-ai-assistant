@@ -100,6 +100,10 @@ class AnalysisSnapshotRead(BaseModel):
     created_at: datetime
 
 
+class AnalysisSnapshotDetail(AnalysisSnapshotRead):
+    payload: dict[str, Any]
+
+
 class HealthResponse(BaseModel):
     status: str
     app: str

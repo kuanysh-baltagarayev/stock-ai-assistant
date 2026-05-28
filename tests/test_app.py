@@ -366,6 +366,49 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(body[0]["ticker"], "AAPL")
         self.assertEqual(body[0]["price"], 189.12)
 
+    def test_analysis_detail_endpoint_serializes_payload(self) -> None:
+        row = SimpleNamespace(
+            id=7,
+            ticker="AAPL",
+            company_name="Apple Inc.",
+            price=189.12,
+            final_score=77.7,
+            recommendation="NEUTRAL",
+            created_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            payload={
+                "ticker": "AAPL",
+                "generated_at": "2026-05-28T00:00:00+00:00",
+                "price": 189.12,
+                "currency": "USD",
+            },
+        )
+
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.get_snapshot_by_id", return_value=row),
+            TestClient(app) as client,
+        ):
+            response = client.get("/analyses/7")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["id"], 7)
+        self.assertEqual(body["ticker"], "AAPL")
+        self.assertEqual(body["payload"]["price"], 189.12)
+
+    def test_analysis_detail_endpoint_returns_404_for_missing_snapshot(self) -> None:
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            patch("app.api.routes.get_snapshot_by_id", return_value=None),
+            TestClient(app) as client,
+        ):
+            response = client.get("/analyses/999")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Analysis snapshot 999 not found")
+
     def test_ready_endpoint_reports_database_ok(self) -> None:
         with (
             patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),

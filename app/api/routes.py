@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.database import check_database, get_db
 from app.schemas import (
     AnalysisSnapshotRead,
+    AnalysisSnapshotDetail,
     AnalyzeResponse,
     HealthResponse,
     ReadinessResponse,
@@ -14,7 +15,7 @@ from app.schemas import (
     ScanRequest,
     ScanResponse,
 )
-from app.services.history import list_recent_snapshots
+from app.services.history import get_snapshot_by_id, list_recent_snapshots
 from app.services.market_data import MarketDataError
 from app.services.scanner import analyze_ticker, scan_tickers
 
@@ -29,7 +30,14 @@ def root() -> RootResponse:
         app=settings.app_name,
         status="ok",
         version="0.1.0",
-        endpoints=["/health", "/ready", "/analyze/{ticker}", "/scan", "/analyses/recent"],
+        endpoints=[
+            "/health",
+            "/ready",
+            "/analyze/{ticker}",
+            "/scan",
+            "/analyses/recent",
+            "/analyses/{analysis_id}",
+        ],
         docs_url="/docs",
         health_url="/health",
         analyze_url_template="/analyze/{ticker}",
@@ -105,3 +113,21 @@ def recent_analyses(
         )
         for item in snapshots
     ]
+
+
+@router.get("/analyses/{analysis_id}", response_model=AnalysisSnapshotDetail)
+def analysis_detail(analysis_id: int, db: Session = Depends(get_db)) -> AnalysisSnapshotDetail:
+    snapshot = get_snapshot_by_id(db, analysis_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail=f"Analysis snapshot {analysis_id} not found")
+
+    return AnalysisSnapshotDetail(
+        id=snapshot.id,
+        ticker=snapshot.ticker,
+        company_name=snapshot.company_name,
+        price=snapshot.price,
+        final_score=snapshot.final_score,
+        recommendation=snapshot.recommendation,
+        created_at=snapshot.created_at,
+        payload=snapshot.payload,
+    )

@@ -21,3 +21,7 @@ def list_recent_snapshots(
         .limit(limit)
         .all()
     )
+
+
+def get_snapshot_by_id(db: Session, snapshot_id: int) -> AnalysisSnapshot | None:
+    return db.query(AnalysisSnapshot).filter(AnalysisSnapshot.id == snapshot_id).one_or_none()

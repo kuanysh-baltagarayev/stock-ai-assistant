@@ -47,6 +47,7 @@ Implemented:
 - `ruff` and coverage configuration in `pyproject.toml`.
 - One-command local verification script at `scripts/check.sh`.
 - Local-only API runner at `scripts/run_api.py` with config validation and startup diagnostics.
+- Baseline SQLite migrations with a recorded `schema_migrations` table.
 
 ## Commit History Baseline Before This Split
 
@@ -60,6 +61,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-28: offline test suite passed with 46 tests after full analysis payload endpoint support was introduced.
+- 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after full analysis payload endpoint support was introduced.
+- 2026-05-28: `scripts/check.sh` passed after full analysis payload endpoint support was introduced, with `ruff`, 46 coverage-wrapped tests, coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 44 tests after baseline migrations were introduced.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after baseline migrations were introduced.
 - 2026-05-28: `scripts/check.sh` passed after baseline migrations were introduced, with `ruff`, 44 coverage-wrapped tests, coverage report, and compile check.
@@ -99,7 +103,8 @@ Implemented:
 - Real HTTP startup through `scripts/run_api.py` still needs a live socket-bound smoke check in an environment where socket binding is allowed.
 - Dependencies are pinned in `requirements.txt` and `requirements-dev.txt`, but there is still no separate lockfile or constraints file for transitive dependencies.
 - Supported Python version is documented in `README.md`.
-- SQLite schema creation uses `Base.metadata.create_all`; there are no migrations.
+- SQLite schema changes now run through the internal migration runner, but richer
+  schema/versioning tooling is still not in place.
 - Network-heavy operations still need bounded retry/backoff policy.
 - Secrets hygiene is implicit through `.gitignore`, but there is no explicit security checklist yet.
 - Local runtime notes for Telegram bot operation are not defined yet.
@@ -389,7 +394,7 @@ Status: in progress.
 ## Phase 3: Improve Data and Persistence
 
 1. Done: introduce migrations before the SQLite schema changes beyond the current tables.
-2. Add endpoints for full saved analysis payloads.
+2. Done: add endpoints for full saved analysis payloads.
 3. Add retention or cleanup rules for old snapshots.
 4. Improve reporting around partial scan failures.
 5. Add an instrument registry for symbol, exchange, MIC, country, timezone, currency, asset type, provider aliases, and stable identifiers.
