@@ -53,10 +53,14 @@ Implemented:
 
 - OpenAI and Telegram live checks are not fully automated yet.
 - The sandbox previously blocked binding `uvicorn` to `127.0.0.1:8000`; API behavior has been validated with `TestClient`.
+- Real HTTP startup through `uvicorn` still needs to be verified in an environment where socket binding is allowed.
 - Dependencies are broad ranges in `requirements.txt`; no lockfile or constraints file exists.
 - There is no CI workflow.
 - SQLite schema creation uses `Base.metadata.create_all`; there are no migrations.
 - Network-heavy operations still need bounded retry/backoff policy.
+- Config validation is partial; startup diagnostics should make invalid env settings obvious.
+- Secrets hygiene is implicit through `.gitignore`, but there is no explicit security checklist yet.
+- Packaging and deployment are not defined yet.
 - No user-facing UI exists yet; API, CLI, and Telegram flows are the current product surface.
 
 ## Phase 1: Finish MVP Hardening
@@ -67,7 +71,11 @@ Status: in progress.
 2. Done: add readiness behavior for database availability.
 3. Improve market-data error handling with timeouts, bounded retries, and clearer user-facing errors.
 4. Add basic structured logging setup for API, scanner, persistence, and Telegram background loops.
-5. Keep README, AGENTS, and this plan synchronized.
+5. Add OpenAI live smoke guarded by `OPENAI_API_KEY`, without making OpenAI required for normal operation.
+6. Add Telegram live check that verifies token/config safely without sending accidental spam.
+7. Verify real `uvicorn` HTTP startup in an environment where socket binding is allowed.
+8. Add config validation and startup diagnostics for env settings.
+9. Keep README, AGENTS, and this plan synchronized.
 
 ## Phase 2: Make Builds Reproducible
 
@@ -75,6 +83,8 @@ Status: in progress.
 2. Document the supported Python version.
 3. Add CI for tests and compile checks.
 4. Add a one-command local verification entrypoint, such as `make test` or `scripts/check.sh`.
+5. Add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
+6. Add packaging or deployment notes, including production run command and environment checklist.
 
 ## Phase 3: Improve Data and Persistence
 
@@ -88,7 +98,27 @@ Status: in progress.
 1. Add watchlist configuration.
 2. Add a richer CLI report mode for recent analyses.
 3. Improve Telegram commands for custom ticker scans and status visibility.
-4. Consider a minimal local UI only after API, CLI, and bot flows are stable.
+4. Add user-visible error summaries for failed market data, OpenAI, and Telegram operations.
+5. Consider a minimal local UI only after API, CLI, and bot flows are stable.
+
+## Final MVP Acceptance Checklist
+
+Before calling the MVP complete, verify all of the following:
+
+1. API starts with `uvicorn` and real HTTP checks pass for `/health`, `/ready`, `/docs`, `/analyze/{ticker}`, `/scan`, and `/analyses/recent`.
+2. CLI scanner works with default tickers, custom tickers, and `--json`.
+3. Live `yfinance` smoke passes.
+4. App still works without `OPENAI_API_KEY`.
+5. OpenAI live smoke passes when `OPENAI_API_KEY` is configured.
+6. Telegram token/config live check passes when Telegram settings are configured.
+7. SQLite persists analyses and recent-analysis reads work after process restart.
+8. Partial scan failures are visible without failing the entire scan.
+9. Tests and compile checks pass.
+10. Dependencies are pinned or constrained enough for repeatable setup.
+11. Secrets are not committed and are not printed in logs.
+12. README, AGENTS, and PLAN match the actual commands and behavior.
+13. Deployment or production-run notes exist.
+14. Final git status is clean after the completion commit.
 
 ## Definition of Done
 
