@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import unittest
 
 import scripts.run_telegram_bot as run_telegram_bot
+import scripts.openai_smoke as openai_smoke
 import scripts.live_smoke as live_smoke
 import scripts.scan_market as scan_market
 
@@ -57,6 +58,47 @@ class RunTelegramBotScriptTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertIn("missing token", stderr.getvalue())
+
+
+class OpenAISmokeScriptTests(unittest.TestCase):
+    def test_main_requires_openai_key(self) -> None:
+        stderr = io.StringIO()
+
+        with (
+            patch.object(openai_smoke, "parse_args", return_value=Namespace(ticker="aapl")),
+            patch.object(openai_smoke, "get_settings", return_value=SimpleNamespace(openai_api_key=None, openai_model="gpt-4.1-mini")),
+            redirect_stderr(stderr),
+        ):
+            exit_code = openai_smoke.main()
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("requires OPENAI_API_KEY", stderr.getvalue())
+
+    def test_main_runs_openai_explanation_path(self) -> None:
+        fake_db = SimpleNamespace(close=MagicMock())
+        fake_analysis = SimpleNamespace(
+            ticker="AAPL",
+            price=189.12,
+            scores=SimpleNamespace(final_score=77.7),
+            recommendation="HOLD",
+            explanation="LLM explanation",
+        )
+
+        with (
+            patch.object(openai_smoke, "parse_args", return_value=Namespace(ticker="aapl")),
+            patch.object(openai_smoke, "get_settings", return_value=SimpleNamespace(openai_api_key="sk-test", openai_model="gpt-4.1-mini")),
+            patch.object(openai_smoke, "init_db"),
+            patch.object(openai_smoke, "SessionLocal", return_value=fake_db),
+            patch.object(openai_smoke, "analyze_ticker", return_value=fake_analysis) as analyze_mock,
+            patch("builtins.print") as print_mock,
+        ):
+            exit_code = openai_smoke.main()
+
+        self.assertEqual(exit_code, 0)
+        analyze_mock.assert_called_once_with("AAPL", db=fake_db, use_ai_explanation=True)
+        self.assertTrue(fake_db.close.called)
+        payload = json.loads(print_mock.call_args.args[0])
+        self.assertEqual(payload["analysis"]["explanation"], "LLM explanation")
 
 
 class LiveSmokeScriptTests(unittest.TestCase):

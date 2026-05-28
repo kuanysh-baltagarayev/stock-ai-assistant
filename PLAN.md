@@ -71,7 +71,7 @@ Status: in progress.
 2. Done: add readiness behavior for database availability.
 3. Done: improve market-data error handling with timeouts, bounded retries, and clearer user-facing errors.
 4. Done: add basic structured logging setup for API, scanner, persistence, and Telegram background loops.
-5. Add OpenAI live smoke guarded by `OPENAI_API_KEY`, without making OpenAI required for normal operation.
+5. Done: add OpenAI live smoke guarded by `OPENAI_API_KEY`, without making OpenAI required for normal operation.
 6. Add Telegram live check that verifies token/config safely without sending accidental spam.
 7. Verify real `uvicorn` HTTP startup in an environment where socket binding is allowed.
 8. Add config validation and startup diagnostics for env settings.

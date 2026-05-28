@@ -215,6 +215,15 @@ python scripts/live_smoke.py
 python scripts/live_smoke.py --ticker AAPL --scan AAPL MSFT NVDA
 ```
 
+OpenAI explanation smoke:
+
+```bash
+python scripts/openai_smoke.py
+python scripts/openai_smoke.py --ticker AAPL
+```
+
+This command requires `OPENAI_API_KEY`.
+
 ## Run Telegram Bot
 
 ```bash
