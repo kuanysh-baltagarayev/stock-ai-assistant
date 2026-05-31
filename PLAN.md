@@ -45,6 +45,7 @@ Implemented:
 - live smoke script for real market data checks without OpenAI or Telegram.
 - Per-chat Telegram watchlists with `/watchlist`, `/add`, `/remove`, and `/scan mine`.
 - Telegram access control via `TELEGRAM_ALLOWED_CHAT_IDS` allowlist.
+- Response-level operation notes for OpenAI fallback, data-quality warnings, partial scan failures, and Telegram budget status.
 - readiness endpoint with a database probe.
 - Smoke tests for API routes, persistence, scanner behavior, and CLI scripts.
 - SQLite path resolution relative to the project root.
@@ -75,6 +76,11 @@ Implemented:
 - 2026-05-31: `scripts/check.sh` passed after Telegram access control was
   introduced, with `ruff`, 68 coverage-wrapped tests, coverage report, and
   compile check.
+- 2026-05-31: `scripts/test_fast.sh` passed after user-visible operation
+  summaries were introduced, with `ruff` and 51 focused tests.
+- 2026-05-31: `scripts/check.sh` passed after user-visible operation summaries
+  were introduced, with `ruff`, 70 coverage-wrapped tests, coverage report,
+  and compile check.
 - 2026-05-31: `scripts/test_fast.sh` passed after per-chat Telegram watchlist
   support was introduced, with `ruff` and 44 focused tests.
 - 2026-05-31: `scripts/check.sh` passed after per-chat Telegram watchlist
@@ -362,13 +368,11 @@ Suggested order for low-waste progress:
 
 1. Per-chat Telegram watchlists: add persistence, `/watchlist`, `/add`,
    `/remove`, and `/scan mine`, with Telegram unit tests and README updates.
-2. User-visible operation summaries: make market-data, OpenAI fallback, and
-   Telegram-send budget failures visible in API/CLI/Telegram responses.
-3. Source provider abstraction: introduce normalized collector contracts and
+2. Source provider abstraction: introduce normalized collector contracts and
    offline fixtures before adding SEC, macro, or news sources.
-4. Session/freshness foundation: add market session states and stale-data
+3. Session/freshness foundation: add market session states and stale-data
    thresholds for U.S. equities before richer digests or alerts.
-5. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
+4. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
    and market-hours-only mode.
 
 ## Operations, Budgets, And Runtime Boundaries

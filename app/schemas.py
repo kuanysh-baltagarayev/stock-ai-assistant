@@ -51,6 +51,7 @@ class AnalyzeResponse(BaseModel):
     source_provenance: "SourceProvenance | None" = None
     data_quality: "DataQualityFlags" = Field(default_factory=lambda: DataQualityFlags())
     fx: "FXNormalization | None" = None
+    operation_notes: list[str] = Field(default_factory=list)
 
 
 class ScanRequest(BaseModel):
@@ -96,6 +97,7 @@ class ScanSummary(BaseModel):
     partial_failure: bool
     message: str
     failed_tickers: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class ScanResponse(BaseModel):

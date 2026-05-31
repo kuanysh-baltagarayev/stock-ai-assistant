@@ -83,3 +83,31 @@ class TelegramDisclaimerTests(unittest.TestCase):
 
         self.assertIn("Telegram send budget exhausted", str(exc.exception))
         request_mock.assert_not_called()
+
+    def test_status_text_includes_telegram_send_budget(self) -> None:
+        service = TelegramBotService(
+            settings=SimpleNamespace(
+                telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyzABCDEF",
+                telegram_poll_timeout_seconds=1,
+                telegram_send_budget=3,
+                telegram_digest_interval_minutes=1440,
+                telegram_allowed_chat_ids=[],
+            )
+        )
+
+        fake_session = SimpleNamespace(
+            query=lambda *args, **kwargs: SimpleNamespace(
+                filter=lambda *a, **k: SimpleNamespace(one_or_none=lambda: SimpleNamespace(
+                    is_active=True,
+                    last_alert_at=None,
+                    watchlist_symbols=["AAPL"],
+                ))
+            ),
+            close=lambda: None,
+        )
+
+        with patch("app.services.telegram_bot.SessionLocal", return_value=fake_session):
+            text = service._status_text(123)
+
+        self.assertIn("Telegram send budget", text)
+        self.assertIn("3/3 осталось", text)

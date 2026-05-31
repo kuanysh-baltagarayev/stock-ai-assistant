@@ -38,6 +38,7 @@ class ScanMarketScriptTests(unittest.TestCase):
                 partial_failure=False,
                 message="Scan completed successfully for 1 tickers.",
                 failed_tickers=[],
+                notes=["Example note."],
             ),
         )
 
@@ -56,6 +57,7 @@ class ScanMarketScriptTests(unittest.TestCase):
         payload = json.loads(print_mock.call_args.args[0])
         self.assertEqual(payload["results"][0]["ticker"], "AAPL")
         self.assertEqual(payload["summary"]["success_count"], 1)
+        self.assertEqual(payload["summary"]["notes"], ["Example note."])
 
 
 class RunApiScriptTests(unittest.TestCase):

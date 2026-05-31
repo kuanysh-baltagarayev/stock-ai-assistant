@@ -159,7 +159,7 @@ The default SQLite database path is resolved relative to the project root, so th
 - Analysis snapshots are cleaned up automatically to keep the latest per-ticker history within the configured retention policy.
 - Raw provider snapshots are stored separately from normalized analyses with source URLs, timestamps, parser version, confidence, and content hashes.
 - Provider health is stored in `provider_registry` and updated when market data requests succeed or fail.
-- Analysis responses include explicit data-quality flags and FX assumption metadata. Non-USD FX conversion is not applied yet, so values remain in the reported trading currency.
+- Analysis responses include explicit data-quality flags, operation notes, and FX assumption metadata. Non-USD FX conversion is not applied yet, so values remain in the reported trading currency.
 - If `TELEGRAM_ALLOWED_CHAT_IDS` is set, only those chats can use the bot and receive digests.
 
 ## Security Checklist

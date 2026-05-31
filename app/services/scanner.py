@@ -45,6 +45,7 @@ def analyze_ticker(
     scoring = score_stock(market["price"], technicals, fundamentals)
     if db is not None:
         _save_instrument(db, market["ticker"], market["info"], market["currency"])
+    settings = get_settings()
 
     payload = {
         "ticker": market["ticker"],
@@ -67,7 +68,16 @@ def analyze_ticker(
     else:
         explanation = rule_based_explanation(_json_ready(payload), scoring.reasons)
 
-    response = AnalyzeResponse(**payload, explanation=explanation)
+    response = AnalyzeResponse(
+        **payload,
+        explanation=explanation,
+        operation_notes=_build_operation_notes(
+            market=market,
+            explanation=explanation,
+            settings=settings,
+            used_ai_explanation=use_ai_explanation,
+        ),
+    )
     if db is not None:
         _save_snapshot(db, response)
     logger.debug(
@@ -312,6 +322,11 @@ def _build_scan_summary(
         message = f"Scan completed with {success_count} successful tickers and {error_count} failures."
     else:
         message = f"Scan completed successfully for {success_count} tickers."
+    notes = []
+    if partial_failure:
+        notes.append(
+            "Partial failure: review the per-ticker error lines for market-data issues or ticker-specific problems."
+        )
 
     return ScanSummary(
         requested_count=len(tickers),
@@ -320,4 +335,29 @@ def _build_scan_summary(
         partial_failure=partial_failure,
         message=message,
         failed_tickers=failed_tickers,
+        notes=notes,
     )
+
+
+def _build_operation_notes(
+    *,
+    market: dict,
+    explanation: str,
+    settings,
+    used_ai_explanation: bool,
+) -> list[str]:
+    notes: list[str] = []
+    data_quality = market.get("data_quality") or {}
+    quality_summary = data_quality.get("summary")
+    if quality_summary and quality_summary != "ok":
+        notes.append(f"Data quality: {quality_summary}.")
+
+    if used_ai_explanation:
+        if not getattr(settings, "openai_api_key", None):
+            notes.append("OpenAI explanation is disabled, so a rule-based explanation was used.")
+        elif "Лимит OpenAI-вызовов исчерпан" in explanation:
+            notes.append("OpenAI call budget was exhausted, so a rule-based explanation was used.")
+        elif "Объяснение от LLM недоступно" in explanation:
+            notes.append("OpenAI response was unavailable, so a rule-based explanation was used.")
+
+    return notes

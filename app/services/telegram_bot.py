@@ -13,7 +13,11 @@ from app.database import SessionLocal, init_db
 from app.models import TelegramSubscription
 from app.services.market_data import InvalidTickerError, normalize_ticker
 from app.services.research_labels import research_label_to_russian
-from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_budget
+from app.services.runtime_budget import (
+    RuntimeBudgetExceeded,
+    consume_runtime_budget,
+    runtime_budget_snapshot,
+)
 from app.services.scanner import analyze_ticker, scan_tickers
 
 
@@ -315,7 +319,11 @@ class TelegramBotService:
                 response = await asyncio.to_thread(scan_tickers, watchlist, None)
                 await self._send_message(
                     int(chat_id),
-                    self._scan_text(response.results, response.errors),
+                    self._scan_text(
+                        response.results,
+                        response.errors,
+                        summary_notes=getattr(response.summary, "notes", None),
+                    ),
                     reply_markup=self._main_keyboard(),
                 )
             except Exception as exc:
@@ -377,7 +385,11 @@ class TelegramBotService:
                 response = await asyncio.to_thread(scan_tickers, tickers, None)
                 await self._send_message(
                     int(chat_id),
-                    self._scan_text(response.results, response.errors),
+                    self._scan_text(
+                        response.results,
+                        response.errors,
+                        summary_notes=getattr(response.summary, "notes", None),
+                    ),
                     reply_markup=self._main_keyboard(),
                 )
             except Exception as exc:
@@ -420,7 +432,11 @@ class TelegramBotService:
                 continue
 
             response = await asyncio.to_thread(scan_tickers, tickers, None)
-            digest = self._digest_text(response.results, response.errors)
+            digest = self._digest_text(
+                response.results,
+                response.errors,
+                summary_notes=getattr(response.summary, "notes", None),
+            )
             logger.info(
                 "telegram_digest_ready",
                 extra={
@@ -553,10 +569,19 @@ class TelegramBotService:
             last_alert = sub.last_alert_at.isoformat() if sub.last_alert_at else "ещё не отправлял"
             watchlist = self._watchlist_tickers_for_subscription(sub)
             watchlist_text = ", ".join(watchlist) if watchlist else "пусто"
+            send_budget = runtime_budget_snapshot(
+                "telegram_sends",
+                getattr(self.settings, "telegram_send_budget", None),
+            )
+            if send_budget.limit is None:
+                budget_text = "не ограничен"
+            else:
+                budget_text = f"{send_budget.remaining}/{send_budget.limit} осталось"
             return (
                 f"Подписка активна: {'да' if sub.is_active else 'нет'}\n"
                 f"Последняя рассылка: {last_alert}\n"
                 f"Частота рассылки: {self.settings.telegram_digest_interval_minutes} мин.\n"
+                f"Telegram send budget: {budget_text}\n"
                 f"Твой список: {watchlist_text}"
             )
         finally:
@@ -678,12 +703,22 @@ class TelegramBotService:
             f"Кратко: {self._translate_text(analysis.short_reason)}",
             f"Комментарий: {self._translate_text(analysis.explanation)}",
         ]
+        operation_notes = getattr(analysis, "operation_notes", None) or []
+        if operation_notes:
+            lines.extend(["", "Операционные заметки:"])
+            lines.extend(f"- {self._translate_text(note)}" for note in operation_notes)
         disclaimer = self._analysis_disclaimer(analysis)
         if disclaimer:
             lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
 
-    def _scan_text(self, results: list[Any], errors: list[Any]) -> str:
+    def _scan_text(
+        self,
+        results: list[Any],
+        errors: list[Any],
+        *,
+        summary_notes: list[str] | None = None,
+    ) -> str:
         if not results and not errors:
             return "Ничего не найдено."
 
@@ -698,12 +733,21 @@ class TelegramBotService:
             lines.append("Ошибки:")
             for item in errors[:5]:
                 lines.append(f"- {item.ticker}: {item.error}")
+        if summary_notes:
+            lines.extend(["", "Операционные заметки:"])
+            lines.extend(f"- {self._translate_text(note)}" for note in summary_notes)
         disclaimer = self._scan_disclaimer(results)
         if disclaimer:
             lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
 
-    def _digest_text(self, results: list[Any], errors: list[Any]) -> str:
+    def _digest_text(
+        self,
+        results: list[Any],
+        errors: list[Any],
+        *,
+        summary_notes: list[str] | None = None,
+    ) -> str:
         top = results[:3]
         if not top and not errors:
             return "Дайджест пуст: данных для отчёта нет."
@@ -718,6 +762,9 @@ class TelegramBotService:
             lines.append("Ошибки скана:")
             for item in errors[:3]:
                 lines.append(f"- {item.ticker}: {item.error}")
+        if summary_notes:
+            lines.extend(["", "Операционные заметки:"])
+            lines.extend(f"- {self._translate_text(note)}" for note in summary_notes)
         disclaimer = self._scan_disclaimer(top)
         if disclaimer:
             lines.extend(["", disclaimer])
@@ -830,6 +877,11 @@ class TelegramBotService:
             "LLM explanation is unavailable, so rule-based explanation was used.": "Объяснение от LLM недоступно, поэтому использован rule-based вариант.",
             "LLM explanation is unavailable": "Объяснение от LLM недоступно",
             "rule-based explanation": "объяснение по правилам",
+            "OpenAI explanation is disabled, so a rule-based explanation was used.": "Объяснение OpenAI отключено, поэтому использован rule-based вариант.",
+            "OpenAI call budget was exhausted, so a rule-based explanation was used.": "Лимит вызовов OpenAI исчерпан, поэтому использован rule-based вариант.",
+            "OpenAI response was unavailable, so a rule-based explanation was used.": "Ответ OpenAI недоступен, поэтому использован rule-based вариант.",
+            "Data quality:": "Качество данных:",
+            "Partial failure: review the per-ticker error lines for market-data issues or ticker-specific problems.": "Частичный сбой: проверь строки ошибок по тикерам для проблем с market-data или конкретным тикером.",
             "momentum": "импульс",
             "valuation": "оценка стоимости",
             "risk": "риск",

@@ -302,6 +302,41 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(response.explanation, "Mock explanation")
         self.assertIsNotNone(response.generated_at.tzinfo)
 
+    def test_analyze_ticker_adds_operation_notes_for_openai_fallback(self) -> None:
+        market = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "info": {},
+            "data_quality": {"summary": "ok"},
+        }
+        fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
+        technicals = TechnicalIndicators(change_1d_pct=1.0)
+        scoring = SimpleNamespace(
+            scores=Scores(
+                momentum_score=60.0,
+                valuation_score=55.0,
+                risk_score=35.0,
+                final_score=62.5,
+            ),
+            recommendation="NEUTRAL",
+            short_reason="Neutral: sample reason.",
+            reasons=["price is above MA50"],
+        )
+
+        with (
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_market_data", return_value=market),
+            patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
+            patch("app.services.scanner.calculate_indicators", return_value=technicals),
+            patch("app.services.scanner.score_stock", return_value=scoring),
+            patch("app.services.scanner.explain_analysis", return_value="Mock explanation"),
+        ):
+            response = analyze_ticker("aapl", db=None, use_ai_explanation=True)
+
+        self.assertIn("OpenAI explanation is disabled", response.operation_notes[0])
+
     def test_analyze_ticker_persists_snapshot(self) -> None:
         market = {
             "ticker": "AAPL",
@@ -411,6 +446,8 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(response.summary.error_count, 1)
         self.assertEqual(response.summary.failed_tickers, ["NVDA"])
         self.assertIn("failures", response.summary.message)
+        self.assertTrue(response.summary.notes)
+        self.assertIn("Partial failure", response.summary.notes[0])
 
     def test_openai_budget_exhaustion_uses_rule_based_explanation(self) -> None:
         payload = {

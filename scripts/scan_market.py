@@ -63,6 +63,10 @@ def main() -> int:
             f"\nSummary: {response.summary.message} "
             f"(success={response.summary.success_count}, errors={response.summary.error_count})"
         )
+        if getattr(response.summary, "notes", None):
+            print("\nNotes:")
+            for note in response.summary.notes:
+                print(f"- {note}")
         if response.errors:
             print("\nErrors:")
             for item in response.errors:
