@@ -530,10 +530,16 @@ class TelegramBotService:
         result = response.get("result", [])
         return result if isinstance(result, list) else []
 
-    async def _send_digest_to_active_subscribers(self) -> None:
+    async def _send_digest_to_active_subscribers(
+        self,
+        digest_mode: str | None = None,
+        reference_time: datetime | None = None,
+    ) -> None:
         subscribers = self._active_subscribers()
         if not subscribers:
             return
+
+        mode = digest_mode or self._scheduled_digest_mode(reference_time)
 
         for subscriber in subscribers:
             skip_reason = self._digest_skip_reason(subscriber)
@@ -558,6 +564,7 @@ class TelegramBotService:
                 response.results,
                 response.errors,
                 summary_notes=getattr(response.summary, "notes", None),
+                digest_mode=mode,
             )
             logger.info(
                 "telegram_digest_ready",
@@ -1416,12 +1423,17 @@ class TelegramBotService:
         errors: list[Any],
         *,
         summary_notes: list[str] | None = None,
+        digest_mode: str = "market_open",
     ) -> str:
-        top = results[:3]
+        limit = 5 if digest_mode == "weekly_review" else 3
+        top = results[:limit]
         if not top and not errors:
             return "Дайджест пуст: данных для отчёта нет."
 
-        lines = ["Телеграм-дайджест рынка:"]
+        lines = [self._digest_heading(digest_mode)]
+        digest_note = self._digest_mode_note(digest_mode)
+        if digest_note:
+            lines.extend(["", digest_note])
         for item in top:
             recommendation = self._translate_recommendation(item.recommendation)
             lines.append(
@@ -1438,6 +1450,48 @@ class TelegramBotService:
         if disclaimer:
             lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
+
+    def _digest_heading(self, digest_mode: str) -> str:
+        headings = {
+            "pre_market": "Утренний pre-market дайджест:",
+            "market_open": "Market-open дайджест:",
+            "midday": "Midday check дайджест:",
+            "close": "Close summary дайджест:",
+            "after_hours": "After-hours news дайджест:",
+            "weekly_review": "Weekly watchlist review:",
+        }
+        return headings.get(digest_mode, "Телеграм-дайджест рынка:")
+
+    def _digest_mode_note(self, digest_mode: str) -> str | None:
+        notes = {
+            "pre_market": "До открытия рынка показываю свежий pre-market контекст и то, что может измениться к open.",
+            "market_open": "На открытии фокус на первых реакциях и gap risk.",
+            "midday": "Полуденный check помогает увидеть, что поменялось после открытия.",
+            "close": "Close summary подводит итог регулярной сессии.",
+            "after_hours": "After-hours дайджест выделяет то, что появилось после закрытия и может повлиять на завтрашний open.",
+            "weekly_review": "Weekly review собирает контекст по сохранённым watchlist-тикерам и недельной динамике.",
+        }
+        return notes.get(digest_mode)
+
+    def _scheduled_digest_mode(self, reference_time: datetime | None = None) -> str:
+        reference = reference_time or datetime.now(timezone.utc)
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=timezone.utc)
+        local_reference = reference.astimezone(ZoneInfo("America/New_York"))
+
+        if local_reference.weekday() >= 5:
+            return "weekly_review"
+
+        current_minutes = local_reference.hour * 60 + local_reference.minute
+        if current_minutes < 9 * 60 + 30:
+            return "pre_market"
+        if current_minutes < 10 * 60 + 30:
+            return "market_open"
+        if current_minutes < 15 * 60 + 30:
+            return "midday"
+        if current_minutes < 17 * 60:
+            return "close"
+        return "after_hours"
 
     def _first_use_disclaimer(self) -> str:
         return (

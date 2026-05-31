@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.logging_config import configure_logging  # noqa: E402
 from app.database import SessionLocal, init_db  # noqa: E402
+from app.services.history import list_recent_snapshots  # noqa: E402
 from app.services.scanner import scan_tickers  # noqa: E402
 
 
@@ -26,6 +27,17 @@ def parse_args() -> Namespace:
         help="Optional list of tickers to scan. Defaults to the built-in watchlist.",
     )
     parser.add_argument(
+        "--recent",
+        action="store_true",
+        help="Print recent saved analyses from SQLite instead of running a fresh scan.",
+    )
+    parser.add_argument(
+        "--recent-limit",
+        type=int,
+        default=10,
+        help="Maximum number of saved analyses to show in recent mode.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print the scan response as JSON instead of a table.",
@@ -36,51 +48,76 @@ def parse_args() -> Namespace:
 def main() -> int:
     configure_logging(force=True)
     args = parse_args()
-    tickers = [ticker.strip().upper() for ticker in args.tickers if ticker.strip()] or DEFAULT_TICKERS
-    logger.info("scan_script_started", extra={"component": "cli", "ticker_count": len(tickers)})
+    requested_tickers = [ticker.strip().upper() for ticker in args.tickers if ticker.strip()]
+    tickers = requested_tickers or DEFAULT_TICKERS
+    ticker_count = len(requested_tickers) if args.recent else len(tickers)
+    logger.info("scan_script_started", extra={"component": "cli", "ticker_count": ticker_count})
     init_db()
     db = SessionLocal()
+    response = None
+    recent_snapshots = None
     try:
-        response = scan_tickers(tickers, db=db)
+        if args.recent:
+            recent_snapshots = _load_recent_snapshots(db, requested_tickers, args.recent_limit)
+        else:
+            response = scan_tickers(tickers, db=db)
     finally:
         db.close()
 
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "results": [_serialize(row) for row in response.results],
-                    "errors": [_serialize(row) for row in response.errors],
-                    "summary": _serialize(response.summary),
-                },
-                ensure_ascii=False,
-                indent=2,
+    if args.recent:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "mode": "recent",
+                        "snapshots": [_serialize_recent_snapshot(row) for row in recent_snapshots or []],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
             )
-        )
+        else:
+            print_recent_report(recent_snapshots or [])
     else:
-        print_table(response.results)
-        print(
-            f"\nSummary: {response.summary.message} "
-            f"(success={response.summary.success_count}, errors={response.summary.error_count})"
-        )
-        if getattr(response.summary, "notes", None):
-            print("\nNotes:")
-            for note in response.summary.notes:
-                print(f"- {note}")
-        if response.errors:
-            print("\nErrors:")
-            for item in response.errors:
-                print(f"- {item.ticker}: {item.error}")
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "results": [_serialize(row) for row in response.results],
+                        "errors": [_serialize(row) for row in response.errors],
+                        "summary": _serialize(response.summary),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print_table(response.results)
+            print(
+                f"\nSummary: {response.summary.message} "
+                f"(success={response.summary.success_count}, errors={response.summary.error_count})"
+            )
+            if getattr(response.summary, "notes", None):
+                print("\nNotes:")
+                for note in response.summary.notes:
+                    print(f"- {note}")
+            if response.errors:
+                print("\nErrors:")
+                for item in response.errors:
+                    print(f"- {item.ticker}: {item.error}")
     logger.info(
         "scan_script_finished",
         extra={
             "component": "cli",
-            "ticker_count": len(tickers),
-            "result_count": len(response.results),
-            "error_count": len(response.errors),
-            "partial_failure": response.summary.partial_failure,
+            "ticker_count": ticker_count,
+            "mode": "recent" if args.recent else "scan",
+            "result_count": len(recent_snapshots or []) if args.recent else len(response.results),
+            "error_count": 0 if args.recent else len(response.errors),
+            "partial_failure": False if args.recent else response.summary.partial_failure,
         },
     )
+    if args.recent:
+        return 0 if recent_snapshots else 1
     return 0 if response.results else 1
 
 
@@ -104,8 +141,76 @@ def print_table(rows) -> None:
         )
 
 
+def print_recent_report(rows) -> None:
+    print(f"Recent analyses ({len(rows)}):")
+    if not rows:
+        print("No saved analyses found.")
+        return
+
+    for row in rows:
+        report = _recent_snapshot_report(row)
+        print(f"- #{report['id']} {report['ticker']} {report['created_at']}")
+        print(
+            "  "
+            f"price={report['price']} "
+            f"score={report['final_score']} "
+            f"recommendation={report['recommendation']}"
+        )
+        print(
+            "  "
+            f"session={report['session_status']} "
+            f"freshness={report['freshness_state']} "
+            f"quality={report['data_quality_summary']}"
+        )
+        print(f"  source={report['source_provider']} confidence={report['confidence']}")
+        print(f"  reason={report['short_reason']}")
+        if report["operation_notes"]:
+            print(f"  notes={' | '.join(report['operation_notes'])}")
+
+
 def _format_row(values: list[str], widths: list[int]) -> str:
     return " ".join(str(value).ljust(width) for value, width in zip(values, widths))
+
+
+def _load_recent_snapshots(db, tickers: list[str], limit: int) -> list:
+    limit = max(1, min(limit, 100))
+    filters = [ticker for ticker in tickers if ticker]
+    if len(filters) == 1:
+        return list_recent_snapshots(db, limit=limit, ticker=filters[0])
+    if not filters:
+        return list_recent_snapshots(db, limit=limit, ticker=None)
+
+    snapshots = list_recent_snapshots(db, limit=100, ticker=None)
+    if filters:
+        allowed = set(filters)
+        snapshots = [snapshot for snapshot in snapshots if snapshot.ticker in allowed]
+    return snapshots[:limit]
+
+
+def _recent_snapshot_report(snapshot) -> dict[str, str | list[str] | float | int | None]:
+    payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+    provenance = payload.get("source_provenance") if isinstance(payload.get("source_provenance"), dict) else {}
+    data_quality = payload.get("data_quality") if isinstance(payload.get("data_quality"), dict) else {}
+    market_session = payload.get("market_session") if isinstance(payload.get("market_session"), dict) else {}
+    operation_notes = payload.get("operation_notes")
+    if not isinstance(operation_notes, list):
+        operation_notes = []
+
+    return {
+        "id": snapshot.id,
+        "ticker": snapshot.ticker,
+        "created_at": snapshot.created_at.isoformat(),
+        "price": f"{snapshot.price:.2f}" if snapshot.price is not None else "n/a",
+        "final_score": f"{snapshot.final_score:.2f}",
+        "recommendation": snapshot.recommendation,
+        "session_status": _first_present(market_session.get("status"), "n/a"),
+        "freshness_state": _first_present(market_session.get("freshness_state"), "n/a"),
+        "data_quality_summary": _first_present(data_quality.get("summary"), "n/a"),
+        "source_provider": _first_present(provenance.get("provider_name"), "n/a"),
+        "confidence": _first_present(data_quality.get("confidence"), provenance.get("confidence"), "n/a"),
+        "short_reason": _first_present(payload.get("short_reason"), "n/a"),
+        "operation_notes": operation_notes,
+    }
 
 
 def _serialize(item) -> dict:
@@ -114,6 +219,22 @@ def _serialize(item) -> dict:
     if hasattr(item, "__dict__"):
         return {key: value for key, value in vars(item).items() if not key.startswith("_")}
     return {"value": str(item)}
+
+
+def _serialize_recent_snapshot(snapshot) -> dict:
+    report = _recent_snapshot_report(snapshot)
+    payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+    return {
+        **report,
+        "payload": payload,
+    }
+
+
+def _first_present(*values):
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return "n/a"
 
 
 if __name__ == "__main__":

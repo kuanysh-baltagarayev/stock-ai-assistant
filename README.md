@@ -15,8 +15,8 @@ This is an MVP for private research. It is not a public investment advisory serv
 - `GET /analyses/{analysis_id}` returns a saved analysis with its full payload.
 - `GET /instruments/{symbol}` returns the saved instrument registry entry for a symbol.
 - `GET /providers` and `GET /providers/{name}` expose provider registry entries and health.
-- CLI scanner for a default watchlist.
-- Telegram bot with `/analyze`, `/scan`, watchlists, preferences, source-backed detail commands, and scheduled digests.
+- CLI scanner for a default watchlist, custom tickers, JSON output, and recent-analysis reports.
+- Telegram bot with `/analyze`, `/scan`, watchlists, preferences, source-backed detail commands, and session-aware scheduled digests.
 - SQLite snapshot storage for completed analyses.
 - SQLite raw source snapshot storage with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
@@ -195,6 +195,17 @@ Quick app index:
 http://127.0.0.1:8000/
 ```
 
+CLI examples:
+
+```bash
+python scripts/scan_market.py
+python scripts/scan_market.py AAPL MSFT --json
+python scripts/scan_market.py --recent
+python scripts/scan_market.py --recent AAPL
+```
+
+`--recent` prints saved analyses from SQLite with score, recommendation, market session, data-quality, source, and note context.
+
 ## Run Tests
 
 ```bash
@@ -370,6 +381,7 @@ Scheduled digests use the personal watchlist when it exists and fall back to `TE
 On first use, and for major or high-risk alerts, Telegram includes a short contextual disclaimer instead of repeating the same warning on every line.
 Per-chat alert preferences are stored in SQLite and currently cover quiet hours, daily caps, and market-hours-only digests.
 Scheduled digests respect those preferences before sending anything.
+The digest loop selects a session-aware mode automatically: pre-market, market-open, midday, close, after-hours, or weekly review on weekends.
 The detail commands read from saved analysis and source snapshots, so they reflect the latest stored provenance and freshness context even when a live event calendar feed is not available yet.
 
 ## Scoring Model
