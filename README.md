@@ -17,6 +17,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - `GET /providers` and `GET /providers/{name}` expose provider registry entries and health.
 - CLI scanner for a default watchlist, custom tickers, JSON output, and recent-analysis reports.
 - Telegram bot with `/analyze`, `/scan`, watchlists, preferences, source-backed detail commands, and session-aware scheduled digests.
+- Telegram analysis responses include inline follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
 - SQLite snapshot storage for completed analyses.
 - SQLite raw source snapshot storage with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
@@ -205,6 +206,8 @@ python scripts/scan_market.py --recent AAPL
 ```
 
 `--recent` prints saved analyses from SQLite with score, recommendation, market session, data-quality, source, and note context.
+
+Telegram `/analyze` responses also attach inline follow-up buttons so you can jump straight to sources, freshness, risk, rescan, and watchlist actions without retyping commands.
 
 ## Run Tests
 

@@ -115,6 +115,36 @@ class TelegramBotService:
             "is_persistent": True,
         }
 
+    def _analysis_followup_keyboard(self, ticker: str) -> dict[str, Any]:
+        ticker = ticker.upper()
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "Почему", "callback_data": self._callback_data("why", ticker)},
+                    {"text": "Источники", "callback_data": self._callback_data("sources", ticker)},
+                ],
+                [
+                    {"text": "События", "callback_data": self._callback_data("events", ticker)},
+                    {"text": "Свежесть", "callback_data": self._callback_data("freshness", ticker)},
+                ],
+                [
+                    {"text": "Риск", "callback_data": self._callback_data("risk", ticker)},
+                    {"text": "Аудит", "callback_data": self._callback_data("audit", ticker)},
+                ],
+                [
+                    {"text": "Пересканировать", "callback_data": self._callback_data("rescan", ticker)},
+                    {"text": "Добавить в список", "callback_data": self._callback_data("watchlist_add", ticker)},
+                ],
+                [
+                    {"text": "Убрать из списка", "callback_data": self._callback_data("watchlist_remove", ticker)},
+                    {"text": "Заглушить", "callback_data": self._callback_data("mute", ticker)},
+                ],
+            ]
+        }
+
+    def _callback_data(self, action: str, ticker: str) -> str:
+        return f"{action}:{ticker.upper()}"
+
     async def start(self) -> None:
         if not self.enabled:
             return
@@ -184,6 +214,11 @@ class TelegramBotService:
                 logger.exception("Telegram digest loop failed")
 
     async def _handle_update(self, update: dict[str, Any]) -> None:
+        callback_query = update.get("callback_query")
+        if callback_query:
+            await self._handle_callback_query(callback_query)
+            return
+
         message = update.get("message") or update.get("edited_message")
         if not message:
             return
@@ -455,11 +490,11 @@ class TelegramBotService:
                 return
             await self._send_message(int(chat_id), "Считаю анализ...", reply_markup=self._main_keyboard())
             try:
-                analysis = await asyncio.to_thread(analyze_ticker, ticker, None, False)
+                analysis = await asyncio.to_thread(self._analyze_and_persist, ticker)
                 await self._send_message(
                     int(chat_id),
                     self._analysis_text(analysis),
-                    reply_markup=self._main_keyboard(),
+                    reply_markup=self._analysis_followup_keyboard(ticker),
                 )
             except Exception as exc:
                 await self._send_message(
@@ -521,7 +556,7 @@ class TelegramBotService:
         payload = {
             "timeout": timeout_seconds,
             "offset": offset,
-            "allowed_updates": json.dumps(["message", "edited_message"]),
+            "allowed_updates": json.dumps(["message", "edited_message", "callback_query"]),
         }
         data = parse.urlencode(payload).encode("utf-8")
         response = self._request_json("getUpdates", data)
@@ -529,6 +564,103 @@ class TelegramBotService:
             raise RuntimeError(f"Telegram getUpdates failed: {response}")
         result = response.get("result", [])
         return result if isinstance(result, list) else []
+
+    async def _handle_callback_query(self, callback_query: dict[str, Any]) -> None:
+        callback_id = callback_query.get("id")
+        data = str(callback_query.get("data") or "")
+        message = callback_query.get("message") or {}
+        chat = message.get("chat") or {}
+        chat_id = chat.get("id")
+
+        if callback_id:
+            await self._answer_callback_query(str(callback_id))
+        if chat_id is None:
+            return
+        if not self._chat_is_allowed(int(chat_id)):
+            await self._send_message(int(chat_id), self._access_denied_text())
+            return
+
+        action, ticker = self._parse_callback_data(data)
+        if not action or not ticker:
+            await self._send_message(int(chat_id), "Не удалось распознать кнопку.", reply_markup=self._main_keyboard())
+            return
+
+        username = (callback_query.get("from") or {}).get("username")
+        await self._handle_followup_action(
+            int(chat_id),
+            action=action,
+            ticker=ticker,
+            username=username,
+        )
+
+    async def _handle_followup_action(
+        self,
+        chat_id: int,
+        *,
+        action: str,
+        ticker: str,
+        username: str | None,
+    ) -> None:
+        followup_keyboard = self._analysis_followup_keyboard(ticker)
+
+        if action in {"why", "sources", "events", "freshness", "audit"}:
+            await self._handle_detail_command(
+                chat_id,
+                action=action,
+                args=[ticker],
+                reply_markup=followup_keyboard,
+            )
+            return
+
+        if action == "risk":
+            await self._send_message(chat_id, self._risk_text(ticker), reply_markup=followup_keyboard)
+            return
+
+        if action == "rescan":
+            await self._send_message(
+                chat_id,
+                f"Пересчитываю {ticker.upper()}...",
+                reply_markup=followup_keyboard,
+            )
+            try:
+                analysis = await asyncio.to_thread(self._analyze_and_persist, ticker)
+                await self._send_message(
+                    chat_id,
+                    self._analysis_text(analysis),
+                    reply_markup=followup_keyboard,
+                )
+            except Exception as exc:
+                await self._send_message(
+                    chat_id,
+                    f"Не удалось пересчитать {ticker.upper()}: {exc}",
+                    reply_markup=followup_keyboard,
+                )
+            return
+
+        if action in {"watchlist_add", "watchlist_remove", "mute"}:
+            mode = "add" if action == "watchlist_add" else "remove"
+            changed, invalid = self._update_watchlist(
+                chat_id,
+                username=username,
+                tickers=[ticker],
+                mode=mode,
+            )
+            notice = self._watchlist_update_text(
+                chat_id=chat_id,
+                mode=mode,
+                changed_tickers=changed,
+                invalid_tickers=invalid,
+            )
+            if action == "mute":
+                notice = f"{notice}\nЗаглушение реализовано через снятие тикера с watchlist."
+            await self._send_message(chat_id, notice, reply_markup=followup_keyboard)
+            return
+
+        await self._send_message(
+            chat_id,
+            "Неизвестное действие кнопки.",
+            reply_markup=followup_keyboard,
+        )
 
     async def _send_digest_to_active_subscribers(
         self,
@@ -580,6 +712,13 @@ class TelegramBotService:
             await self._send_message(subscriber.chat_id, digest)
             self._mark_last_alert(subscriber.id)
 
+    def _analyze_and_persist(self, ticker: str) -> Any:
+        db = SessionLocal()
+        try:
+            return analyze_ticker(ticker, db=db, use_ai_explanation=False)
+        finally:
+            db.close()
+
     async def _handle_detail_command(
         self,
         chat_id: int,
@@ -616,6 +755,27 @@ class TelegramBotService:
         }
         builder = builders[action]
         await self._send_message(chat_id, builder(ticker), reply_markup=reply_markup)
+
+    async def _answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
+        payload: dict[str, Any] = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        response = self._request_json(
+            "answerCallbackQuery",
+            parse.urlencode(payload).encode("utf-8"),
+        )
+        if not response.get("ok"):
+            raise RuntimeError(f"Telegram answerCallbackQuery failed: {response}")
+
+    def _parse_callback_data(self, data: str) -> tuple[str | None, str | None]:
+        if not data or ":" not in data:
+            return None, None
+        action, ticker = data.split(":", 1)
+        action = action.strip()
+        ticker = ticker.strip().upper()
+        if not action or not ticker:
+            return None, None
+        return action, ticker
 
     def _detail_ticker(self, args: list[str]) -> str | None:
         if not args:
