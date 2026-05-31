@@ -332,10 +332,50 @@ class AppSmokeTests(unittest.TestCase):
             patch("app.services.scanner.calculate_indicators", return_value=technicals),
             patch("app.services.scanner.score_stock", return_value=scoring),
             patch("app.services.scanner.explain_analysis", return_value="Mock explanation"),
+            patch("app.services.scanner._build_market_session", return_value=None),
         ):
             response = analyze_ticker("aapl", db=None, use_ai_explanation=True)
 
         self.assertIn("OpenAI explanation is disabled", response.operation_notes[0])
+
+    def test_analyze_ticker_adds_market_session_for_closed_market(self) -> None:
+        market = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "info": {"exchangeTimezoneName": "America/New_York"},
+            "published_at": datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc),
+            "fetched_at": datetime(2026, 6, 1, 20, 30, tzinfo=timezone.utc),
+        }
+        fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
+        technicals = TechnicalIndicators(change_1d_pct=1.0)
+        scoring = SimpleNamespace(
+            scores=Scores(
+                momentum_score=60.0,
+                valuation_score=55.0,
+                risk_score=35.0,
+                final_score=62.5,
+            ),
+            recommendation="NEUTRAL",
+            short_reason="Neutral: sample reason.",
+            reasons=["price is above MA50"],
+        )
+
+        with (
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_market_data", return_value=market),
+            patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
+            patch("app.services.scanner.calculate_indicators", return_value=technicals),
+            patch("app.services.scanner.score_stock", return_value=scoring),
+            patch("app.services.scanner.explain_analysis", return_value="Mock explanation"),
+        ):
+            response = analyze_ticker("aapl", db=None, use_ai_explanation=True)
+
+        self.assertIsNotNone(response.market_session)
+        self.assertEqual(response.market_session.status, "after-hours")
+        self.assertEqual(response.market_session.freshness_state, "session_closed")
+        self.assertTrue(any("session" in note.lower() for note in response.operation_notes))
 
     def test_analyze_ticker_persists_snapshot(self) -> None:
         market = {

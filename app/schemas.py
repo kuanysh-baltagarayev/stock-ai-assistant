@@ -51,6 +51,7 @@ class AnalyzeResponse(BaseModel):
     source_provenance: "SourceProvenance | None" = None
     data_quality: "DataQualityFlags" = Field(default_factory=lambda: DataQualityFlags())
     fx: "FXNormalization | None" = None
+    market_session: "MarketSession | None" = None
     operation_notes: list[str] = Field(default_factory=list)
 
 
@@ -192,6 +193,17 @@ class FXNormalization(BaseModel):
     fx_source: str | None = None
     fx_timestamp: datetime | None = None
     fx_assumption_note: str | None = None
+
+
+class MarketSession(BaseModel):
+    timezone: str | None = None
+    reference_time: datetime
+    status: str
+    is_open: bool
+    market_open_at: datetime | None = None
+    market_close_at: datetime | None = None
+    freshness_state: str | None = None
+    freshness_note: str | None = None
 
 
 class HealthResponse(BaseModel):

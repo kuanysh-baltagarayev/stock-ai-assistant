@@ -41,6 +41,7 @@ Implemented:
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
 - Normalized market-data provider contract plus offline fixture loader for future collectors.
+- Session-aware market analysis with exchange-hours freshness notes for U.S. equities.
 - Telegram bot service and entrypoint.
 - CLI scanner with default watchlist, custom tickers, and JSON output.
 - live smoke script for real market data checks without OpenAI or Telegram.
@@ -86,6 +87,11 @@ Implemented:
   updates, with `ruff` and 54 focused tests.
 - 2026-05-31: `scripts/check.sh` passed after source provider abstraction
   updates, with `ruff`, 73 coverage-wrapped tests, coverage report, and
+  compile check.
+- 2026-06-01: `scripts/test_fast.sh` passed after session/freshness foundation
+  updates, with `ruff` and 55 focused tests.
+- 2026-06-01: `scripts/check.sh` passed after session/freshness foundation
+  updates, with `ruff`, 74 coverage-wrapped tests, coverage report, and
   compile check.
 - 2026-05-31: `scripts/test_fast.sh` passed after per-chat Telegram watchlist
   support was introduced, with `ruff` and 44 focused tests.
@@ -167,7 +173,7 @@ Implemented:
 - Local runtime notes for Telegram bot operation are not defined yet.
 - No user-facing UI exists yet; API, CLI, and Telegram flows are the current product surface.
 - Source coverage is still narrow: the app currently depends on `yfinance` for market data and does not yet ingest news or other open web sources through Playwright MCP.
-- Session awareness is missing: the app does not yet model exchange open/close hours or news freshness windows for economy and politics.
+- Session awareness is now present for U.S. equities in the core analysis path, but broader exchange calendars and news freshness windows for economy and politics are still not modeled.
 - Telegram UX is still basic: it lacks per-chat watchlists, alert preferences, source-backed signal explanations, quiet hours, and guided decision flows.
 - Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, does not flag stale/low-confidence data prominently, and does not show source coverage gaps in every Telegram answer.
 - Instrument identity exists for the U.S.-centric MVP, but cross-listing mapping, provider aliases, and global identifier coverage remain incomplete.
@@ -374,9 +380,7 @@ Suggested order for low-waste progress:
 
 1. Per-chat Telegram watchlists: add persistence, `/watchlist`, `/add`,
    `/remove`, and `/scan mine`, with Telegram unit tests and README updates.
-2. Session/freshness foundation: add market session states and stale-data
-   thresholds for U.S. equities before richer digests or alerts.
-3. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
+2. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
    and market-hours-only mode.
 
 ## Operations, Budgets, And Runtime Boundaries
