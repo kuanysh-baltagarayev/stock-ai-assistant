@@ -59,19 +59,21 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
                 freshness_state="fresh",
                 freshness_note=None,
                 confidence=0.81,
+                source_disagreed=False,
             )
             latest_payload = self._build_payload(
                 final_score=62.5,
                 recommendation="NEUTRAL",
                 short_reason="Neutral: sample reason.",
                 explanation="Sample explanation.",
-                provider_name="yfinance",
-                source_tier="Tier 2",
+                provider_name="alpha_vantage",
+                source_tier="Tier 1",
                 fetched_at="2026-06-01T00:00:00+00:00",
                 market_status="after-hours",
                 freshness_state="session_closed",
                 freshness_note="Market session is after-hours; latest bar is from 2026-05-31.",
                 confidence=0.75,
+                source_disagreed=True,
             )
             db.add(
                 AnalysisSnapshot(
@@ -129,6 +131,7 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
         freshness_state: str,
         freshness_note: str | None,
         confidence: float,
+        source_disagreed: bool,
     ) -> dict:
         return {
             "ticker": "AAPL",
@@ -152,7 +155,11 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
                 "source_url": "https://finance.yahoo.com/",
                 "fetched_at": fetched_at,
             },
-            "data_quality": {"confidence": confidence, "summary": "ok"},
+            "data_quality": {
+                "confidence": confidence,
+                "summary": "source disagreement flagged" if source_disagreed else "ok",
+                "source_disagreed": source_disagreed,
+            },
             "market_session": {
                 "timezone": "America/New_York",
                 "reference_time": "2026-06-01T00:00:00+00:00",
@@ -231,7 +238,9 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("freshness", send_mock.await_args_list[2].args[1].lower())
         self.assertIn("risk context", send_mock.await_args_list[3].args[1].lower())
         self.assertIn("event and session context", send_mock.await_args_list[4].args[1])
-        self.assertIn("Score delta vs previous", send_mock.await_args_list[5].args[1])
+        self.assertIn("changes vs older snapshot", send_mock.await_args_list[5].args[1].lower())
+        self.assertIn("source disagreement flagged", send_mock.await_args_list[5].args[1].lower())
+        self.assertIn("provenance delta", send_mock.await_args_list[5].args[1].lower())
 
     async def test_calendar_today_uses_baseline_session(self) -> None:
         send_mock = AsyncMock()

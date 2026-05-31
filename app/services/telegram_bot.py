@@ -14,7 +14,7 @@ from app.database import SessionLocal, init_db
 from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
 from app.services.market_data import InvalidTickerError, normalize_ticker
 from app.services.research_labels import research_label_to_russian
-from app.services.history import list_recent_snapshots
+from app.services.history import build_snapshot_audit_entries, list_recent_snapshots
 from app.services.runtime_budget import (
     RuntimeBudgetExceeded,
     consume_runtime_budget,
@@ -1387,7 +1387,8 @@ class TelegramBotService:
             )
 
         lines = [f"{ticker.upper()}: audit trail"]
-        for index, snapshot in enumerate(snapshots, start=1):
+        for index, entry in enumerate(build_snapshot_audit_entries(snapshots), start=1):
+            snapshot = entry.snapshot
             payload = snapshot.payload or {}
             provenance = payload.get("source_provenance") or {}
             data_quality = payload.get("data_quality") or {}
@@ -1402,17 +1403,35 @@ class TelegramBotService:
             )
             if payload.get("short_reason"):
                 lines.append(f"   reason={self._translate_text(str(payload.get('short_reason')))}")
+            if entry.changes:
+                lines.append("   changes vs older snapshot:")
+                lines.extend(f"   - {self._translate_text(change)}" for change in entry.changes)
 
         if len(snapshots) >= 2:
             latest, previous = snapshots[0], snapshots[1]
             delta = latest.final_score - previous.final_score
-            lines.extend(
-                [
-                    "",
-                    f"Score delta vs previous: {delta:+.2f}",
-                    f"Latest recommendation: {latest.recommendation}",
-                    f"Previous recommendation: {previous.recommendation}",
-                ]
+            lines.extend(["", f"Latest score delta vs previous: {delta:+.2f}"])
+            latest_payload = latest.payload or {}
+            previous_payload = previous.payload or {}
+            latest_quality = latest_payload.get("data_quality") or {}
+            previous_quality = previous_payload.get("data_quality") or {}
+            latest_session = latest_payload.get("market_session") or {}
+            previous_session = previous_payload.get("market_session") or {}
+            if latest_quality.get("source_disagreed") or previous_quality.get("source_disagreed"):
+                lines.append("Source disagreement flagged in one of the latest snapshots.")
+            lines.append(
+                "Freshness delta: "
+                f"{previous_session.get('freshness_state') or 'unknown'} -> "
+                f"{latest_session.get('freshness_state') or 'unknown'}"
+            )
+            lines.append(
+                "Provenance delta: "
+                f"{(previous_payload.get('source_provenance') or {}).get('provider_name') or 'unknown'} -> "
+                f"{(latest_payload.get('source_provenance') or {}).get('provider_name') or 'unknown'}"
+            )
+            lines.append(
+                "Recommendation delta: "
+                f"{previous.recommendation} -> {latest.recommendation}"
             )
 
         return self._trim_message("\n".join(lines))

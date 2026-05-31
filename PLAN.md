@@ -48,7 +48,7 @@ Implemented:
 - Per-chat Telegram watchlists with `/watchlist`, `/add`, `/remove`, and `/scan mine`.
 - Telegram access control via `TELEGRAM_ALLOWED_CHAT_IDS` allowlist.
 - Telegram alert preferences with quiet hours, daily caps, and market-hours-only digests.
-- Telegram source-backed detail commands for saved analysis and source snapshots.
+- Telegram source-backed detail commands for saved analysis and source snapshots, including audit comparisons across saved snapshots.
 - Session-aware scheduled digests for pre-market, market-open, midday, close, after-hours, and weekly review.
 - Response-level operation notes for OpenAI fallback, data-quality warnings, partial scan failures, and Telegram budget status.
 - readiness endpoint with a database probe.
@@ -76,6 +76,11 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/test_fast.sh` passed after source-disagreement audit
+  view was introduced, with `ruff` and 65 focused tests.
+- 2026-06-01: `scripts/check.sh` passed after source-disagreement audit view
+  was introduced, with `ruff`, 84 coverage-wrapped tests, coverage report, and
+  compile check.
 - 2026-06-01: `scripts/test_fast.sh` passed after richer CLI recent-analysis
   report mode was introduced, with `ruff` and 65 focused tests.
 - 2026-06-01: `scripts/check.sh` passed after richer CLI recent-analysis report
@@ -401,9 +406,7 @@ quota, and review time.
 
 Suggested order for low-waste progress:
 
-1. Source-disagreement audit view for saved analyses, so recent reports can
-   compare score, freshness, and provenance changes across snapshots.
-2. Telegram follow-up buttons for sources, freshness, and watchlist actions
+1. Telegram follow-up buttons for sources, freshness, and watchlist actions
    after each analysis response.
 
 ## Operations, Budgets, And Runtime Boundaries
