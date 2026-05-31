@@ -123,6 +123,12 @@ class TelegramSubscription(Base):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     watchlist_symbols: Mapped[list[str]] = mapped_column(JSON, default=list)
+    quiet_hours_start_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quiet_hours_end_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_alerts_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    market_hours_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    daily_alert_count: Mapped[int] = mapped_column(Integer, default=0)
+    daily_alert_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     last_alert_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

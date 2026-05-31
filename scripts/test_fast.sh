@@ -19,6 +19,7 @@ else
     tests.test_scripts \
     tests.test_provider_collectors \
     tests.test_telegram_disclaimers \
+    tests.test_telegram_preferences \
     tests.test_telegram_watchlists \
     tests.test_research_labels
 fi

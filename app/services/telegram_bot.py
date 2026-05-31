@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib import error as urlerror
 from urllib import parse, request
+from zoneinfo import ZoneInfo
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
@@ -71,6 +72,9 @@ class TelegramBotService:
     def _button_watchlist(self) -> str:
         return "Мой список"
 
+    def _button_preferences(self) -> str:
+        return "Настройки"
+
     def _button_back(self) -> str:
         return "Назад"
 
@@ -86,6 +90,7 @@ class TelegramBotService:
             ],
             [
                 {"text": self._button_watchlist()},
+                {"text": self._button_preferences()},
                 {"text": self._button_choose_ticker()},
                 {"text": self._button_scan()},
             ],
@@ -241,6 +246,14 @@ class TelegramBotService:
             )
             return
 
+        if action == "preferences":
+            await self._send_message(
+                int(chat_id),
+                self._preferences_text(int(chat_id)),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
         if action == "subscribe":
             is_first_use = self._subscription_for_chat(int(chat_id)) is None
             self._upsert_subscription(int(chat_id), username=username, active=True)
@@ -297,6 +310,94 @@ class TelegramBotService:
             await self._send_message(
                 int(chat_id),
                 "Подписка отключена.",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "quiet":
+            quiet_hours_start_minute, quiet_hours_end_minute, quiet_error = self._parse_quiet_hours(
+                args[0] if args else ""
+            )
+            if quiet_error:
+                await self._send_message(
+                    int(chat_id),
+                    quiet_error,
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            self._upsert_subscription(
+                int(chat_id),
+                username=username,
+                active=True,
+                preferences={
+                    "quiet_hours_start_minute": quiet_hours_start_minute,
+                    "quiet_hours_end_minute": quiet_hours_end_minute,
+                },
+            )
+            await self._send_message(
+                int(chat_id),
+                self._preferences_text(
+                    int(chat_id),
+                    notice=(
+                        "Quiet hours updated."
+                        if quiet_hours_start_minute is not None
+                        else "Quiet hours cleared."
+                    ),
+                ),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "cap":
+            cap_value, cap_error = self._parse_daily_cap(args[0] if args else "")
+            if cap_error:
+                await self._send_message(
+                    int(chat_id),
+                    cap_error,
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            self._upsert_subscription(
+                int(chat_id),
+                username=username,
+                active=True,
+                preferences={"max_alerts_per_day": cap_value},
+            )
+            await self._send_message(
+                int(chat_id),
+                self._preferences_text(
+                    int(chat_id),
+                    notice=("Daily cap updated." if cap_value is not None else "Daily cap cleared."),
+                ),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "market_hours":
+            market_hours_only, market_error = self._parse_toggle(args[0] if args else "")
+            if market_error:
+                await self._send_message(
+                    int(chat_id),
+                    market_error,
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            self._upsert_subscription(
+                int(chat_id),
+                username=username,
+                active=True,
+                preferences={"market_hours_only": market_hours_only},
+            )
+            await self._send_message(
+                int(chat_id),
+                self._preferences_text(
+                    int(chat_id),
+                    notice=(
+                        "Market-hours-only mode enabled."
+                        if market_hours_only
+                        else "Market-hours-only mode disabled."
+                    ),
+                ),
                 reply_markup=self._main_keyboard(),
             )
             return
@@ -425,6 +526,17 @@ class TelegramBotService:
             return
 
         for subscriber in subscribers:
+            skip_reason = self._digest_skip_reason(subscriber)
+            if skip_reason:
+                logger.info(
+                    "telegram_digest_skipped",
+                    extra={
+                        "component": "telegram",
+                        "chat_id": subscriber.chat_id,
+                        "reason": skip_reason,
+                    },
+                )
+                continue
             tickers = self._watchlist_tickers_for_subscription(subscriber)
             if not tickers:
                 tickers = self._configured_tickers()
@@ -481,6 +593,7 @@ class TelegramBotService:
         username: str | None,
         active: bool,
         watchlist_symbols: list[str] | None = None,
+        preferences: dict[str, Any] | None = None,
     ) -> None:
         db = SessionLocal()
         try:
@@ -495,6 +608,7 @@ class TelegramBotService:
                     username=username,
                     is_active=active,
                     watchlist_symbols=watchlist_symbols or [],
+                    **(preferences or {}),
                 )
                 db.add(sub)
             else:
@@ -502,6 +616,8 @@ class TelegramBotService:
                 sub.is_active = active
                 if watchlist_symbols is not None:
                     sub.watchlist_symbols = watchlist_symbols
+                for field_name, field_value in (preferences or {}).items():
+                    setattr(sub, field_name, field_value)
             db.commit()
             logger.info(
                 "telegram_subscription_updated",
@@ -538,7 +654,13 @@ class TelegramBotService:
             sub = db.get(TelegramSubscription, subscription_id)
             if sub is None:
                 return
-            sub.last_alert_at = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            today = now.date().isoformat()
+            if sub.daily_alert_date != today:
+                sub.daily_alert_date = today
+                sub.daily_alert_count = 0
+            sub.daily_alert_count = (sub.daily_alert_count or 0) + 1
+            sub.last_alert_at = now
             db.commit()
             logger.debug(
                 "telegram_alert_timestamp_updated",
@@ -552,6 +674,156 @@ class TelegramBotService:
             )
         finally:
             db.close()
+
+    def _current_day_key(self, moment: datetime | None = None) -> str:
+        return (moment or datetime.now(timezone.utc)).date().isoformat()
+
+    def _format_minutes(self, minutes: int | None) -> str:
+        if minutes is None:
+            return "off"
+        hours, remainder = divmod(minutes, 60)
+        return f"{hours:02d}:{remainder:02d}"
+
+    def _format_quiet_hours(self, subscription: TelegramSubscription) -> str:
+        start = getattr(subscription, "quiet_hours_start_minute", None)
+        end = getattr(subscription, "quiet_hours_end_minute", None)
+        if start is None or end is None:
+            return "off"
+        return f"{self._format_minutes(start)}-{self._format_minutes(end)}"
+
+    def _preferences_summary_text(self, subscription: TelegramSubscription) -> str:
+        quiet_hours = self._format_quiet_hours(subscription)
+        max_alerts = getattr(subscription, "max_alerts_per_day", None)
+        daily_cap = "не ограничен" if max_alerts is None else str(max_alerts)
+        market_hours_only = "да" if getattr(subscription, "market_hours_only", False) else "нет"
+        today_key = self._current_day_key()
+        daily_alert_date = getattr(subscription, "daily_alert_date", None)
+        daily_alert_count = getattr(subscription, "daily_alert_count", 0) or 0
+        current_count = daily_alert_count if daily_alert_date == today_key else 0
+        return (
+            "Настройки уведомлений:\n"
+            f"• Quiet hours: {quiet_hours}\n"
+            f"• Daily cap: {daily_cap}\n"
+            f"• Market-hours-only: {market_hours_only}\n"
+            f"• Сегодня отправлено: {current_count}"
+        )
+
+    def _preferences_text(self, chat_id: int, notice: str | None = None) -> str:
+        sub = self._subscription_for_chat(chat_id)
+        if sub is None:
+            return (
+                "Подписка не найдена. Используй /start, чтобы создать её, "
+                "а затем /quiet, /cap и /markethours для настройки уведомлений."
+            )
+
+        lines = [self._preferences_summary_text(sub)]
+        if notice:
+            lines.extend(["", notice])
+        lines.extend(
+            [
+                "",
+                "Команды:",
+                "• /quiet 22:00-07:00 или /quiet off",
+                "• /cap 3 или /cap off",
+                "• /markethours on или /markethours off",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _parse_minutes(self, value: str) -> tuple[int | None, str | None]:
+        raw = value.strip()
+        if not raw:
+            return None, "Укажи время в формате HH:MM или HH."
+        parts = raw.split(":")
+        if len(parts) == 1:
+            try:
+                hour = int(parts[0])
+            except ValueError:
+                return None, "Укажи время в формате HH:MM или HH."
+            minute = 0
+        elif len(parts) == 2:
+            try:
+                hour = int(parts[0])
+                minute = int(parts[1])
+            except ValueError:
+                return None, "Укажи время в формате HH:MM или HH."
+        else:
+            return None, "Укажи время в формате HH:MM или HH."
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            return None, "Время должно быть в диапазоне 00:00-23:59."
+        return hour * 60 + minute, None
+
+    def _parse_quiet_hours(self, value: str) -> tuple[int | None, int | None, str | None]:
+        raw = value.strip().lower()
+        if not raw or raw in {"off", "none", "clear", "unset"}:
+            return None, None, None
+        if "-" not in raw:
+            return None, None, "Формат quiet hours: /quiet 22:00-07:00 или /quiet off."
+        start_raw, end_raw = raw.split("-", maxsplit=1)
+        start, start_error = self._parse_minutes(start_raw)
+        if start_error:
+            return None, None, start_error
+        end, end_error = self._parse_minutes(end_raw)
+        if end_error:
+            return None, None, end_error
+        if start == end:
+            return None, None, "Quiet hours start and end must be different."
+        return start, end, None
+
+    def _parse_daily_cap(self, value: str) -> tuple[int | None, str | None]:
+        raw = value.strip().lower()
+        if not raw or raw in {"off", "none", "clear", "unset"}:
+            return None, None
+        try:
+            parsed = int(raw)
+        except ValueError:
+            return None, "Daily cap must be a positive integer or /cap off."
+        if parsed < 1:
+            return None, "Daily cap must be a positive integer or /cap off."
+        return parsed, None
+
+    def _parse_toggle(self, value: str) -> tuple[bool, str | None]:
+        raw = value.strip().lower()
+        if raw in {"on", "1", "true", "yes"}:
+            return True, None
+        if raw in {"off", "0", "false", "no"}:
+            return False, None
+        return False, "Use /markethours on or /markethours off."
+
+    def _is_market_session_open(self, moment: datetime | None = None) -> bool:
+        reference = moment or datetime.now(timezone.utc)
+        local_reference = reference.astimezone(ZoneInfo("America/New_York"))
+        if local_reference.weekday() >= 5:
+            return False
+        current_minutes = local_reference.hour * 60 + local_reference.minute
+        return 9 * 60 + 30 <= current_minutes < 16 * 60
+
+    def _digest_skip_reason(self, subscription: TelegramSubscription) -> str | None:
+        now = datetime.now(timezone.utc)
+        if self._quiet_hours_active(subscription, now):
+            return "quiet_hours"
+        if getattr(subscription, "market_hours_only", False) and not self._is_market_session_open(now):
+            return "market_hours_only"
+        max_alerts = getattr(subscription, "max_alerts_per_day", None)
+        if max_alerts is not None:
+            today_key = self._current_day_key(now)
+            current_count = (
+                subscription.daily_alert_count if subscription.daily_alert_date == today_key else 0
+            )
+            if current_count >= max_alerts:
+                return "daily_cap"
+        return None
+
+    def _quiet_hours_active(self, subscription: TelegramSubscription, moment: datetime | None = None) -> bool:
+        start = getattr(subscription, "quiet_hours_start_minute", None)
+        end = getattr(subscription, "quiet_hours_end_minute", None)
+        if start is None or end is None:
+            return False
+        reference = moment or datetime.now(timezone.utc)
+        minute = reference.astimezone(timezone.utc).hour * 60 + reference.astimezone(timezone.utc).minute
+        if start < end:
+            return start <= minute < end
+        return minute >= start or minute < end
 
     def _status_text(self, chat_id: int) -> str:
         if not self._chat_is_allowed(chat_id):
@@ -582,7 +854,8 @@ class TelegramBotService:
                 f"Последняя рассылка: {last_alert}\n"
                 f"Частота рассылки: {self.settings.telegram_digest_interval_minutes} мин.\n"
                 f"Telegram send budget: {budget_text}\n"
-                f"Твой список: {watchlist_text}"
+                f"Твой список: {watchlist_text}\n"
+                f"{self._preferences_summary_text(sub)}"
             )
         finally:
             db.close()
@@ -632,6 +905,8 @@ class TelegramBotService:
             return "status", []
         if lowered in {"/watchlist", "watchlist", self._button_watchlist().lower()}:
             return "watchlist", []
+        if lowered in {"/prefs", "prefs", "/preferences", "preferences", self._button_preferences().lower()}:
+            return "preferences", []
         if lowered in {self._button_choose_ticker().lower()}:
             return "ticker_menu", []
         if lowered in {self._button_back().lower()}:
@@ -640,6 +915,30 @@ class TelegramBotService:
             return "scan_mine", []
         if lowered in {"/scan", "scan", self._button_scan().lower()}:
             return "scan", []
+
+        if lowered.startswith("/quiet ") or lowered.startswith("quiet "):
+            parts = normalized.split(maxsplit=1)
+            if len(parts) == 2:
+                return "quiet", [parts[1].strip()]
+            return "quiet", []
+        if lowered in {"/quiet", "quiet"}:
+            return "preferences", []
+
+        if lowered.startswith("/cap ") or lowered.startswith("cap "):
+            parts = normalized.split(maxsplit=1)
+            if len(parts) == 2:
+                return "cap", [parts[1].strip()]
+            return "cap", []
+        if lowered in {"/cap", "cap"}:
+            return "preferences", []
+
+        if lowered.startswith("/markethours ") or lowered.startswith("/market-hours ") or lowered.startswith("markethours "):
+            parts = normalized.split(maxsplit=1)
+            if len(parts) == 2:
+                return "market_hours", [parts[1].strip()]
+            return "market_hours", []
+        if lowered in {"/markethours", "markethours", "/market-hours", "market-hours"}:
+            return "preferences", []
 
         if lowered.startswith("/add ") or lowered.startswith("add "):
             parts = normalized.split(maxsplit=1)
@@ -678,6 +977,7 @@ class TelegramBotService:
             "• подписка и отписка\n"
             "• статус подписки\n"
             "• просмотр и редактирование личного списка тикеров\n"
+            "• просмотр и изменение настроек уведомлений\n"
             "• анализ отдельных тикеров\n"
             "• сканирование рынка по списку из настроек или по команде /scan mine\n"
         )

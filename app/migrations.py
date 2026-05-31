@@ -69,6 +69,32 @@ def _upgrade_0005_telegram_watchlists(connection: Connection) -> None:
     )
 
 
+def _upgrade_0006_telegram_preferences(connection: Connection) -> None:
+    columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("telegram_subscriptions")
+    }
+    statements = [
+        ("quiet_hours_start_minute", "INTEGER"),
+        ("quiet_hours_end_minute", "INTEGER"),
+        ("max_alerts_per_day", "INTEGER"),
+        ("market_hours_only", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("daily_alert_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("daily_alert_date", "VARCHAR(10)"),
+    ]
+    for column_name, column_type in statements:
+        if column_name in columns:
+            continue
+        connection.execute(
+            text(
+                f"""
+                ALTER TABLE telegram_subscriptions
+                ADD COLUMN {column_name} {column_type}
+                """
+            )
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -94,6 +120,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0005_telegram_watchlists",
         description="Add per-chat Telegram watchlists.",
         upgrade=_upgrade_0005_telegram_watchlists,
+    ),
+    Migration(
+        revision="0006_telegram_preferences",
+        description="Add per-chat Telegram alert preferences.",
+        upgrade=_upgrade_0006_telegram_preferences,
     ),
 )
 
