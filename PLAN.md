@@ -40,6 +40,7 @@ Implemented:
 - SQLite raw source snapshot persistence with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
+- Normalized market-data provider contract plus offline fixture loader for future collectors.
 - Telegram bot service and entrypoint.
 - CLI scanner with default watchlist, custom tickers, and JSON output.
 - live smoke script for real market data checks without OpenAI or Telegram.
@@ -81,6 +82,11 @@ Implemented:
 - 2026-05-31: `scripts/check.sh` passed after user-visible operation summaries
   were introduced, with `ruff`, 70 coverage-wrapped tests, coverage report,
   and compile check.
+- 2026-05-31: `scripts/test_fast.sh` passed after source provider abstraction
+  updates, with `ruff` and 54 focused tests.
+- 2026-05-31: `scripts/check.sh` passed after source provider abstraction
+  updates, with `ruff`, 73 coverage-wrapped tests, coverage report, and
+  compile check.
 - 2026-05-31: `scripts/test_fast.sh` passed after per-chat Telegram watchlist
   support was introduced, with `ruff` and 44 focused tests.
 - 2026-05-31: `scripts/check.sh` passed after per-chat Telegram watchlist
@@ -368,11 +374,9 @@ Suggested order for low-waste progress:
 
 1. Per-chat Telegram watchlists: add persistence, `/watchlist`, `/add`,
    `/remove`, and `/scan mine`, with Telegram unit tests and README updates.
-2. Source provider abstraction: introduce normalized collector contracts and
-   offline fixtures before adding SEC, macro, or news sources.
-3. Session/freshness foundation: add market session states and stale-data
+2. Session/freshness foundation: add market session states and stale-data
    thresholds for U.S. equities before richer digests or alerts.
-4. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
+3. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
    and market-hours-only mode.
 
 ## Operations, Budgets, And Runtime Boundaries

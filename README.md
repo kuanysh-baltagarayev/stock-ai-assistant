@@ -21,6 +21,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - SQLite raw source snapshot storage with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
+- Normalized market-data provider contract with offline fixture support for future collectors.
 - Works without `OPENAI_API_KEY`; falls back to rule-based explanations.
 
 ## Stack

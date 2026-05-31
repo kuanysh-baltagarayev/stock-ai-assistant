@@ -1,0 +1,79 @@
+{
+  "ticker": "AAPL",
+  "price": 189.12,
+  "currency": "USD",
+  "provider_name": "yfinance",
+  "source_url": "https://github.com/ranaroussi/yfinance",
+  "source_tier": "Tier 2",
+  "data_category": "market_data",
+  "extraction_method": "yfinance",
+  "parser_version": "yfinance-0.2.65",
+  "observed_at": "2026-05-28T00:00:00+00:00",
+  "published_at": "2026-05-28T00:00:00+00:00",
+  "fetched_at": "2026-05-28T00:00:00+00:00",
+  "price_source": "fast_info.last_price",
+  "price_adjustment_policy": "raw_close",
+  "corporate_actions_policy": "raw_close_no_auto_adjustment",
+  "data_quality": {
+    "stale": false,
+    "delayed": false,
+    "estimated": false,
+    "missing": false,
+    "source_disagreed": false,
+    "confidence": 1.0,
+    "summary": "ok"
+  },
+  "fx": {
+    "base_currency": "USD",
+    "quote_currency": "USD",
+    "fx_rate_to_usd": null,
+    "fx_source": null,
+    "fx_timestamp": null,
+    "fx_assumption_note": null
+  },
+  "source_provenance": {
+    "provider_name": "yfinance",
+    "source_url": "https://github.com/ranaroussi/yfinance",
+    "source_tier": "Tier 2",
+    "data_category": "market_data",
+    "extraction_method": "yfinance",
+    "parser_version": "yfinance-0.2.65",
+    "observed_at": "2026-05-28T00:00:00+00:00",
+    "published_at": "2026-05-28T00:00:00+00:00",
+    "fetched_at": "2026-05-28T00:00:00+00:00",
+    "confidence": 1.0,
+    "content_hash": "fixture-hash"
+  },
+  "history_rows": [
+    {
+      "Date": "2026-05-26T00:00:00+00:00",
+      "Open": 186.0,
+      "High": 189.5,
+      "Low": 185.6,
+      "Close": 188.01,
+      "Volume": 1000000
+    },
+    {
+      "Date": "2026-05-27T00:00:00+00:00",
+      "Open": 188.2,
+      "High": 190.1,
+      "Low": 187.4,
+      "Close": 188.73,
+      "Volume": 1200000
+    },
+    {
+      "Date": "2026-05-28T00:00:00+00:00",
+      "Open": 189.0,
+      "High": 190.4,
+      "Low": 188.2,
+      "Close": 189.12,
+      "Volume": 1300000
+    }
+  ],
+  "info": {
+    "longName": "Apple Inc.",
+    "sector": "Technology",
+    "currency": "USD"
+  },
+  "cache_hit": false
+}

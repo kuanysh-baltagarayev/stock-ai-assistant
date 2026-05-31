@@ -11,9 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.schemas import Fundamentals
+from app.services.provider_collectors import (
+    MarketDataCollection,
+    ProviderContract,
+)
 from app.services.providers import (
     DEFAULT_PROVIDER_NAME,
-    provider_registry_payload,
     record_provider_failure,
     record_provider_success,
 )
@@ -48,8 +51,9 @@ def normalize_ticker(ticker: str) -> str:
 def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
     symbol = normalize_ticker(ticker)
     settings = get_settings()
-    provider_profile = provider_registry_payload(DEFAULT_PROVIDER_NAME)
-    cache_ttl_seconds = _market_data_cache_ttl_seconds(settings, provider_profile)
+    provider_profile = ProviderContract.from_name(DEFAULT_PROVIDER_NAME)
+    provider_payload = provider_profile.to_payload()
+    cache_ttl_seconds = _market_data_cache_ttl_seconds(settings, provider_payload)
     cached_market = _get_cached_market_data(symbol, cache_ttl_seconds)
     if cached_market is not None:
         logger.debug(
@@ -135,9 +139,9 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
         fx = _build_fx_metadata(currency=currency, fetched_at=fetched_at)
         source_provenance = {
             "provider_name": DEFAULT_PROVIDER_NAME,
-            "source_url": provider_profile["source_url"],
-            "source_tier": provider_profile["source_tier"],
-            "data_category": provider_profile["data_category"],
+            "source_url": provider_payload["source_url"],
+            "source_tier": provider_payload["source_tier"],
+            "data_category": provider_payload["data_category"],
             "extraction_method": "yfinance",
             "parser_version": f"yfinance-{getattr(yf, '__version__', 'unknown')}",
             "observed_at": fetched_at,
@@ -149,36 +153,38 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
 
         if db is not None:
             try:
-                record_provider_success(db=db, name=DEFAULT_PROVIDER_NAME, **provider_profile)
+                record_provider_success(db=db, name=DEFAULT_PROVIDER_NAME, **provider_payload)
             except Exception:
                 logger.exception(
                     "provider_registry_success_record_failed",
                     extra={"component": "persistence", "provider": DEFAULT_PROVIDER_NAME},
                 )
 
-        market = {
-            "ticker": symbol,
-            "price": price,
-            "currency": currency,
-            "history": history,
-            "info": info,
-            "provider_name": DEFAULT_PROVIDER_NAME,
-            "source_url": provider_profile["source_url"],
-            "source_tier": provider_profile["source_tier"],
-            "data_category": provider_profile["data_category"],
-            "extraction_method": "yfinance",
-            "parser_version": f"yfinance-{getattr(yf, '__version__', 'unknown')}",
-            "observed_at": fetched_at,
-            "published_at": latest_history_timestamp,
-            "fetched_at": fetched_at,
-            "price_source": price_source,
-            "price_adjustment_policy": "raw_close",
-            "corporate_actions_policy": "raw_close_no_auto_adjustment",
-            "data_quality": data_quality,
-            "fx": fx,
-            "source_provenance": source_provenance,
-            "cache_hit": False,
-        }
+        collection = MarketDataCollection(
+            provider=provider_profile,
+            ticker=symbol,
+            price=price,
+            currency=currency,
+            history=history,
+            info=info,
+            price_source=price_source,
+            price_adjustment_policy="raw_close",
+            corporate_actions_policy="raw_close_no_auto_adjustment",
+            observed_at=fetched_at,
+            published_at=latest_history_timestamp,
+            fetched_at=fetched_at,
+            data_quality=data_quality,
+            fx=fx,
+            source_provenance=source_provenance,
+            provider_name=DEFAULT_PROVIDER_NAME,
+            source_url=provider_profile.source_url,
+            source_tier=provider_profile.source_tier,
+            data_category=provider_profile.data_category,
+            extraction_method="yfinance",
+            parser_version=f"yfinance-{getattr(yf, '__version__', 'unknown')}",
+            cache_hit=False,
+        )
+        market = collection.to_market_dict()
         _set_cached_market_data(symbol, market, cache_ttl_seconds)
         return _copy_market_data(market)
     except MarketDataError:
@@ -188,7 +194,7 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
                     db=db,
                     name=DEFAULT_PROVIDER_NAME,
                     failure_mode="unavailable",
-                    **provider_profile,
+                    **provider_payload,
                 )
             except Exception:
                 logger.exception(
