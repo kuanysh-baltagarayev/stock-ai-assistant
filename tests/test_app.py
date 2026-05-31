@@ -489,6 +489,36 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.playwright_page_budget, 7)
         self.assertEqual(settings.telegram_send_budget, 44)
 
+    def test_get_settings_parses_telegram_allowlist(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_ALLOWED_CHAT_IDS": "101, 202,101, 303",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        self.assertEqual(settings.telegram_allowed_chat_ids, [101, 202, 303])
+
+    def test_get_settings_rejects_invalid_telegram_allowlist(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_ALLOWED_CHAT_IDS": "101, bad-id, 303",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            with self.assertRaises(ConfigurationError) as exc:
+                get_settings()
+
+        self.assertIn(
+            "TELEGRAM_ALLOWED_CHAT_IDS must contain comma-separated integers",
+            str(exc.exception),
+        )
+
     def test_get_settings_parses_snapshot_retention_policy(self) -> None:
         with patch.dict(
             os.environ,
@@ -526,6 +556,27 @@ class ConfigurationTests(unittest.TestCase):
         )
         with self.assertRaises(ConfigurationError):
             enforce_local_api_policy(settings)
+
+    def test_startup_diagnostics_warn_on_telegram_allowlist(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_ALLOWED_CHAT_IDS": "101,202",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        diagnostics = build_startup_diagnostics(settings)
+
+        self.assertEqual(diagnostics.summary["telegram_allowed_chat_ids"], "2")
+        self.assertTrue(
+            any(
+                "Telegram access control is enabled" in warning
+                for warning in diagnostics.warnings
+            )
+        )
 
 
 class ApiRouteTests(unittest.TestCase):

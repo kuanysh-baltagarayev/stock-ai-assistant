@@ -36,6 +36,7 @@ class Settings(BaseModel):
     telegram_default_tickers: str = Field(
         default="AAPL,MSFT,NVDA,TSLA,AMD,AMZN,GOOGL,META"
     )
+    telegram_allowed_chat_ids: list[int] = Field(default_factory=list)
     telegram_digest_interval_minutes: int = Field(default=1440)
     telegram_poll_timeout_seconds: int = Field(default=30)
     telegram_enabled: bool = Field(default=False)
@@ -120,6 +121,26 @@ def _parse_host(value: str | None) -> str:
     return host or "127.0.0.1"
 
 
+def _parse_int_list(value: str | None, *, env_name: str) -> list[int]:
+    if value is None:
+        return []
+
+    raw_items = [item.strip() for item in value.split(",")]
+    parsed: list[int] = []
+    seen: set[int] = set()
+    for item in raw_items:
+        if not item:
+            continue
+        try:
+            chat_id = int(item)
+        except ValueError as exc:
+            raise ConfigurationError(f"{env_name} must contain comma-separated integers; got {value!r}.") from exc
+        if chat_id not in seen:
+            parsed.append(chat_id)
+            seen.add(chat_id)
+    return parsed
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
@@ -194,6 +215,10 @@ def get_settings() -> Settings:
         telegram_default_tickers=os.getenv(
             "TELEGRAM_DEFAULT_TICKERS",
             "AAPL,MSFT,NVDA,TSLA,AMD,AMZN,GOOGL,META",
+        ),
+        telegram_allowed_chat_ids=_parse_int_list(
+            os.getenv("TELEGRAM_ALLOWED_CHAT_IDS"),
+            env_name="TELEGRAM_ALLOWED_CHAT_IDS",
         ),
         telegram_digest_interval_minutes=_parse_int(
             os.getenv("TELEGRAM_DIGEST_INTERVAL_MINUTES"),

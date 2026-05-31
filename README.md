@@ -138,8 +138,11 @@ Telegram bot settings:
 TELEGRAM_ENABLED=1
 TELEGRAM_BOT_TOKEN=123456:ABC...
 TELEGRAM_DEFAULT_TICKERS=AAPL,MSFT,NVDA
+TELEGRAM_ALLOWED_CHAT_IDS=123456789,987654321
 TELEGRAM_DIGEST_INTERVAL_MINUTES=1440
 ```
+
+Set `TELEGRAM_ALLOWED_CHAT_IDS` to a comma-separated list of chat IDs to restrict the bot to approved chats. Leave it empty to allow any chat that can reach the bot.
 
 The bot stores subscriptions and alert timestamps in SQLite. If `TELEGRAM_ENABLED=1` and `TELEGRAM_BOT_TOKEN` are set, it starts automatically when the app runs.
 
@@ -157,6 +160,7 @@ The default SQLite database path is resolved relative to the project root, so th
 - Raw provider snapshots are stored separately from normalized analyses with source URLs, timestamps, parser version, confidence, and content hashes.
 - Provider health is stored in `provider_registry` and updated when market data requests succeed or fail.
 - Analysis responses include explicit data-quality flags and FX assumption metadata. Non-USD FX conversion is not applied yet, so values remain in the reported trading currency.
+- If `TELEGRAM_ALLOWED_CHAT_IDS` is set, only those chats can use the bot and receive digests.
 
 ## Security Checklist
 

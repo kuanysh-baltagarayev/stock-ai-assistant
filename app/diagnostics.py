@@ -22,6 +22,7 @@ def build_startup_diagnostics(settings: Settings) -> StartupDiagnostics:
         "openai_call_budget": str(settings.openai_call_budget),
         "playwright_page_budget": str(settings.playwright_page_budget),
         "telegram_send_budget": str(settings.telegram_send_budget),
+        "telegram_allowed_chat_ids": str(len(settings.telegram_allowed_chat_ids)),
         "analysis_snapshot_retention_count": str(
             settings.analysis_snapshot_retention_count
         ),
@@ -34,6 +35,11 @@ def build_startup_diagnostics(settings: Settings) -> StartupDiagnostics:
     if settings.telegram_enabled and not settings.telegram_bot_token:
         warnings.append(
             "TELEGRAM_ENABLED is set but TELEGRAM_BOT_TOKEN is missing; Telegram bot startup will be skipped."
+        )
+
+    if settings.telegram_allowed_chat_ids:
+        warnings.append(
+            "Telegram access control is enabled; only chats listed in TELEGRAM_ALLOWED_CHAT_IDS can interact with the bot."
         )
 
     if not _is_loopback_host(settings.api_host):

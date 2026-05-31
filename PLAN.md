@@ -44,6 +44,7 @@ Implemented:
 - CLI scanner with default watchlist, custom tickers, and JSON output.
 - live smoke script for real market data checks without OpenAI or Telegram.
 - Per-chat Telegram watchlists with `/watchlist`, `/add`, `/remove`, and `/scan mine`.
+- Telegram access control via `TELEGRAM_ALLOWED_CHAT_IDS` allowlist.
 - readiness endpoint with a database probe.
 - Smoke tests for API routes, persistence, scanner behavior, and CLI scripts.
 - SQLite path resolution relative to the project root.
@@ -69,6 +70,11 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-31: `scripts/test_fast.sh` passed after Telegram access control was
+  introduced, with `ruff` and 49 focused tests.
+- 2026-05-31: `scripts/check.sh` passed after Telegram access control was
+  introduced, with `ruff`, 68 coverage-wrapped tests, coverage report, and
+  compile check.
 - 2026-05-31: `scripts/test_fast.sh` passed after per-chat Telegram watchlist
   support was introduced, with `ruff` and 44 focused tests.
 - 2026-05-31: `scripts/check.sh` passed after per-chat Telegram watchlist
@@ -155,7 +161,7 @@ Implemented:
 - Instrument identity exists for the U.S.-centric MVP, but cross-listing mapping, provider aliases, and global identifier coverage remain incomplete.
 - Corporate actions are currently represented as a raw-close policy with no auto-adjustment, and broader adjusted-price handling is still limited.
 - OpenAI explanations do not yet have a dedicated prompt-injection and source-grounding safety layer for future web/news ingestion.
-- Telegram access control is not defined yet; any chat that reaches the bot can currently subscribe.
+- Telegram access control is allowlist-based and intentionally narrow for the current MVP; broader onboarding flows are still not implemented.
 - Scheduler behavior is basic and not yet session-aware, idempotent, or protected by per-chat alert budgets.
 - The current recommendation labels include buy/sell-like language and should be replaced with neutral research labels before wider practical use.
 - FX normalization metadata is stored, but no live FX conversion provider is wired in yet.
@@ -356,15 +362,13 @@ Suggested order for low-waste progress:
 
 1. Per-chat Telegram watchlists: add persistence, `/watchlist`, `/add`,
    `/remove`, and `/scan mine`, with Telegram unit tests and README updates.
-2. Telegram access control: add an allowlist/admin approval setting before
-   broader bot usage.
-3. User-visible operation summaries: make market-data, OpenAI fallback, and
+2. User-visible operation summaries: make market-data, OpenAI fallback, and
    Telegram-send budget failures visible in API/CLI/Telegram responses.
-4. Source provider abstraction: introduce normalized collector contracts and
+3. Source provider abstraction: introduce normalized collector contracts and
    offline fixtures before adding SEC, macro, or news sources.
-5. Session/freshness foundation: add market session states and stale-data
+4. Session/freshness foundation: add market session states and stale-data
    thresholds for U.S. equities before richer digests or alerts.
-6. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
+5. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
    and market-hours-only mode.
 
 ## Operations, Budgets, And Runtime Boundaries

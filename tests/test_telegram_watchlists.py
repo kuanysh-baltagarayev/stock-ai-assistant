@@ -29,6 +29,7 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
                 telegram_enabled=True,
                 telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyzABCDEF",
                 telegram_default_tickers="AAPL,MSFT,NVDA",
+                telegram_allowed_chat_ids=[],
                 telegram_digest_interval_minutes=1440,
                 telegram_poll_timeout_seconds=1,
                 telegram_send_budget=100,
@@ -118,3 +119,62 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scan_mock.call_args_list[0].args[0], ["AAPL"])
         self.assertEqual(scan_mock.call_args_list[1].args[0], ["MSFT", "NVDA"])
         self.assertEqual(send_mock.await_count, 2)
+
+    async def test_restricted_allowlist_blocks_unauthorized_chat(self) -> None:
+        restricted_service = TelegramBotService(
+            settings=SimpleNamespace(
+                telegram_enabled=True,
+                telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyzABCDEF",
+                telegram_default_tickers="AAPL,MSFT,NVDA",
+                telegram_allowed_chat_ids=[999],
+                telegram_digest_interval_minutes=1440,
+                telegram_poll_timeout_seconds=1,
+                telegram_send_budget=100,
+            )
+        )
+        send_mock = AsyncMock()
+
+        with patch.object(restricted_service, "_send_message", send_mock):
+            await restricted_service._handle_update(
+                {
+                    "message": {
+                        "chat": {"id": 101},
+                        "from": {"username": "alice"},
+                        "text": "/watchlist",
+                    }
+                }
+            )
+
+        self.assertIsNone(restricted_service._subscription_for_chat(101))
+        self.assertEqual(send_mock.await_count, 1)
+        self.assertIn("Доступ к этому боту ограничен", send_mock.await_args.args[1])
+
+    async def test_digest_skips_chat_outside_allowlist(self) -> None:
+        restricted_service = TelegramBotService(
+            settings=SimpleNamespace(
+                telegram_enabled=True,
+                telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyzABCDEF",
+                telegram_default_tickers="AAPL,MSFT,NVDA",
+                telegram_allowed_chat_ids=[401],
+                telegram_digest_interval_minutes=1440,
+                telegram_poll_timeout_seconds=1,
+                telegram_send_budget=100,
+            )
+        )
+        restricted_service._upsert_subscription(401, username="erin", active=True, watchlist_symbols=["AAPL"])
+        restricted_service._upsert_subscription(402, username="frank", active=True, watchlist_symbols=["MSFT"])
+        send_mock = AsyncMock()
+        fake_scan = SimpleNamespace(
+            results=[],
+            errors=[],
+            summary=SimpleNamespace(partial_failure=False, message="ok", failed_tickers=[]),
+        )
+
+        with (
+            patch.object(restricted_service, "_send_message", send_mock),
+            patch("app.services.telegram_bot.scan_tickers", return_value=fake_scan) as scan_mock,
+        ):
+            await restricted_service._send_digest_to_active_subscribers()
+
+        scan_mock.assert_called_once_with(["AAPL"], None)
+        self.assertEqual(send_mock.await_count, 1)

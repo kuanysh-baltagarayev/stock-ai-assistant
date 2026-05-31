@@ -31,6 +31,21 @@ class TelegramBotService:
     def enabled(self) -> bool:
         return bool(self.settings.telegram_enabled and self.settings.telegram_bot_token)
 
+    def _chat_is_allowed(self, chat_id: int) -> bool:
+        allowed_chat_ids = getattr(self.settings, "telegram_allowed_chat_ids", []) or []
+        return not allowed_chat_ids or chat_id in allowed_chat_ids
+
+    def _access_denied_text(self) -> str:
+        allowed_chat_ids = getattr(self.settings, "telegram_allowed_chat_ids", []) or []
+        if allowed_chat_ids:
+            allowed = ", ".join(str(chat_id) for chat_id in allowed_chat_ids)
+            return (
+                "Доступ к этому боту ограничен.\n"
+                f"Чат не входит в TELEGRAM_ALLOWED_CHAT_IDS: {allowed}.\n"
+                "Если доступ нужен, добавь этот chat_id в allowlist и перезапусти бота."
+            )
+        return "Доступ к этому боту временно ограничен."
+
     def _button_subscribe(self) -> str:
         return "Подписаться"
 
@@ -170,6 +185,10 @@ class TelegramBotService:
 
         text = (message.get("text") or "").strip()
         if not text:
+            return
+
+        if not self._chat_is_allowed(int(chat_id)):
+            await self._send_message(int(chat_id), self._access_denied_text())
             return
 
         user = message.get("from") or {}
@@ -419,12 +438,13 @@ class TelegramBotService:
     def _active_subscribers(self) -> list[TelegramSubscription]:
         db = SessionLocal()
         try:
-            return (
+            subscribers = (
                 db.query(TelegramSubscription)
                 .filter(TelegramSubscription.is_active.is_(True))
                 .order_by(TelegramSubscription.created_at.asc())
                 .all()
             )
+            return [sub for sub in subscribers if self._chat_is_allowed(sub.chat_id)]
         finally:
             db.close()
 
@@ -518,6 +538,9 @@ class TelegramBotService:
             db.close()
 
     def _status_text(self, chat_id: int) -> str:
+        if not self._chat_is_allowed(chat_id):
+            return self._access_denied_text()
+
         db = SessionLocal()
         try:
             sub = (
