@@ -48,6 +48,7 @@ Implemented:
 - Per-chat Telegram watchlists with `/watchlist`, `/add`, `/remove`, and `/scan mine`.
 - Telegram access control via `TELEGRAM_ALLOWED_CHAT_IDS` allowlist.
 - Telegram alert preferences with quiet hours, daily caps, and market-hours-only digests.
+- Telegram source-backed detail commands for saved analysis and source snapshots.
 - Response-level operation notes for OpenAI fallback, data-quality warnings, partial scan failures, and Telegram budget status.
 - readiness endpoint with a database probe.
 - Smoke tests for API routes, persistence, scanner behavior, and CLI scripts.
@@ -84,6 +85,11 @@ Implemented:
 - 2026-05-31: `scripts/check.sh` passed after Telegram access control was
   introduced, with `ruff`, 68 coverage-wrapped tests, coverage report, and
   compile check.
+- 2026-06-01: `scripts/test_fast.sh` passed after Telegram source-backed detail
+  commands were introduced, with `ruff` and 61 focused tests.
+- 2026-06-01: `scripts/check.sh` passed after Telegram source-backed detail
+  commands were introduced, with `ruff`, 80 coverage-wrapped tests, coverage
+  report, and compile check.
 - 2026-05-31: `scripts/test_fast.sh` passed after user-visible operation
   summaries were introduced, with `ruff` and 51 focused tests.
 - 2026-05-31: `scripts/check.sh` passed after user-visible operation summaries
@@ -180,7 +186,7 @@ Implemented:
 - No user-facing UI exists yet; API, CLI, and Telegram flows are the current product surface.
 - Source coverage is still narrow: the app currently depends on `yfinance` for market data and does not yet ingest news or other open web sources through Playwright MCP.
 - Session awareness is now present for U.S. equities in the core analysis path, but broader exchange calendars and news freshness windows for economy and politics are still not modeled.
-- Telegram UX is still basic: it lacks source-backed signal explanations, timezone preferences, preferred market/exchange, and guided decision flows.
+- Telegram UX is still basic: it still lacks guided decision flows, live event-calendar/news ingestion, and richer follow-up buttons.
 - Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, does not flag stale/low-confidence data prominently, and does not show source coverage gaps in every Telegram answer.
 - Instrument identity exists for the U.S.-centric MVP, but cross-listing mapping, provider aliases, and global identifier coverage remain incomplete.
 - Corporate actions are currently represented as a raw-close policy with no auto-adjustment, and broader adjusted-price handling is still limited.
@@ -386,8 +392,8 @@ Suggested order for low-waste progress:
 
 1. Per-chat Telegram watchlists: add persistence, `/watchlist`, `/add`,
    `/remove`, and `/scan mine`, with Telegram unit tests and README updates.
-2. Telegram source-backed detail commands: `/why`, `/sources`, `/events`,
-   `/freshness`, `/calendar`, `/risk`, and `/audit`.
+2. Scheduled Telegram digests: pre-market brief, market-open brief, midday
+   check, close summary, after-hours news summary, and weekly watchlist review.
 
 ## Operations, Budgets, And Runtime Boundaries
 
@@ -519,7 +525,7 @@ Status: in progress.
 3. Improve Telegram commands for custom ticker scans and status visibility.
 4. Add user-visible error summaries for failed market data, OpenAI, and Telegram operations.
 5. Done: add per-chat Telegram watchlists and alert preferences with quiet hours, daily caps, and market-hours-only mode.
-6. Add Telegram-only source-backed workflows: `/why`, `/sources`, `/events`, `/freshness`, `/calendar`, `/risk`, and `/audit`.
+6. Done: add Telegram-only source-backed workflows: `/why`, `/sources`, `/events`, `/freshness`, `/calendar`, `/risk`, and `/audit` against saved analysis and source snapshots.
 7. Add scheduled Telegram digests for pre-market, market open, close, after-hours, and weekly review.
 8. Done: add Telegram chat allowlist via `TELEGRAM_ALLOWED_CHAT_IDS`.
 9. Add per-chat data deletion or cleanup behavior.

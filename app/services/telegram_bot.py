@@ -11,9 +11,10 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
-from app.models import TelegramSubscription
+from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
 from app.services.market_data import InvalidTickerError, normalize_ticker
 from app.services.research_labels import research_label_to_russian
+from app.services.history import list_recent_snapshots
 from app.services.runtime_budget import (
     RuntimeBudgetExceeded,
     consume_runtime_budget,
@@ -501,6 +502,15 @@ class TelegramBotService:
                 )
             return
 
+        if action in {"why", "sources", "events", "freshness", "calendar", "risk", "audit"}:
+            await self._handle_detail_command(
+                int(chat_id),
+                action=action,
+                args=args,
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
         await self._send_message(
             int(chat_id),
             "Используй кнопки под сообщением.",
@@ -562,6 +572,84 @@ class TelegramBotService:
             )
             await self._send_message(subscriber.chat_id, digest)
             self._mark_last_alert(subscriber.id)
+
+    async def _handle_detail_command(
+        self,
+        chat_id: int,
+        *,
+        action: str,
+        args: list[str],
+        reply_markup: dict[str, Any] | None = None,
+    ) -> None:
+        ticker = self._detail_ticker(args)
+        if action == "calendar":
+            calendar_ticker = None if not args or args[0].strip().lower() in {"today", "сегодня", "now"} else ticker
+            await self._send_message(
+                chat_id,
+                self._calendar_text(calendar_ticker),
+                reply_markup=reply_markup,
+            )
+            return
+        if action == "audit":
+            await self._send_message(chat_id, self._audit_text(ticker), reply_markup=reply_markup)
+            return
+        if ticker is None:
+            await self._send_message(
+                chat_id,
+                f"Укажи тикер для /{action}. Например: /{action} AAPL",
+                reply_markup=reply_markup,
+            )
+            return
+        builders = {
+            "why": self._why_text,
+            "sources": self._sources_text,
+            "events": self._events_text,
+            "freshness": self._freshness_text,
+            "risk": self._risk_text,
+        }
+        builder = builders[action]
+        await self._send_message(chat_id, builder(ticker), reply_markup=reply_markup)
+
+    def _detail_ticker(self, args: list[str]) -> str | None:
+        if not args:
+            return None
+        ticker = args[0].strip().upper()
+        return ticker or None
+
+    def _format_dt(self, value: Any) -> str:
+        if value is None:
+            return "n/a"
+        if isinstance(value, str):
+            return value
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc).isoformat()
+        return str(value)
+
+    def _latest_analysis_snapshot(self, ticker: str) -> AnalysisSnapshot | None:
+        db = SessionLocal()
+        try:
+            return (
+                db.query(AnalysisSnapshot)
+                .filter(AnalysisSnapshot.ticker == ticker.upper())
+                .order_by(AnalysisSnapshot.created_at.desc(), AnalysisSnapshot.id.desc())
+                .first()
+            )
+        finally:
+            db.close()
+
+    def _latest_source_snapshot(self, ticker: str) -> SourceSnapshot | None:
+        db = SessionLocal()
+        try:
+            return (
+                db.query(SourceSnapshot)
+                .filter(SourceSnapshot.ticker == ticker.upper())
+                .order_by(SourceSnapshot.fetched_at.desc(), SourceSnapshot.id.desc())
+                .first()
+            )
+        finally:
+            db.close()
 
     def _active_subscribers(self) -> list[TelegramSubscription]:
         db = SessionLocal()
@@ -916,6 +1004,43 @@ class TelegramBotService:
         if lowered in {"/scan", "scan", self._button_scan().lower()}:
             return "scan", []
 
+        for prefix, action in (
+            ("/why ", "why"),
+            ("why ", "why"),
+            ("/sources ", "sources"),
+            ("sources ", "sources"),
+            ("/events ", "events"),
+            ("events ", "events"),
+            ("/freshness ", "freshness"),
+            ("freshness ", "freshness"),
+            ("/calendar ", "calendar"),
+            ("calendar ", "calendar"),
+            ("/risk ", "risk"),
+            ("risk ", "risk"),
+            ("/audit ", "audit"),
+            ("audit ", "audit"),
+        ):
+            if lowered.startswith(prefix):
+                parts = normalized.split(maxsplit=1)
+                if len(parts) == 2:
+                    return action, [parts[1].strip()]
+                return action, []
+
+        if lowered in {"/why", "why"}:
+            return "why", []
+        if lowered in {"/sources", "sources"}:
+            return "sources", []
+        if lowered in {"/events", "events"}:
+            return "events", []
+        if lowered in {"/freshness", "freshness"}:
+            return "freshness", []
+        if lowered in {"/calendar", "calendar"}:
+            return "calendar", []
+        if lowered in {"/risk", "risk"}:
+            return "risk", []
+        if lowered in {"/audit", "audit"}:
+            return "audit", []
+
         if lowered.startswith("/quiet ") or lowered.startswith("quiet "):
             parts = normalized.split(maxsplit=1)
             if len(parts) == 2:
@@ -980,6 +1105,7 @@ class TelegramBotService:
             "• просмотр и изменение настроек уведомлений\n"
             "• анализ отдельных тикеров\n"
             "• сканирование рынка по списку из настроек или по команде /scan mine\n"
+            "• source-backed детали: /why, /sources, /events, /freshness, /calendar, /risk, /audit\n"
         )
 
     def _welcome_text(self, is_first_use: bool = False) -> str:
@@ -1039,6 +1165,249 @@ class TelegramBotService:
         disclaimer = self._scan_disclaimer(results)
         if disclaimer:
             lines.extend(["", disclaimer])
+        return self._trim_message("\n".join(lines))
+
+    def _why_text(self, ticker: str) -> str:
+        snapshot = self._latest_analysis_snapshot(ticker)
+        if snapshot is None:
+            return (
+                f"По {ticker.upper()} ещё нет сохранённой аналитики.\n"
+                "Сначала запусти /analyze, чтобы появился source-backed контекст."
+            )
+
+        payload = snapshot.payload or {}
+        scores = payload.get("scores") or {}
+        source_provenance = payload.get("source_provenance") or {}
+        lines = [
+            f"{ticker.upper()}: почему это выглядит так",
+            f"Последний анализ: {self._format_dt(snapshot.created_at)}",
+            f"Рекомендация: {self._translate_recommendation(str(payload.get('recommendation') or snapshot.recommendation))}",
+            f"Итоговая оценка: {scores.get('final_score', snapshot.final_score):.2f}",
+        ]
+        short_reason = payload.get("short_reason")
+        if short_reason:
+            lines.append(f"Кратко: {self._translate_text(str(short_reason))}")
+        explanation = payload.get("explanation")
+        if explanation:
+            lines.extend(["", "Объяснение:", self._translate_text(str(explanation))])
+        if source_provenance:
+            lines.extend(
+                [
+                    "",
+                    "Source-backed context:",
+                    f"• provider: {source_provenance.get('provider_name')}",
+                    f"• source tier: {source_provenance.get('source_tier')}",
+                    f"• fetched_at: {source_provenance.get('fetched_at') or payload.get('generated_at')}",
+                ]
+            )
+        return self._trim_message("\n".join(lines))
+
+    def _sources_text(self, ticker: str) -> str:
+        snapshot = self._latest_analysis_snapshot(ticker)
+        source_snapshot = self._latest_source_snapshot(ticker)
+        if snapshot is None and source_snapshot is None:
+            return (
+                f"По {ticker.upper()} нет сохранённых источников.\n"
+                "Сначала запусти /analyze или /scan, чтобы сохранить source provenance."
+            )
+
+        lines = [f"{ticker.upper()}: источники и provenance"]
+        if snapshot is not None:
+            provenance = (snapshot.payload or {}).get("source_provenance") or {}
+            data_quality = (snapshot.payload or {}).get("data_quality") or {}
+            lines.extend(
+                [
+                    f"Последний анализ: {self._format_dt(snapshot.created_at)}",
+                    f"Provider: {provenance.get('provider_name') or 'unknown'}",
+                    f"Tier: {provenance.get('source_tier') or 'unknown'}",
+                    f"URL: {provenance.get('source_url') or 'n/a'}",
+                    f"Confidence: {data_quality.get('confidence', 1.0):.2f}",
+                    f"Data quality: {data_quality.get('summary') or 'ok'}",
+                ]
+            )
+        if source_snapshot is not None:
+            lines.extend(
+                [
+                    "",
+                    "Raw source snapshot:",
+                    f"• provider: {source_snapshot.provider_name}",
+                    f"• source tier: {source_snapshot.source_tier or 'unknown'}",
+                    f"• fetched_at: {self._format_dt(source_snapshot.fetched_at)}",
+                    f"• published_at: {self._format_dt(source_snapshot.published_at)}",
+                    f"• observed_at: {self._format_dt(source_snapshot.observed_at)}",
+                    f"• content hash: {source_snapshot.content_hash}",
+                ]
+            )
+        return self._trim_message("\n".join(lines))
+
+    def _events_text(self, ticker: str) -> str:
+        snapshot = self._latest_analysis_snapshot(ticker)
+        if snapshot is None:
+            return (
+                f"По {ticker.upper()} нет сохранённой аналитики для event context.\n"
+                "Запусти /analyze, чтобы появился свежий риск и session context."
+            )
+
+        payload = snapshot.payload or {}
+        market_session = payload.get("market_session") or {}
+        data_quality = payload.get("data_quality") or {}
+        lines = [
+            f"{ticker.upper()}: event and session context",
+            f"Session: {market_session.get('status') or 'unknown'}",
+            f"Market open: {self._format_dt(market_session.get('market_open_at'))}",
+            f"Market close: {self._format_dt(market_session.get('market_close_at'))}",
+            f"Freshness: {market_session.get('freshness_state') or 'fresh'}",
+        ]
+        freshness_note = market_session.get("freshness_note")
+        if freshness_note:
+            lines.append(f"Note: {self._translate_text(str(freshness_note))}")
+        if data_quality.get("summary"):
+            lines.append(f"Data quality: {self._translate_text(str(data_quality.get('summary')))}")
+        lines.extend(
+            [
+                "",
+                "Breaking news / filing calendar is not wired yet; this view shows the latest stored market session context.",
+            ]
+        )
+        return self._trim_message("\n".join(lines))
+
+    def _freshness_text(self, ticker: str) -> str:
+        snapshot = self._latest_analysis_snapshot(ticker)
+        if snapshot is None:
+            return (
+                f"По {ticker.upper()} нет сохранённой аналитики.\n"
+                "Сначала запусти /analyze, чтобы получить freshness context."
+            )
+
+        payload = snapshot.payload or {}
+        source_provenance = payload.get("source_provenance") or {}
+        market_session = payload.get("market_session") or {}
+        data_quality = payload.get("data_quality") or {}
+        lines = [
+            f"{ticker.upper()}: freshness",
+            f"Latest analysis: {self._format_dt(snapshot.created_at)}",
+            f"Source fetched_at: {self._format_dt(source_provenance.get('fetched_at'))}",
+            f"Source published_at: {self._format_dt(source_provenance.get('published_at'))}",
+            f"Market session: {market_session.get('status') or 'unknown'}",
+            f"Freshness state: {market_session.get('freshness_state') or 'fresh'}",
+            f"Signal confidence: {data_quality.get('confidence', 1.0):.2f}",
+        ]
+        if market_session.get("freshness_note"):
+            lines.append(f"Note: {self._translate_text(str(market_session.get('freshness_note')))}")
+        return self._trim_message("\n".join(lines))
+
+    def _risk_text(self, ticker: str) -> str:
+        snapshot = self._latest_analysis_snapshot(ticker)
+        if snapshot is None:
+            return (
+                f"По {ticker.upper()} нет сохранённой аналитики.\n"
+                "Сначала запусти /analyze, чтобы увидеть risk context."
+            )
+
+        payload = snapshot.payload or {}
+        scores = payload.get("scores") or {}
+        market_session = payload.get("market_session") or {}
+        data_quality = payload.get("data_quality") or {}
+        explanation = payload.get("explanation") or ""
+        lines = [
+            f"{ticker.upper()}: risk context",
+            f"Risk score: {scores.get('risk_score', 0.0):.2f}",
+            f"Final score: {scores.get('final_score', snapshot.final_score):.2f}",
+            f"Recommendation: {self._translate_recommendation(str(payload.get('recommendation') or snapshot.recommendation))}",
+            f"Data confidence: {data_quality.get('confidence', 1.0):.2f}",
+            f"Session state: {market_session.get('status') or 'unknown'}",
+        ]
+        if payload.get("short_reason"):
+            lines.append(f"Short reason: {self._translate_text(str(payload.get('short_reason')))}")
+        if explanation:
+            lines.extend(["", self._translate_text(str(explanation))])
+        return self._trim_message("\n".join(lines))
+
+    def _calendar_text(self, ticker: str | None) -> str:
+        if ticker:
+            snapshot = self._latest_analysis_snapshot(ticker)
+            if snapshot is None:
+                return (
+                    f"По {ticker.upper()} нет сохранённой аналитики.\n"
+                    "Запусти /analyze, чтобы получить market session context."
+                )
+            payload = snapshot.payload or {}
+            market_session = payload.get("market_session") or {}
+            return self._trim_message(
+                "\n".join(
+                    [
+                        f"{ticker.upper()}: calendar context",
+                        f"Session: {market_session.get('status') or 'unknown'}",
+                        f"Timezone: {market_session.get('timezone') or 'n/a'}",
+                        f"Open: {self._format_dt(market_session.get('market_open_at'))}",
+                        f"Close: {self._format_dt(market_session.get('market_close_at'))}",
+                        "",
+                        "This view uses the latest stored market session snapshot, not a live exchange calendar feed.",
+                    ]
+                )
+            )
+
+        now = datetime.now(timezone.utc)
+        local_now = now.astimezone(ZoneInfo("America/New_York"))
+        market_open = local_now.replace(hour=9, minute=30, second=0, microsecond=0)
+        market_close = local_now.replace(hour=16, minute=0, second=0, microsecond=0)
+        session = "weekend" if local_now.weekday() >= 5 else "open" if market_open <= local_now < market_close else "closed"
+        lines = [
+            "Today: U.S. equity session baseline",
+            f"Reference time: {local_now.isoformat()}",
+            f"Session: {session}",
+            f"Regular open: {market_open.isoformat()}",
+            f"Regular close: {market_close.isoformat()}",
+            "",
+            "Use /calendar AAPL to see the latest stored market session for a ticker.",
+        ]
+        return self._trim_message("\n".join(lines))
+
+    def _audit_text(self, ticker: str | None) -> str:
+        if not ticker:
+            return "Укажи тикер для /audit. Например: /audit AAPL"
+
+        db = SessionLocal()
+        try:
+            snapshots = list_recent_snapshots(db, limit=3, ticker=ticker)
+        finally:
+            db.close()
+
+        if not snapshots:
+            return (
+                f"По {ticker.upper()} нет сохранённых аудиторских данных.\n"
+                "Сначала запусти /analyze, чтобы появились snapshot history и provenance."
+            )
+
+        lines = [f"{ticker.upper()}: audit trail"]
+        for index, snapshot in enumerate(snapshots, start=1):
+            payload = snapshot.payload or {}
+            provenance = payload.get("source_provenance") or {}
+            data_quality = payload.get("data_quality") or {}
+            market_session = payload.get("market_session") or {}
+            lines.extend(
+                [
+                    f"{index}. {self._format_dt(snapshot.created_at)}",
+                    f"   score={snapshot.final_score:.2f} recommendation={snapshot.recommendation}",
+                    f"   provider={provenance.get('provider_name') or 'unknown'} tier={provenance.get('source_tier') or 'unknown'}",
+                    f"   confidence={data_quality.get('confidence', 1.0):.2f} session={market_session.get('status') or 'unknown'}",
+                ]
+            )
+            if payload.get("short_reason"):
+                lines.append(f"   reason={self._translate_text(str(payload.get('short_reason')))}")
+
+        if len(snapshots) >= 2:
+            latest, previous = snapshots[0], snapshots[1]
+            delta = latest.final_score - previous.final_score
+            lines.extend(
+                [
+                    "",
+                    f"Score delta vs previous: {delta:+.2f}",
+                    f"Latest recommendation: {latest.recommendation}",
+                    f"Previous recommendation: {previous.recommendation}",
+                ]
+            )
+
         return self._trim_message("\n".join(lines))
 
     def _digest_text(
