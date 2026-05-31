@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 import unittest
 
+from app.services.runtime_budget import reset_runtime_budgets
 from app.services.telegram_bot import TelegramBotService
 
 
 class TelegramDisclaimerTests(unittest.TestCase):
     def setUp(self) -> None:
+        reset_runtime_budgets()
         self.service = TelegramBotService(settings=SimpleNamespace())
+
+    def tearDown(self) -> None:
+        reset_runtime_budgets()
 
     def test_welcome_text_includes_first_use_disclaimer(self) -> None:
         text = self.service._welcome_text(is_first_use=True)
@@ -61,3 +67,19 @@ class TelegramDisclaimerTests(unittest.TestCase):
 
         self.assertIn("Крупные сигналы (1)", text)
         self.assertIn("Рискованные сигналы (1)", text)
+
+    def test_send_message_respects_telegram_send_budget(self) -> None:
+        service = TelegramBotService(
+            settings=SimpleNamespace(
+                telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyzABCDEF",
+                telegram_poll_timeout_seconds=1,
+                telegram_send_budget=0,
+            )
+        )
+
+        with patch.object(service, "_request_json") as request_mock:
+            with self.assertRaises(RuntimeError) as exc:
+                service._send_message_sync(123, "hello")
+
+        self.assertIn("Telegram send budget exhausted", str(exc.exception))
+        request_mock.assert_not_called()

@@ -3,6 +3,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.services.research_labels import research_label_to_russian
+from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_budget
 
 
 def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str]) -> str:
@@ -11,7 +12,11 @@ def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str]) -> st
         return rule_based_explanation(analysis_payload, reasons)
 
     try:
+        consume_runtime_budget("openai_calls", settings.openai_call_budget)
         return _openai_explanation(analysis_payload, reasons)
+    except RuntimeBudgetExceeded:
+        fallback = rule_based_explanation(analysis_payload, reasons)
+        return f"{fallback} Лимит OpenAI-вызовов исчерпан, поэтому использован rule-based вариант."
     except Exception:
         fallback = rule_based_explanation(analysis_payload, reasons)
         return f"{fallback} Объяснение от LLM недоступно, поэтому использован rule-based вариант."

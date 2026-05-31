@@ -27,6 +27,7 @@ class Settings(BaseModel):
     market_data_timeout_seconds: float = Field(default=20.0)
     market_data_max_attempts: int = Field(default=3)
     market_data_retry_backoff_seconds: float = Field(default=1.5)
+    market_data_cache_ttl_seconds: int = Field(default=3600)
     provider_call_budget: int = Field(default=1000)
     openai_call_budget: int = Field(default=50)
     playwright_page_budget: int = Field(default=20)
@@ -158,6 +159,12 @@ def get_settings() -> Settings:
             env_name="MARKET_DATA_RETRY_BACKOFF_SECONDS",
             default=1.5,
             minimum=0.0,
+        ),
+        market_data_cache_ttl_seconds=_parse_int(
+            os.getenv("MARKET_DATA_CACHE_TTL_SECONDS"),
+            env_name="MARKET_DATA_CACHE_TTL_SECONDS",
+            default=3600,
+            minimum=0,
         ),
         provider_call_budget=_parse_int(
             os.getenv("PROVIDER_CALL_BUDGET"),

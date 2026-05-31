@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import TelegramSubscription
 from app.services.research_labels import research_label_to_russian
+from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_budget
 from app.services.scanner import analyze_ticker, scan_tickers
 
 
@@ -720,6 +721,14 @@ class TelegramBotService:
         text: str,
         reply_markup: dict[str, Any] | None = None,
     ) -> None:
+        try:
+            consume_runtime_budget(
+                "telegram_sends",
+                getattr(self.settings, "telegram_send_budget", None),
+            )
+        except RuntimeBudgetExceeded as exc:
+            raise RuntimeError(f"Telegram send budget exhausted: {exc}") from exc
+
         payload = {
             "chat_id": chat_id,
             "text": self._trim_message(text),

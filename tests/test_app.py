@@ -29,7 +29,9 @@ from app.schemas import (
     Scores,
     TechnicalIndicators,
 )
+from app.services.ai_explainer import explain_analysis
 from app.services import market_data
+from app.services.runtime_budget import reset_runtime_budgets
 from app.services.scanner import analyze_ticker, scan_tickers
 
 
@@ -54,6 +56,14 @@ def make_analysis(ticker: str, final_score: float) -> AnalyzeResponse:
 
 
 class AppSmokeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_runtime_budgets()
+        market_data.clear_market_data_cache()
+
+    def tearDown(self) -> None:
+        reset_runtime_budgets()
+        market_data.clear_market_data_cache()
+
     def test_root_and_health_smoke(self) -> None:
         with (
             patch(
@@ -113,6 +123,53 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(data["ticker"], "AAPL")
         self.assertEqual(data["price"], 102.0)
         self.assertEqual(len(data["history"]), 3)
+
+    def test_market_data_reuses_cache_without_provider_calls(self) -> None:
+        history = pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0]},
+            index=pd.date_range("2026-05-25", periods=3, tz="UTC"),
+        )
+        stock = SimpleNamespace(info={}, fast_info={})
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=1,
+            market_data_retry_backoff_seconds=0.0,
+            market_data_cache_ttl_seconds=3600,
+            provider_call_budget=3,
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download", return_value=history) as download_mock,
+            patch("app.services.market_data.yf.Ticker", return_value=stock),
+        ):
+            first = market_data.get_market_data("aapl")
+            second = market_data.get_market_data("aapl")
+
+        self.assertFalse(first["cache_hit"])
+        self.assertTrue(second["cache_hit"])
+        self.assertEqual(second["price"], 102.0)
+        download_mock.assert_called_once()
+
+    def test_market_data_provider_budget_exhaustion_returns_429(self) -> None:
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=1,
+            market_data_retry_backoff_seconds=0.0,
+            market_data_cache_ttl_seconds=0,
+            provider_call_budget=0,
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download") as download_mock,
+        ):
+            with self.assertRaises(market_data.MarketDataError) as exc:
+                market_data.get_market_data("aapl")
+
+        self.assertEqual(exc.exception.status_code, 429)
+        self.assertIn("Provider call budget exhausted", str(exc.exception))
+        download_mock.assert_not_called()
 
     def test_market_data_records_provider_success(self) -> None:
         history = pd.DataFrame(
@@ -355,6 +412,32 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(response.summary.failed_tickers, ["NVDA"])
         self.assertIn("failures", response.summary.message)
 
+    def test_openai_budget_exhaustion_uses_rule_based_explanation(self) -> None:
+        payload = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "fundamentals": {},
+            "technicals": {},
+            "scores": {"final_score": 62.5},
+            "recommendation": "NEUTRAL",
+            "short_reason": "Neutral: sample reason.",
+        }
+        settings = SimpleNamespace(
+            openai_api_key="sk-test",
+            openai_model="gpt-4.1-mini",
+            openai_call_budget=0,
+        )
+
+        with (
+            patch("app.services.ai_explainer.get_settings", return_value=settings),
+            patch("app.services.ai_explainer._openai_explanation") as openai_mock,
+        ):
+            text = explain_analysis(payload, ["price is above MA50"])
+
+        self.assertIn("Лимит OpenAI-вызовов исчерпан", text)
+        openai_mock.assert_not_called()
+
 
 class ConfigurationTests(unittest.TestCase):
     def tearDown(self) -> None:
@@ -389,6 +472,7 @@ class ConfigurationTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "MARKET_DATA_CACHE_TTL_SECONDS": "900",
                 "PROVIDER_CALL_BUDGET": "321",
                 "OPENAI_CALL_BUDGET": "12",
                 "PLAYWRIGHT_PAGE_BUDGET": "7",
@@ -399,6 +483,7 @@ class ConfigurationTests(unittest.TestCase):
             get_settings.cache_clear()
             settings = get_settings()
 
+        self.assertEqual(settings.market_data_cache_ttl_seconds, 900)
         self.assertEqual(settings.provider_call_budget, 321)
         self.assertEqual(settings.openai_call_budget, 12)
         self.assertEqual(settings.playwright_page_budget, 7)

@@ -17,6 +17,7 @@ def build_startup_diagnostics(settings: Settings) -> StartupDiagnostics:
         "api_host": settings.api_host,
         "api_port": str(settings.api_port),
         "database_scheme": _database_scheme(settings.database_url),
+        "market_data_cache_ttl_seconds": str(settings.market_data_cache_ttl_seconds),
         "provider_call_budget": str(settings.provider_call_budget),
         "openai_call_budget": str(settings.openai_call_budget),
         "playwright_page_budget": str(settings.playwright_page_budget),

@@ -46,6 +46,10 @@ Implemented:
 - readiness endpoint with a database probe.
 - Smoke tests for API routes, persistence, scanner behavior, and CLI scripts.
 - SQLite path resolution relative to the project root.
+- In-memory market-data TTL cache to avoid repeated provider downloads for the
+  same ticker inside one running process.
+- Enforced per-process runtime budgets for provider calls, OpenAI explanations,
+  and Telegram sends.
 - Development requirements file for lint and coverage tooling.
 - `ruff` and coverage configuration in `pyproject.toml`.
 - One-command local verification script at `scripts/check.sh`.
@@ -64,6 +68,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-31: `scripts/check.sh` passed after market-data TTL cache and runtime
+  budget enforcement were introduced, with `ruff`, 59 coverage-wrapped tests,
+  coverage report, and compile check.
 - 2026-05-28: offline test suite passed with 55 tests after raw source snapshot, data-quality, and FX metadata support was introduced.
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after raw source snapshot, data-quality, and FX metadata support was introduced.
 - 2026-05-28: `scripts/check.sh` passed after raw source snapshot, data-quality, and FX metadata support was introduced, with `ruff`, 55 coverage-wrapped tests, coverage report, and compile check.
@@ -141,6 +148,10 @@ Implemented:
 - Scheduler behavior is basic and not yet session-aware, idempotent, or protected by per-chat alert budgets.
 - The current recommendation labels include buy/sell-like language and should be replaced with neutral research labels before wider practical use.
 - FX normalization metadata is stored, but no live FX conversion provider is wired in yet.
+- Runtime budget counters are in-memory and reset on process restart; persistent
+  budget accounting is not implemented yet.
+- `PLAYWRIGHT_PAGE_BUDGET` is parsed and shown in diagnostics, but there are no
+  Playwright collectors yet, so there is nothing to enforce against.
 
 ## Scope And Coverage Boundaries
 
@@ -410,7 +421,7 @@ Status: in progress.
 5. Done: add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
 6. Done: add local runtime notes for Telegram bot operation, logs, restart, env setup, and database location.
 7. Done: add clear live-smoke environment flags so offline tests never depend on network access.
-8. Done: add provider-call, OpenAI-call, Playwright-page, and Telegram-send runtime budgets.
+8. Done: add provider-call, OpenAI-call, Playwright-page, and Telegram-send runtime budgets; provider, OpenAI, and Telegram-send budgets are enforced per process.
 9. Done: add backup/restore notes for the local SQLite database.
 
 ## Phase 3: Improve Data and Persistence

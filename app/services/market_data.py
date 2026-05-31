@@ -2,6 +2,7 @@ import logging
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 from typing import Any, TypeVar
 
 import pandas as pd
@@ -16,11 +17,14 @@ from app.services.providers import (
     record_provider_failure,
     record_provider_success,
 )
+from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_budget
 
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+_MARKET_DATA_CACHE_LOCK = Lock()
+_MARKET_DATA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 class MarketDataError(RuntimeError):
@@ -45,7 +49,17 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
     symbol = normalize_ticker(ticker)
     settings = get_settings()
     provider_profile = provider_registry_payload(DEFAULT_PROVIDER_NAME)
+    cache_ttl_seconds = _market_data_cache_ttl_seconds(settings, provider_profile)
+    cached_market = _get_cached_market_data(symbol, cache_ttl_seconds)
+    if cached_market is not None:
+        logger.debug(
+            "market_data_cache_hit",
+            extra={"component": "market_data", "ticker": symbol},
+        )
+        return cached_market
+
     fetched_at = datetime.now(timezone.utc)
+    provider_call_budget = getattr(settings, "provider_call_budget", None)
 
     try:
         history = _with_retries(
@@ -54,6 +68,11 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             lambda: _download_history(symbol, settings.market_data_timeout_seconds),
             settings.market_data_max_attempts,
             settings.market_data_retry_backoff_seconds,
+            before_attempt=lambda _: _consume_provider_call(
+                provider_call_budget,
+                symbol=symbol,
+                action="download market history",
+            ),
         )
 
         if history is None or history.empty or "Close" not in history.columns:
@@ -75,8 +94,13 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             symbol=symbol,
             attempts=settings.market_data_max_attempts,
             retry_backoff_seconds=settings.market_data_retry_backoff_seconds,
+            provider_call_budget=provider_call_budget,
         )
-        fast_info = _safe_fast_info(stock)
+        fast_info = _safe_fast_info(
+            stock,
+            symbol=symbol,
+            provider_call_budget=provider_call_budget,
+        )
         fast_price = _to_float(_fast_info_value(fast_info, "last_price"))
         current_price = _to_float(info.get("currentPrice"))
         regular_market_price = _to_float(info.get("regularMarketPrice"))
@@ -132,7 +156,7 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
                     extra={"component": "persistence", "provider": DEFAULT_PROVIDER_NAME},
                 )
 
-        return {
+        market = {
             "ticker": symbol,
             "price": price,
             "currency": currency,
@@ -153,7 +177,10 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             "data_quality": data_quality,
             "fx": fx,
             "source_provenance": source_provenance,
+            "cache_hit": False,
         }
+        _set_cached_market_data(symbol, market, cache_ttl_seconds)
+        return _copy_market_data(market)
     except MarketDataError:
         if db is not None:
             try:
@@ -208,6 +235,7 @@ def _safe_info(
     symbol: str,
     attempts: int,
     retry_backoff_seconds: float,
+    provider_call_budget: int | None,
 ) -> dict[str, Any]:
     try:
         info = _with_retries(
@@ -216,16 +244,35 @@ def _safe_info(
             lambda: stock.info,
             attempts,
             retry_backoff_seconds,
+            before_attempt=lambda _: _consume_provider_call(
+                provider_call_budget,
+                symbol=symbol,
+                action="load company profile",
+            ),
         )
     except MarketDataError as exc:
+        if exc.status_code == 429:
+            raise
         logger.warning("Using empty company profile for %s: %s", symbol, exc)
         return {}
     return info if isinstance(info, dict) else {}
 
 
-def _safe_fast_info(stock: yf.Ticker) -> Any:
+def _safe_fast_info(
+    stock: yf.Ticker,
+    *,
+    symbol: str,
+    provider_call_budget: int | None,
+) -> Any:
     try:
+        _consume_provider_call(
+            provider_call_budget,
+            symbol=symbol,
+            action="load fast info",
+        )
         return stock.fast_info
+    except MarketDataError:
+        raise
     except Exception:
         return {}
 
@@ -236,6 +283,7 @@ def _with_retries(
     operation: Callable[[], T],
     attempts: int,
     retry_backoff_seconds: float,
+    before_attempt: Callable[[int], None] | None = None,
 ) -> T:
     total_attempts = max(1, attempts)
     delay = max(0.0, retry_backoff_seconds)
@@ -243,7 +291,11 @@ def _with_retries(
 
     for attempt in range(1, total_attempts + 1):
         try:
+            if before_attempt is not None:
+                before_attempt(attempt)
             return operation()
+        except MarketDataError:
+            raise
         except Exception as exc:  # pragma: no cover - retry path is covered via tests
             last_exc = exc
             if attempt >= total_attempts:
@@ -263,6 +315,80 @@ def _with_retries(
     raise MarketDataError(
         f"Could not {action} after {total_attempts} attempts for {symbol}: {last_exc}"
     ) from last_exc
+
+
+def _consume_provider_call(
+    provider_call_budget: int | None,
+    *,
+    symbol: str,
+    action: str,
+) -> None:
+    try:
+        consume_runtime_budget("provider_calls", provider_call_budget)
+    except RuntimeBudgetExceeded as exc:
+        raise MarketDataError(
+            f"Provider call budget exhausted while trying to {action} for {symbol}: {exc}",
+            status_code=429,
+        ) from exc
+
+
+def _market_data_cache_ttl_seconds(settings: Any, provider_profile: dict[str, Any]) -> int:
+    ttl = getattr(settings, "market_data_cache_ttl_seconds", None)
+    if ttl is None:
+        ttl = provider_profile.get("cache_ttl_seconds") or 0
+    return max(0, int(ttl))
+
+
+def _get_cached_market_data(symbol: str, ttl_seconds: int) -> dict[str, Any] | None:
+    if ttl_seconds <= 0:
+        return None
+
+    now = time.monotonic()
+    with _MARKET_DATA_CACHE_LOCK:
+        cached = _MARKET_DATA_CACHE.get(symbol)
+        if cached is None:
+            return None
+        expires_at, market = cached
+        if expires_at <= now:
+            _MARKET_DATA_CACHE.pop(symbol, None)
+            return None
+        cached_market = _copy_market_data(market)
+
+    cached_market["cache_hit"] = True
+    return cached_market
+
+
+def _set_cached_market_data(
+    symbol: str,
+    market: dict[str, Any],
+    ttl_seconds: int,
+) -> None:
+    if ttl_seconds <= 0:
+        return
+
+    with _MARKET_DATA_CACHE_LOCK:
+        _MARKET_DATA_CACHE[symbol] = (
+            time.monotonic() + ttl_seconds,
+            _copy_market_data(market),
+        )
+
+
+def _copy_market_data(market: dict[str, Any]) -> dict[str, Any]:
+    copied = market.copy()
+    history = copied.get("history")
+    if isinstance(history, pd.DataFrame):
+        copied["history"] = history.copy(deep=True)
+
+    for key in ("info", "data_quality", "fx", "source_provenance"):
+        value = copied.get(key)
+        if isinstance(value, dict):
+            copied[key] = value.copy()
+    return copied
+
+
+def clear_market_data_cache() -> None:
+    with _MARKET_DATA_CACHE_LOCK:
+        _MARKET_DATA_CACHE.clear()
 
 
 def _fast_info_value(fast_info: Any, key: str) -> Any:

@@ -103,7 +103,12 @@ Market-data resilience settings:
 MARKET_DATA_TIMEOUT_SECONDS=20
 MARKET_DATA_MAX_ATTEMPTS=3
 MARKET_DATA_RETRY_BACKOFF_SECONDS=1.5
+MARKET_DATA_CACHE_TTL_SECONDS=3600
 ```
+
+`MARKET_DATA_CACHE_TTL_SECONDS` keeps repeated ticker analyses inside the same
+running process from re-downloading provider data. Set it to `0` to disable the
+in-memory cache.
 
 Runtime budgets:
 
@@ -113,6 +118,10 @@ OPENAI_CALL_BUDGET=50
 PLAYWRIGHT_PAGE_BUDGET=20
 TELEGRAM_SEND_BUDGET=200
 ```
+
+Runtime budgets are enforced per process. Provider calls, OpenAI explanations,
+and Telegram `sendMessage` calls stop when their configured limit is exhausted;
+restart the process to reset counters.
 
 Snapshot retention:
 
