@@ -29,6 +29,19 @@ class TechnicalIndicators(BaseModel):
     max_drawdown_pct: float | None = None
 
 
+class CalendarEvent(BaseModel):
+    name: str
+    scheduled_at: datetime | None = None
+    window_start_at: datetime | None = None
+    window_end_at: datetime | None = None
+    note: str | None = None
+
+
+class EventCalendar(BaseModel):
+    summary: str | None = None
+    upcoming_events: list[CalendarEvent] = Field(default_factory=list)
+
+
 class Scores(BaseModel):
     momentum_score: float
     valuation_score: float
@@ -52,6 +65,7 @@ class AnalyzeResponse(BaseModel):
     data_quality: "DataQualityFlags" = Field(default_factory=lambda: DataQualityFlags())
     fx: "FXNormalization | None" = None
     market_session: "MarketSession | None" = None
+    event_calendar: "EventCalendar | None" = None
     operation_notes: list[str] = Field(default_factory=list)
 
 

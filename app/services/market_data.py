@@ -137,6 +137,7 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             currency=currency,
         )
         fx = _build_fx_metadata(currency=currency, fetched_at=fetched_at)
+        event_calendar = _build_event_calendar(info=info, fetched_at=fetched_at)
         source_provenance = {
             "provider_name": DEFAULT_PROVIDER_NAME,
             "source_url": provider_payload["source_url"],
@@ -175,6 +176,7 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             fetched_at=fetched_at,
             data_quality=data_quality,
             fx=fx,
+            event_calendar=event_calendar,
             source_provenance=source_provenance,
             provider_name=DEFAULT_PROVIDER_NAME,
             source_url=provider_profile.source_url,
@@ -534,6 +536,60 @@ def _build_fx_metadata(*, currency: str | None, fetched_at: datetime) -> dict[st
     }
 
 
+def _build_event_calendar(*, info: dict[str, Any], fetched_at: datetime) -> dict[str, Any] | None:
+    events: list[dict[str, Any]] = []
+    earnings_dates = _extract_datetime_candidates(info.get("earningsDate"))
+    earnings_timestamp = _coerce_datetime_like(info.get("earningsTimestamp"))
+    if earnings_timestamp is not None:
+        earnings_dates = earnings_dates or [earnings_timestamp]
+    if earnings_dates:
+        scheduled_at = min(earnings_dates)
+        window_end_at = max(earnings_dates) if len(earnings_dates) > 1 else None
+        events.append(
+            {
+                "name": "earnings",
+                "scheduled_at": scheduled_at,
+                "window_start_at": scheduled_at if len(earnings_dates) > 1 else None,
+                "window_end_at": window_end_at,
+                "note": "Derived from yfinance company profile earnings dates.",
+            }
+        )
+
+    ex_dividend_dates = _extract_datetime_candidates(info.get("exDividendDate"))
+    dividend_dates = _extract_datetime_candidates(info.get("dividendDate"))
+    dividend_timestamp = _coerce_datetime_like(info.get("dividendDate"))
+    next_dividend_at = min(ex_dividend_dates or dividend_dates or ([dividend_timestamp] if dividend_timestamp else []), default=None)
+    if next_dividend_at is not None:
+        events.append(
+            {
+                "name": "ex_dividend",
+                "scheduled_at": next_dividend_at,
+                "note": "Derived from yfinance company profile dividend dates.",
+            }
+        )
+
+    if not events:
+        return None
+
+    summary_bits = []
+    earnings_event = next((event for event in events if event["name"] == "earnings"), None)
+    if earnings_event and earnings_event.get("scheduled_at") is not None:
+        summary_bits.append(
+            f"Next earnings around {earnings_event['scheduled_at'].date().isoformat()}"
+        )
+    dividend_event = next((event for event in events if event["name"] == "ex_dividend"), None)
+    if dividend_event and dividend_event.get("scheduled_at") is not None:
+        summary_bits.append(
+            f"Next ex-dividend around {dividend_event['scheduled_at'].date().isoformat()}"
+        )
+
+    return {
+        "summary": "; ".join(summary_bits) if summary_bits else "Company event calendar available from yfinance profile fields.",
+        "upcoming_events": events,
+        "fetched_at": fetched_at,
+    }
+
+
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -544,3 +600,33 @@ def _to_float(value: Any) -> float | None:
     if pd.isna(number):
         return None
     return number
+
+
+def _extract_datetime_candidates(value: Any) -> list[datetime]:
+    if value is None:
+        return []
+    values = value if isinstance(value, (list, tuple, set)) else [value]
+    parsed: list[datetime] = []
+    for item in values:
+        dt_value = _coerce_datetime_like(item)
+        if dt_value is not None:
+            parsed.append(dt_value)
+    return parsed
+
+
+def _coerce_datetime_like(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        dt_value = value
+    elif isinstance(value, pd.Timestamp):
+        dt_value = value.to_pydatetime()
+    elif isinstance(value, str) and value.strip():
+        parsed = pd.to_datetime(value, utc=True, errors="coerce")
+        if pd.isna(parsed):
+            return None
+        dt_value = parsed.to_pydatetime()
+    else:
+        return None
+
+    if dt_value.tzinfo is None:
+        dt_value = dt_value.replace(tzinfo=timezone.utc)
+    return dt_value.astimezone(timezone.utc)

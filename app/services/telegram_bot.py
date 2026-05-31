@@ -1300,6 +1300,11 @@ class TelegramBotService:
         if operation_notes:
             lines.extend(["", "Операционные заметки:"])
             lines.extend(f"- {self._translate_text(note)}" for note in operation_notes)
+        event_calendar = getattr(analysis, "event_calendar", None)
+        event_lines = self._event_calendar_lines(event_calendar)
+        if event_lines:
+            lines.extend(["", "События:"])
+            lines.extend(event_lines)
         disclaimer = self._analysis_disclaimer(analysis)
         if disclaimer:
             lines.extend(["", disclaimer])
@@ -1418,6 +1423,7 @@ class TelegramBotService:
         payload = snapshot.payload or {}
         market_session = payload.get("market_session") or {}
         data_quality = payload.get("data_quality") or {}
+        event_calendar = payload.get("event_calendar") or {}
         lines = [
             f"{ticker.upper()}: event and session context",
             f"Session: {market_session.get('status') or 'unknown'}",
@@ -1430,12 +1436,17 @@ class TelegramBotService:
             lines.append(f"Note: {self._translate_text(str(freshness_note))}")
         if data_quality.get("summary"):
             lines.append(f"Data quality: {self._translate_text(str(data_quality.get('summary')))}")
-        lines.extend(
-            [
-                "",
-                "Breaking news / filing calendar is not wired yet; this view shows the latest stored market session context.",
-            ]
-        )
+        event_lines = self._event_calendar_lines(event_calendar)
+        if event_lines:
+            lines.extend(["", "Upcoming company events:"])
+            lines.extend(event_lines)
+        else:
+            lines.extend(
+                [
+                    "",
+                    "No stored company event calendar is available yet; this view shows the latest stored market session context.",
+                ]
+            )
         return self._trim_message("\n".join(lines))
 
     def _freshness_text(self, ticker: str) -> str:
@@ -1450,6 +1461,7 @@ class TelegramBotService:
         source_provenance = payload.get("source_provenance") or {}
         market_session = payload.get("market_session") or {}
         data_quality = payload.get("data_quality") or {}
+        event_calendar = payload.get("event_calendar") or {}
         lines = [
             f"{ticker.upper()}: freshness",
             f"Latest analysis: {self._format_dt(snapshot.created_at)}",
@@ -1461,6 +1473,10 @@ class TelegramBotService:
         ]
         if market_session.get("freshness_note"):
             lines.append(f"Note: {self._translate_text(str(market_session.get('freshness_note')))}")
+        event_lines = self._event_calendar_lines(event_calendar)
+        if event_lines:
+            lines.extend(["", "Upcoming company events:"])
+            lines.extend(event_lines)
         return self._trim_message("\n".join(lines))
 
     def _risk_text(self, ticker: str) -> str:
@@ -1475,6 +1491,7 @@ class TelegramBotService:
         scores = payload.get("scores") or {}
         market_session = payload.get("market_session") or {}
         data_quality = payload.get("data_quality") or {}
+        event_calendar = payload.get("event_calendar") or {}
         explanation = payload.get("explanation") or ""
         lines = [
             f"{ticker.upper()}: risk context",
@@ -1486,6 +1503,10 @@ class TelegramBotService:
         ]
         if payload.get("short_reason"):
             lines.append(f"Short reason: {self._translate_text(str(payload.get('short_reason')))}")
+        event_lines = self._event_calendar_lines(event_calendar)
+        if event_lines:
+            lines.extend(["", "Upcoming company events:"])
+            lines.extend(event_lines)
         if explanation:
             lines.extend(["", self._translate_text(str(explanation))])
         return self._trim_message("\n".join(lines))
@@ -1500,6 +1521,8 @@ class TelegramBotService:
                 )
             payload = snapshot.payload or {}
             market_session = payload.get("market_session") or {}
+            event_calendar = payload.get("event_calendar") or {}
+            event_lines = self._event_calendar_lines(event_calendar)
             return self._trim_message(
                 "\n".join(
                     [
@@ -1508,8 +1531,9 @@ class TelegramBotService:
                         f"Timezone: {market_session.get('timezone') or 'n/a'}",
                         f"Open: {self._format_dt(market_session.get('market_open_at'))}",
                         f"Close: {self._format_dt(market_session.get('market_close_at'))}",
+                        *([""] + ["Upcoming company events:"] + event_lines if event_lines else []),
                         "",
-                        "This view uses the latest stored market session snapshot, not a live exchange calendar feed.",
+                        "This view uses the latest stored market session snapshot and stored company event calendar, not a live exchange calendar feed.",
                     ]
                 )
             )
@@ -1529,6 +1553,51 @@ class TelegramBotService:
             "Use /calendar AAPL to see the latest stored market session for a ticker.",
         ]
         return self._trim_message("\n".join(lines))
+
+    def _event_calendar_lines(self, event_calendar: Any) -> list[str]:
+        if not event_calendar:
+            return []
+
+        events = getattr(event_calendar, "upcoming_events", None)
+        if events is None and isinstance(event_calendar, dict):
+            events = event_calendar.get("upcoming_events")
+        if not events:
+            return []
+
+        lines: list[str] = []
+        summary = getattr(event_calendar, "summary", None)
+        if summary is None and isinstance(event_calendar, dict):
+            summary = event_calendar.get("summary")
+        if summary:
+            lines.append(self._translate_text(str(summary)))
+
+        for event in events[:4]:
+            if isinstance(event, dict):
+                name = event.get("name") or "event"
+                scheduled_at = event.get("scheduled_at")
+                window_start_at = event.get("window_start_at")
+                window_end_at = event.get("window_end_at")
+                note = event.get("note")
+            else:
+                name = getattr(event, "name", "event")
+                scheduled_at = getattr(event, "scheduled_at", None)
+                window_start_at = getattr(event, "window_start_at", None)
+                window_end_at = getattr(event, "window_end_at", None)
+                note = getattr(event, "note", None)
+
+            parts = [f"• {name}"]
+            if scheduled_at is not None:
+                parts.append(f"at {self._format_dt(scheduled_at)}")
+            if window_start_at is not None or window_end_at is not None:
+                parts.append(
+                    "window "
+                    f"{self._format_dt(window_start_at)} -> {self._format_dt(window_end_at)}"
+                )
+            if note:
+                parts.append(self._translate_text(str(note)))
+            lines.append(" | ".join(parts))
+
+        return lines
 
     def _audit_text(self, ticker: str | None) -> str:
         if not ticker:

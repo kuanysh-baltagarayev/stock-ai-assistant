@@ -70,7 +70,12 @@ class TelegramDigestModeTests(unittest.IsolatedAsyncioTestCase):
                 )
             ],
             errors=[],
-            summary=SimpleNamespace(partial_failure=False, message="ok", failed_tickers=[]),
+            summary=SimpleNamespace(
+                partial_failure=False,
+                message="ok",
+                failed_tickers=[],
+                notes=["AAPL event calendar: Next earnings around 2026-06-12."],
+            ),
         )
         send_mock = AsyncMock()
 
@@ -83,3 +88,4 @@ class TelegramDigestModeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(send_mock.await_count, 1)
         self.assertIn("Close summary дайджест", send_mock.await_args.args[1])
+        self.assertIn("event calendar", send_mock.await_args.args[1].lower())

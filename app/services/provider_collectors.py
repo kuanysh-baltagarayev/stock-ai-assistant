@@ -71,6 +71,7 @@ class MarketDataCollection:
     fetched_at: datetime
     data_quality: dict[str, Any]
     fx: dict[str, Any] | None
+    event_calendar: dict[str, Any] | None
     source_provenance: dict[str, Any]
     provider_name: str
     source_url: str | None
@@ -101,6 +102,7 @@ class MarketDataCollection:
             "corporate_actions_policy": self.corporate_actions_policy,
             "data_quality": dict(self.data_quality),
             "fx": dict(self.fx) if isinstance(self.fx, dict) else None,
+            "event_calendar": dict(self.event_calendar) if isinstance(self.event_calendar, dict) else None,
             "source_provenance": dict(self.source_provenance),
             "cache_hit": self.cache_hit,
         }
@@ -135,6 +137,7 @@ def market_data_collection_from_payload(payload: dict[str, Any]) -> MarketDataCo
         fetched_at=_parse_datetime(payload.get("fetched_at")) or datetime.now(timezone.utc),
         data_quality=dict(payload.get("data_quality") or {}),
         fx=dict(payload["fx"]) if isinstance(payload.get("fx"), dict) else None,
+        event_calendar=dict(payload["event_calendar"]) if isinstance(payload.get("event_calendar"), dict) else None,
         source_provenance=dict(payload.get("source_provenance") or {}),
         provider_name=provider_name,
         source_url=payload.get("source_url"),

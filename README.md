@@ -18,6 +18,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - CLI scanner for a default watchlist, custom tickers, JSON output, and recent-analysis reports.
 - Telegram bot with `/analyze`, `/scan`, watchlists, preferences, source-backed detail commands, and session-aware scheduled digests.
 - Telegram analysis responses include inline follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
+- Telegram analysis responses also include company event calendar snippets when yfinance profile fields expose upcoming earnings or dividend dates.
 - SQLite snapshot storage for completed analyses.
 - SQLite raw source snapshot storage with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
@@ -385,7 +386,7 @@ On first use, and for major or high-risk alerts, Telegram includes a short conte
 Per-chat alert preferences are stored in SQLite and currently cover quiet hours, daily caps, and market-hours-only digests.
 Scheduled digests respect those preferences before sending anything.
 The digest loop selects a session-aware mode automatically: pre-market, market-open, midday, close, after-hours, or weekly review on weekends.
-The detail commands read from saved analysis and source snapshots, so they reflect the latest stored provenance and freshness context even when a live event calendar feed is not available yet. `/audit` now compares the newest saved snapshots and highlights score, recommendation, freshness, provenance, and source-disagreement changes.
+The detail commands read from saved analysis, source snapshots, and stored company event calendars, so they reflect the latest stored provenance, freshness, and upcoming earnings/dividend context. `/audit` now compares the newest saved snapshots and highlights score, recommendation, freshness, provenance, and source-disagreement changes.
 
 ## Scoring Model
 

@@ -39,6 +39,8 @@ class ProviderCollectorTests(unittest.TestCase):
         self.assertEqual(collection.data_quality["summary"], "ok")
         self.assertIsInstance(market["history"], pd.DataFrame)
         self.assertEqual(market["history"].iloc[-1]["Close"], 189.12)
+        self.assertIsNotNone(market["event_calendar"])
+        self.assertIn("earnings", market["event_calendar"]["summary"].lower())
         self.assertEqual(market["source_provenance"]["provider_name"], "yfinance")
 
     def test_payload_constructor_preserves_payload_shape(self) -> None:
@@ -60,6 +62,16 @@ class ProviderCollectorTests(unittest.TestCase):
             "corporate_actions_policy": "raw_close_no_auto_adjustment",
             "data_quality": {"summary": "ok"},
             "fx": None,
+            "event_calendar": {
+                "summary": "Next earnings around 2026-06-12",
+                "upcoming_events": [
+                    {
+                        "name": "earnings",
+                        "scheduled_at": "2026-06-12T20:00:00+00:00",
+                        "note": "Derived from yfinance company profile earnings dates.",
+                    }
+                ],
+            },
             "source_provenance": {"provider_name": "yfinance"},
             "history_rows": [],
         }
@@ -70,3 +82,4 @@ class ProviderCollectorTests(unittest.TestCase):
         self.assertTrue(collection.history.empty)
         self.assertEqual(collection.source_url, "https://github.com/ranaroussi/yfinance")
         self.assertEqual(collection.to_market_dict()["price"], 101.0)
+        self.assertIn("earnings", collection.to_market_dict()["event_calendar"]["summary"].lower())

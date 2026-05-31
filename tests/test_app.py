@@ -52,6 +52,7 @@ def make_analysis(ticker: str, final_score: float) -> AnalyzeResponse:
         recommendation="NEUTRAL",
         short_reason=f"{ticker} short reason",
         explanation=f"{ticker} explanation",
+        event_calendar=None,
     )
 
 
@@ -344,9 +345,33 @@ class AppSmokeTests(unittest.TestCase):
             "price": 189.12,
             "currency": "USD",
             "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
-            "info": {"exchangeTimezoneName": "America/New_York"},
+            "info": {
+                "exchangeTimezoneName": "America/New_York",
+                "earningsDate": [
+                    datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc),
+                    datetime(2026, 6, 13, 20, 0, tzinfo=timezone.utc),
+                ],
+                "exDividendDate": datetime(2026, 6, 10, 0, 0, tzinfo=timezone.utc),
+            },
             "published_at": datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc),
             "fetched_at": datetime(2026, 6, 1, 20, 30, tzinfo=timezone.utc),
+            "event_calendar": {
+                "summary": "Next earnings around 2026-06-12; Next ex-dividend around 2026-06-10",
+                "upcoming_events": [
+                    {
+                        "name": "earnings",
+                        "scheduled_at": datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc),
+                        "window_start_at": datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc),
+                        "window_end_at": datetime(2026, 6, 13, 20, 0, tzinfo=timezone.utc),
+                        "note": "Derived from yfinance company profile earnings dates.",
+                    },
+                    {
+                        "name": "ex_dividend",
+                        "scheduled_at": datetime(2026, 6, 10, 0, 0, tzinfo=timezone.utc),
+                        "note": "Derived from yfinance company profile dividend dates.",
+                    },
+                ],
+            },
         }
         fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
         technicals = TechnicalIndicators(change_1d_pct=1.0)
@@ -376,6 +401,45 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(response.market_session.status, "after-hours")
         self.assertEqual(response.market_session.freshness_state, "session_closed")
         self.assertTrue(any("session" in note.lower() for note in response.operation_notes))
+        self.assertIsNotNone(response.event_calendar)
+        self.assertTrue(
+            any("earnings" in note.lower() for note in response.operation_notes)
+            or any("ex-dividend" in note.lower() for note in response.operation_notes)
+        )
+
+    def test_market_data_builds_event_calendar_from_profile_fields(self) -> None:
+        history = pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0]},
+            index=pd.date_range("2026-05-25", periods=3, tz="UTC"),
+        )
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=1,
+            market_data_retry_backoff_seconds=0.0,
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download", return_value=history),
+            patch("app.services.market_data.yf.Ticker", return_value=SimpleNamespace()),
+            patch(
+                "app.services.market_data._safe_info",
+                return_value={
+                    "exchangeTimezoneName": "America/New_York",
+                    "earningsDate": [
+                        datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc),
+                        datetime(2026, 6, 13, 20, 0, tzinfo=timezone.utc),
+                    ],
+                    "exDividendDate": datetime(2026, 6, 10, 0, 0, tzinfo=timezone.utc),
+                },
+            ),
+            patch("app.services.market_data._safe_fast_info", return_value={"currency": "USD"}),
+        ):
+            data = market_data.get_market_data("aapl")
+
+        self.assertIsNotNone(data["event_calendar"])
+        self.assertIn("earnings", data["event_calendar"]["summary"].lower())
+        self.assertEqual(data["event_calendar"]["upcoming_events"][0]["name"], "earnings")
 
     def test_analyze_ticker_persists_snapshot(self) -> None:
         market = {
@@ -488,6 +552,41 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("failures", response.summary.message)
         self.assertTrue(response.summary.notes)
         self.assertIn("Partial failure", response.summary.notes[0])
+
+    def test_scan_tickers_adds_event_calendar_notes_to_summary(self) -> None:
+        analysis = AnalyzeResponse(
+            ticker="AAPL",
+            generated_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            price=100.0,
+            currency="USD",
+            fundamentals=Fundamentals(company_name="Apple Inc."),
+            technicals=TechnicalIndicators(),
+            scores=Scores(
+                momentum_score=50.0,
+                valuation_score=50.0,
+                risk_score=50.0,
+                final_score=62.0,
+            ),
+            recommendation="NEUTRAL",
+            short_reason="AAPL short reason",
+            explanation="AAPL explanation",
+            event_calendar={
+                "summary": "Next earnings around 2026-06-12",
+                "upcoming_events": [
+                    {
+                        "name": "earnings",
+                        "scheduled_at": datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc),
+                        "note": "Derived from yfinance company profile earnings dates.",
+                    }
+                ],
+            },
+        )
+
+        with patch("app.services.scanner.analyze_ticker", return_value=analysis):
+            response = scan_tickers(["AAPL"], db=None)
+
+        self.assertTrue(response.summary.notes)
+        self.assertTrue(any("earnings" in note.lower() for note in response.summary.notes))
 
     def test_openai_budget_exhaustion_uses_rule_based_explanation(self) -> None:
         payload = {

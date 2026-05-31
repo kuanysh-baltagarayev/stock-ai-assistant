@@ -50,6 +50,7 @@ Implemented:
 - Telegram alert preferences with quiet hours, daily caps, and market-hours-only digests.
 - Telegram source-backed detail commands for saved analysis and source snapshots, including audit comparisons across saved snapshots.
 - Telegram analysis follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
+- Telegram company event calendar summaries derived from yfinance profile fields, including earnings and dividend hints.
 - Session-aware scheduled digests for pre-market, market-open, midday, close, after-hours, and weekly review.
 - Response-level operation notes for OpenAI fallback, data-quality warnings, partial scan failures, and Telegram budget status.
 - readiness endpoint with a database probe.
@@ -77,12 +78,11 @@ Implemented:
 
 ## Latest Verification
 
-- 2026-06-01: `scripts/test_fast.sh` passed after Telegram analysis follow-up
-  buttons and callback allowlist guards were introduced, with `ruff` and 67
-  focused tests.
-- 2026-06-01: `scripts/check.sh` passed after Telegram analysis follow-up
-  buttons and callback allowlist guards were introduced, with `ruff`, 86
-  coverage-wrapped tests, coverage report, and compile check.
+- 2026-06-01: `scripts/test_fast.sh` passed after Telegram event calendar
+  summaries were introduced, with `ruff` and 69 focused tests.
+- 2026-06-01: `scripts/check.sh` passed after Telegram event calendar
+  summaries were introduced, with `ruff`, 88 coverage-wrapped tests, coverage
+  report, and compile check.
 - 2026-06-01: `scripts/test_fast.sh` passed after source-disagreement audit
   view was introduced, with `ruff` and 65 focused tests.
 - 2026-06-01: `scripts/check.sh` passed after source-disagreement audit view
@@ -209,7 +209,7 @@ Implemented:
 - No user-facing UI exists yet; API, CLI, and Telegram flows are the current product surface.
 - Source coverage is still narrow: the app currently depends on `yfinance` for market data and does not yet ingest news or other open web sources through Playwright MCP.
 - Session awareness is now present for U.S. equities in the core analysis path, but broader exchange calendars and news freshness windows for economy and politics are still not modeled.
-- Telegram UX is still basic: it still lacks live event-calendar/news ingestion and configurable digest calendars.
+- Telegram UX is still basic: it still lacks live news ingestion and configurable digest calendars.
 - Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, does not flag stale/low-confidence data prominently, and does not show source coverage gaps in every Telegram answer.
 - Instrument identity exists for the U.S.-centric MVP, but cross-listing mapping, provider aliases, and global identifier coverage remain incomplete.
 - Corporate actions are currently represented as a raw-close policy with no auto-adjustment, and broader adjusted-price handling is still limited.
@@ -413,8 +413,8 @@ quota, and review time.
 
 Suggested order for low-waste progress:
 
-1. Event and earnings calendar ingestion with source-backed Telegram summaries
-   and digest hooks.
+1. Live SEC EDGAR filing summaries and official exchange calendar feeds with
+   source-backed Telegram hooks.
 
 ## Operations, Budgets, And Runtime Boundaries
 

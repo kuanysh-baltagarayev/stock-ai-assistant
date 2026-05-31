@@ -74,6 +74,23 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
                 freshness_note="Market session is after-hours; latest bar is from 2026-05-31.",
                 confidence=0.75,
                 source_disagreed=True,
+                event_calendar={
+                    "summary": "Next earnings around 2026-06-12; Next ex-dividend around 2026-06-10",
+                    "upcoming_events": [
+                        {
+                            "name": "earnings",
+                            "scheduled_at": "2026-06-12T20:00:00+00:00",
+                            "window_start_at": "2026-06-12T20:00:00+00:00",
+                            "window_end_at": "2026-06-13T20:00:00+00:00",
+                            "note": "Derived from yfinance company profile earnings dates.",
+                        },
+                        {
+                            "name": "ex_dividend",
+                            "scheduled_at": "2026-06-10T00:00:00+00:00",
+                            "note": "Derived from yfinance company profile dividend dates.",
+                        },
+                    ],
+                },
             )
             db.add(
                 AnalysisSnapshot(
@@ -132,6 +149,7 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
         freshness_note: str | None,
         confidence: float,
         source_disagreed: bool,
+        event_calendar: dict | None = None,
     ) -> dict:
         return {
             "ticker": "AAPL",
@@ -170,6 +188,7 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
                 "freshness_state": freshness_state,
                 "freshness_note": freshness_note,
             },
+            "event_calendar": event_calendar,
             "operation_notes": [],
         }
 
@@ -238,6 +257,7 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("freshness", send_mock.await_args_list[2].args[1].lower())
         self.assertIn("risk context", send_mock.await_args_list[3].args[1].lower())
         self.assertIn("event and session context", send_mock.await_args_list[4].args[1])
+        self.assertIn("upcoming company events", send_mock.await_args_list[4].args[1].lower())
         self.assertIn("changes vs older snapshot", send_mock.await_args_list[5].args[1].lower())
         self.assertIn("source disagreement flagged", send_mock.await_args_list[5].args[1].lower())
         self.assertIn("provenance delta", send_mock.await_args_list[5].args[1].lower())

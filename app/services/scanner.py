@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import logging
 from zoneinfo import ZoneInfo
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -65,6 +66,7 @@ def analyze_ticker(
         "data_quality": _build_data_quality(market),
         "fx": _build_fx_normalization(market),
         "market_session": market_session,
+        "event_calendar": market.get("event_calendar"),
     }
 
     if use_ai_explanation:
@@ -81,6 +83,7 @@ def analyze_ticker(
             settings=settings,
             used_ai_explanation=use_ai_explanation,
             market_session=market_session,
+            event_calendar=market.get("event_calendar"),
         ),
     )
     if db is not None:
@@ -100,6 +103,7 @@ def analyze_ticker(
 def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
     results: list[ScanResult] = []
     errors: list[ScanError] = []
+    notes: list[str] = []
 
     logger.info(
         "scan_started",
@@ -136,9 +140,10 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
                 short_reason=analysis.short_reason,
             )
         )
+        notes.extend(_event_calendar_notes(analysis.ticker, analysis.event_calendar))
 
     results.sort(key=lambda item: item.final_score, reverse=True)
-    summary = _build_scan_summary(tickers=tickers, results=results, errors=errors)
+    summary = _build_scan_summary(tickers=tickers, results=results, errors=errors, notes=notes)
 
     if summary.partial_failure:
         logger.warning(
@@ -402,6 +407,7 @@ def _build_scan_summary(
     tickers: list[str],
     results: list[ScanResult],
     errors: list[ScanError],
+    notes: list[str] | None = None,
 ) -> ScanSummary:
     failed_tickers = [item.ticker for item in errors]
     success_count = len(results)
@@ -411,9 +417,9 @@ def _build_scan_summary(
         message = f"Scan completed with {success_count} successful tickers and {error_count} failures."
     else:
         message = f"Scan completed successfully for {success_count} tickers."
-    notes = []
+    summary_notes = list(notes or [])
     if partial_failure:
-        notes.append(
+        summary_notes.append(
             "Partial failure: review the per-ticker error lines for market-data issues or ticker-specific problems."
         )
 
@@ -424,7 +430,7 @@ def _build_scan_summary(
         partial_failure=partial_failure,
         message=message,
         failed_tickers=failed_tickers,
-        notes=notes,
+        notes=summary_notes,
     )
 
 
@@ -435,6 +441,7 @@ def _build_operation_notes(
     settings,
     used_ai_explanation: bool,
     market_session: dict | None,
+    event_calendar: dict | None,
 ) -> list[str]:
     notes: list[str] = []
     data_quality = market.get("data_quality") or {}
@@ -447,6 +454,8 @@ def _build_operation_notes(
         if session_note:
             notes.append(session_note)
 
+    notes.extend(_event_calendar_notes(str(market.get("ticker") or "UNKNOWN"), event_calendar))
+
     if used_ai_explanation:
         if not getattr(settings, "openai_api_key", None):
             notes.append("OpenAI explanation is disabled, so a rule-based explanation was used.")
@@ -455,4 +464,33 @@ def _build_operation_notes(
         elif "Объяснение от LLM недоступно" in explanation:
             notes.append("OpenAI response was unavailable, so a rule-based explanation was used.")
 
+    return notes
+
+
+def _event_calendar_notes(ticker: str, event_calendar: Any) -> list[str]:
+    if not event_calendar:
+        return []
+
+    events = getattr(event_calendar, "upcoming_events", None)
+    if events is None and isinstance(event_calendar, dict):
+        events = event_calendar.get("upcoming_events")
+    if not events:
+        return []
+
+    notes: list[str] = []
+    summary = getattr(event_calendar, "summary", None)
+    if summary is None and isinstance(event_calendar, dict):
+        summary = event_calendar.get("summary")
+    if summary:
+        notes.append(f"{ticker.upper()} event calendar: {summary}.")
+
+    for event in events:
+        name = getattr(event, "name", None)
+        if name is None and isinstance(event, dict):
+            name = event.get("name")
+        scheduled_at = getattr(event, "scheduled_at", None)
+        if scheduled_at is None and isinstance(event, dict):
+            scheduled_at = event.get("scheduled_at")
+        if name and scheduled_at is not None:
+            notes.append(f"{ticker.upper()} {name} event around {scheduled_at.date().isoformat()}.")
     return notes
