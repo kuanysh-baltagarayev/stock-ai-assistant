@@ -196,13 +196,23 @@ http://127.0.0.1:8000/
 python -m unittest discover -v
 ```
 
+Fast development loop:
+
+```bash
+scripts/test_fast.sh
+scripts/test_fast.sh tests.test_app.AppSmokeTests
+```
+
 Full local verification:
 
 ```bash
 scripts/check.sh
 ```
 
-This runs `ruff`, coverage-wrapped unit tests, a coverage report, and `compileall`.
+`scripts/test_fast.sh` runs `ruff` and a focused unittest set without coverage
+for quick iteration. `scripts/check.sh` runs `ruff`, coverage-wrapped unit
+tests, a coverage report, and `compileall`; use it before considering a change
+complete.
 
 ## Check Health
 

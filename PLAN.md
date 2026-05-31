@@ -68,6 +68,11 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-31: `scripts/test_fast.sh` passed after development economy workflow
+  updates, with `ruff` and 40 focused tests.
+- 2026-05-31: `scripts/check.sh` passed after development economy workflow
+  updates, with `ruff`, 59 coverage-wrapped tests, coverage report, and compile
+  check.
 - 2026-05-31: `scripts/check.sh` passed after market-data TTL cache and runtime
   budget enforcement were introduced, with `ruff`, 59 coverage-wrapped tests,
   coverage report, and compile check.
@@ -317,6 +322,45 @@ Required test coverage:
 8. Live smoke tests separated from offline tests and guarded by clear environment settings.
 9. Migration and persistence tests once schema migrations are introduced.
 
+## Development Economy Rules
+
+These rules keep future implementation work cheap in tokens, live-provider
+quota, and review time.
+
+1. Work in one vertical slice at a time: schema, service behavior, tests, docs,
+   and verification for a narrow workflow.
+2. Prefer offline fixtures and deterministic tests before any live provider
+   smoke. Use `ALLOW_LIVE_NETWORK=1` only for deliberate final checks.
+3. Use `scripts/test_fast.sh` while iterating and reserve `scripts/check.sh` for
+   completion checks before commit.
+4. Keep normal development on rule-based explanations; run OpenAI smoke only
+   when changing LLM behavior.
+5. Keep development watchlists to one to three tickers unless testing scan-scale
+   behavior.
+6. When asking an agent to continue, name the next slice and expected files when
+   possible. This avoids re-reading unrelated project areas.
+7. Update this plan at the end of each slice so future turns can resume from
+   tracked context instead of rediscovering decisions.
+8. Commit completed, verified slices so future agents can inspect `git log` and
+   `git show` instead of relying on chat history.
+
+## Next Implementation Slices
+
+Suggested order for low-waste progress:
+
+1. Per-chat Telegram watchlists: add persistence, `/watchlist`, `/add`,
+   `/remove`, and `/scan mine`, with Telegram unit tests and README updates.
+2. Telegram access control: add an allowlist/admin approval setting before
+   broader bot usage.
+3. User-visible operation summaries: make market-data, OpenAI fallback, and
+   Telegram-send budget failures visible in API/CLI/Telegram responses.
+4. Source provider abstraction: introduce normalized collector contracts and
+   offline fixtures before adding SEC, macro, or news sources.
+5. Session/freshness foundation: add market session states and stale-data
+   thresholds for U.S. equities before richer digests or alerts.
+6. Telegram preferences: quiet hours, max alerts per day, minimum confidence,
+   and market-hours-only mode.
+
 ## Operations, Budgets, And Runtime Boundaries
 
 The MVP should stay runnable on a local machine. Heavy provider calls, Playwright
@@ -418,11 +462,12 @@ Status: in progress.
 2. Done: document the supported Python version.
 3. Done: add CI for tests and compile checks.
 4. Done: add a one-command local verification entrypoint at `scripts/check.sh`.
-5. Done: add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
-6. Done: add local runtime notes for Telegram bot operation, logs, restart, env setup, and database location.
-7. Done: add clear live-smoke environment flags so offline tests never depend on network access.
-8. Done: add provider-call, OpenAI-call, Playwright-page, and Telegram-send runtime budgets; provider, OpenAI, and Telegram-send budgets are enforced per process.
-9. Done: add backup/restore notes for the local SQLite database.
+5. Done: add a fast development verification entrypoint at `scripts/test_fast.sh`.
+6. Done: add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
+7. Done: add local runtime notes for Telegram bot operation, logs, restart, env setup, and database location.
+8. Done: add clear live-smoke environment flags so offline tests never depend on network access.
+9. Done: add provider-call, OpenAI-call, Playwright-page, and Telegram-send runtime budgets; provider, OpenAI, and Telegram-send budgets are enforced per process.
+10. Done: add backup/restore notes for the local SQLite database.
 
 ## Phase 3: Improve Data and Persistence
 
