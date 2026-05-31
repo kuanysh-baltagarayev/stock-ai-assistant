@@ -11,6 +11,7 @@ from urllib import parse, request
 from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import TelegramSubscription
+from app.services.market_data import InvalidTickerError, normalize_ticker
 from app.services.research_labels import research_label_to_russian
 from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_budget
 from app.services.scanner import analyze_ticker, scan_tickers
@@ -48,6 +49,9 @@ class TelegramBotService:
     def _button_choose_ticker(self) -> str:
         return "Выбрать тикер"
 
+    def _button_watchlist(self) -> str:
+        return "Мой список"
+
     def _button_back(self) -> str:
         return "Назад"
 
@@ -62,10 +66,11 @@ class TelegramBotService:
                 {"text": self._button_status()},
             ],
             [
+                {"text": self._button_watchlist()},
                 {"text": self._button_choose_ticker()},
                 {"text": self._button_scan()},
-                {"text": self._button_help()},
             ],
+            [{"text": self._button_help()}],
         ]
         return {
             "keyboard": keyboard,
@@ -205,6 +210,14 @@ class TelegramBotService:
             )
             return
 
+        if action == "watchlist":
+            await self._send_message(
+                int(chat_id),
+                self._watchlist_text(int(chat_id)),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
         if action == "subscribe":
             is_first_use = self._subscription_for_chat(int(chat_id)) is None
             self._upsert_subscription(int(chat_id), username=username, active=True)
@@ -218,6 +231,44 @@ class TelegramBotService:
             )
             return
 
+        if action == "add":
+            added, invalid = self._update_watchlist(
+                int(chat_id),
+                username=username,
+                tickers=args,
+                mode="add",
+            )
+            await self._send_message(
+                int(chat_id),
+                self._watchlist_update_text(
+                    chat_id=int(chat_id),
+                    mode="add",
+                    changed_tickers=added,
+                    invalid_tickers=invalid,
+                ),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "remove":
+            removed, invalid = self._update_watchlist(
+                int(chat_id),
+                username=username,
+                tickers=args,
+                mode="remove",
+            )
+            await self._send_message(
+                int(chat_id),
+                self._watchlist_update_text(
+                    chat_id=int(chat_id),
+                    mode="remove",
+                    changed_tickers=removed,
+                    invalid_tickers=invalid,
+                ),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
         if action == "unsubscribe":
             self._upsert_subscription(int(chat_id), username=username, active=False)
             await self._send_message(
@@ -225,6 +276,35 @@ class TelegramBotService:
                 "Подписка отключена.",
                 reply_markup=self._main_keyboard(),
             )
+            return
+
+        if action == "scan_mine":
+            watchlist = self._watchlist_tickers(int(chat_id))
+            if not watchlist:
+                await self._send_message(
+                    int(chat_id),
+                    "Твой список тикеров пуст. Сначала добавь тикеры через /add AAPL.",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            await self._send_message(
+                int(chat_id),
+                "Запускаю сканирование твоего списка...",
+                reply_markup=self._main_keyboard(),
+            )
+            try:
+                response = await asyncio.to_thread(scan_tickers, watchlist, None)
+                await self._send_message(
+                    int(chat_id),
+                    self._scan_text(response.results, response.errors),
+                    reply_markup=self._main_keyboard(),
+                )
+            except Exception as exc:
+                await self._send_message(
+                    int(chat_id),
+                    f"Не удалось выполнить сканирование твоего списка: {exc}",
+                    reply_markup=self._main_keyboard(),
+                )
             return
 
         if action == "status":
@@ -313,23 +393,26 @@ class TelegramBotService:
         if not subscribers:
             return
 
-        tickers = self._configured_tickers()
-        if not tickers:
-            return
-
-        response = await asyncio.to_thread(scan_tickers, tickers, None)
-        digest = self._digest_text(response.results, response.errors)
-        logger.info(
-            "telegram_digest_ready",
-            extra={
-                "component": "telegram",
-                "subscriber_count": len(subscribers),
-                "ticker_count": len(tickers),
-                "result_count": len(response.results),
-                "error_count": len(response.errors),
-            },
-        )
         for subscriber in subscribers:
+            tickers = self._watchlist_tickers_for_subscription(subscriber)
+            if not tickers:
+                tickers = self._configured_tickers()
+            if not tickers:
+                continue
+
+            response = await asyncio.to_thread(scan_tickers, tickers, None)
+            digest = self._digest_text(response.results, response.errors)
+            logger.info(
+                "telegram_digest_ready",
+                extra={
+                    "component": "telegram",
+                    "subscriber_count": len(subscribers),
+                    "chat_id": subscriber.chat_id,
+                    "ticker_count": len(tickers),
+                    "result_count": len(response.results),
+                    "error_count": len(response.errors),
+                },
+            )
             await self._send_message(subscriber.chat_id, digest)
             self._mark_last_alert(subscriber.id)
 
@@ -356,7 +439,13 @@ class TelegramBotService:
         finally:
             db.close()
 
-    def _upsert_subscription(self, chat_id: int, username: str | None, active: bool) -> None:
+    def _upsert_subscription(
+        self,
+        chat_id: int,
+        username: str | None,
+        active: bool,
+        watchlist_symbols: list[str] | None = None,
+    ) -> None:
         db = SessionLocal()
         try:
             sub = (
@@ -369,11 +458,14 @@ class TelegramBotService:
                     chat_id=chat_id,
                     username=username,
                     is_active=active,
+                    watchlist_symbols=watchlist_symbols or [],
                 )
                 db.add(sub)
             else:
                 sub.username = username or sub.username
                 sub.is_active = active
+                if watchlist_symbols is not None:
+                    sub.watchlist_symbols = watchlist_symbols
             db.commit()
             logger.info(
                 "telegram_subscription_updated",
@@ -381,6 +473,7 @@ class TelegramBotService:
                     "component": "telegram",
                     "chat_id": chat_id,
                     "active": active,
+                    "watchlist_size": len(sub.watchlist_symbols or []),
                 },
             )
         except Exception:
@@ -391,6 +484,17 @@ class TelegramBotService:
             )
         finally:
             db.close()
+
+    def _watchlist_tickers_for_subscription(self, subscription: TelegramSubscription) -> list[str]:
+        symbols = subscription.watchlist_symbols or []
+        normalized, _ = self._normalize_watchlist_symbols(symbols)
+        return normalized
+
+    def _watchlist_tickers(self, chat_id: int) -> list[str]:
+        sub = self._subscription_for_chat(chat_id)
+        if sub is None:
+            return []
+        return self._watchlist_tickers_for_subscription(sub)
 
     def _mark_last_alert(self, subscription_id: int) -> None:
         db = SessionLocal()
@@ -424,10 +528,13 @@ class TelegramBotService:
             if sub is None:
                 return "Подписка не найдена. Используй /start."
             last_alert = sub.last_alert_at.isoformat() if sub.last_alert_at else "ещё не отправлял"
+            watchlist = self._watchlist_tickers_for_subscription(sub)
+            watchlist_text = ", ".join(watchlist) if watchlist else "пусто"
             return (
                 f"Подписка активна: {'да' if sub.is_active else 'нет'}\n"
                 f"Последняя рассылка: {last_alert}\n"
-                f"Частота рассылки: {self.settings.telegram_digest_interval_minutes} мин."
+                f"Частота рассылки: {self.settings.telegram_digest_interval_minutes} мин.\n"
+                f"Твой список: {watchlist_text}"
             )
         finally:
             db.close()
@@ -475,12 +582,27 @@ class TelegramBotService:
             return "unsubscribe", []
         if lowered in {"/status", "status", self._button_status().lower()}:
             return "status", []
+        if lowered in {"/watchlist", "watchlist", self._button_watchlist().lower()}:
+            return "watchlist", []
         if lowered in {self._button_choose_ticker().lower()}:
             return "ticker_menu", []
         if lowered in {self._button_back().lower()}:
             return "back", []
+        if lowered in {"/scan mine", "scan mine"}:
+            return "scan_mine", []
         if lowered in {"/scan", "scan", self._button_scan().lower()}:
             return "scan", []
+
+        if lowered.startswith("/add ") or lowered.startswith("add "):
+            parts = normalized.split(maxsplit=1)
+            if len(parts) == 2:
+                return "add", self._parse_tickers(parts[1].split())
+            return "add", []
+        if lowered.startswith("/remove ") or lowered.startswith("remove "):
+            parts = normalized.split(maxsplit=1)
+            if len(parts) == 2:
+                return "remove", self._parse_tickers(parts[1].split())
+            return "remove", []
 
         if lowered.startswith("/analyze "):
             ticker = normalized.split(maxsplit=1)[1].strip().upper()
@@ -507,8 +629,9 @@ class TelegramBotService:
             "Доступно:\n"
             "• подписка и отписка\n"
             "• статус подписки\n"
+            "• просмотр и редактирование личного списка тикеров\n"
             "• анализ отдельных тикеров\n"
-            "• сканирование рынка по списку из настроек\n"
+            "• сканирование рынка по списку из настроек или по команде /scan mine\n"
         )
 
     def _welcome_text(self, is_first_use: bool = False) -> str:
@@ -701,6 +824,104 @@ class TelegramBotService:
             if not item.startswith("/"):
                 tickers.append(item)
         return tickers
+
+    def _normalize_watchlist_symbols(self, tickers: list[str]) -> tuple[list[str], list[str]]:
+        normalized: list[str] = []
+        invalid: list[str] = []
+        seen: set[str] = set()
+        for item in tickers:
+            raw = item.strip().rstrip(",")
+            if not raw:
+                continue
+            try:
+                symbol = normalize_ticker(raw)
+            except InvalidTickerError:
+                invalid.append(item)
+                continue
+            if symbol not in seen:
+                normalized.append(symbol)
+                seen.add(symbol)
+        return normalized, invalid
+
+    def _update_watchlist(
+        self,
+        chat_id: int,
+        *,
+        username: str | None,
+        tickers: list[str],
+        mode: str,
+    ) -> tuple[list[str], list[str]]:
+        normalized, invalid = self._normalize_watchlist_symbols(tickers)
+        sub = self._subscription_for_chat(chat_id)
+        current = self._watchlist_tickers_for_subscription(sub) if sub is not None else []
+
+        if mode == "add":
+            updated = current[:]
+            for symbol in normalized:
+                if symbol not in updated:
+                    updated.append(symbol)
+        else:
+            updated = [symbol for symbol in current if symbol not in normalized]
+
+        self._upsert_subscription(
+            chat_id,
+            username=username,
+            active=True if sub is None else sub.is_active,
+            watchlist_symbols=updated,
+        )
+        if mode == "add":
+            changed = [symbol for symbol in updated if symbol not in current]
+        else:
+            changed = [symbol for symbol in current if symbol not in updated]
+        return changed, invalid
+
+    def _watchlist_text(self, chat_id: int) -> str:
+        sub = self._subscription_for_chat(chat_id)
+        if sub is None:
+            return (
+                "Подписка не найдена. Используй /start, затем /add AAPL MSFT NVDA, "
+                "чтобы завести личный список."
+            )
+
+        watchlist = self._watchlist_tickers_for_subscription(sub)
+        if watchlist:
+            return (
+                "Твой список тикеров:\n"
+                f"{', '.join(watchlist)}\n\n"
+                "Команды: /add AAPL, /remove AAPL, /scan mine"
+            )
+
+        default_list = ", ".join(self._configured_tickers()) or "пусто"
+        return (
+            "Личный список пока пуст.\n"
+            f"По умолчанию для дайджестов используется: {default_list}\n\n"
+            "Команды: /add AAPL, /watchlist, /scan mine"
+        )
+
+    def _watchlist_update_text(
+        self,
+        *,
+        chat_id: int,
+        mode: str,
+        changed_tickers: list[str],
+        invalid_tickers: list[str],
+    ) -> str:
+        current = self._watchlist_tickers(chat_id)
+        if mode == "add":
+            prefix = "Добавил в твой список"
+        else:
+            prefix = "Удалил из твоего списка"
+
+        if changed_tickers:
+            result = f"{prefix}: {', '.join(changed_tickers)}."
+        else:
+            result = "Ничего не изменилось."
+
+        if invalid_tickers:
+            result = f"{result}\nНекорректные тикеры пропущены: {', '.join(invalid_tickers)}."
+
+        result = f"{result}\nТекущий список: {', '.join(current) if current else 'пусто'}."
+        return result
 
     def _trim_message(self, text: str, limit: int = 3900) -> str:
         if len(text) <= limit:

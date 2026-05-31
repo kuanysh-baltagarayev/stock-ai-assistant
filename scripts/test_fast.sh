@@ -18,5 +18,6 @@ else
     tests.test_app.ConfigurationTests \
     tests.test_scripts \
     tests.test_telegram_disclaimers \
+    tests.test_telegram_watchlists \
     tests.test_research_labels
 fi

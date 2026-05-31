@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, MetaData, String, Table, Column, insert, select, text
+from sqlalchemy import inspect
 from sqlalchemy.engine import Connection, Engine
 
 from app.database import Base
@@ -51,6 +52,23 @@ def _upgrade_0004_source_snapshots(connection: Connection) -> None:
     Base.metadata.create_all(bind=connection, tables=[app.models.SourceSnapshot.__table__])
 
 
+def _upgrade_0005_telegram_watchlists(connection: Connection) -> None:
+    columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("telegram_subscriptions")
+    }
+    if "watchlist_symbols" in columns:
+        return
+    connection.execute(
+        text(
+            """
+            ALTER TABLE telegram_subscriptions
+            ADD COLUMN watchlist_symbols JSON
+            """
+        )
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -71,6 +89,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0004_source_snapshots",
         description="Create the raw source snapshots table.",
         upgrade=_upgrade_0004_source_snapshots,
+    ),
+    Migration(
+        revision="0005_telegram_watchlists",
+        description="Add per-chat Telegram watchlists.",
+        upgrade=_upgrade_0005_telegram_watchlists,
     ),
 )
 

@@ -43,6 +43,7 @@ Implemented:
 - Telegram bot service and entrypoint.
 - CLI scanner with default watchlist, custom tickers, and JSON output.
 - live smoke script for real market data checks without OpenAI or Telegram.
+- Per-chat Telegram watchlists with `/watchlist`, `/add`, `/remove`, and `/scan mine`.
 - readiness endpoint with a database probe.
 - Smoke tests for API routes, persistence, scanner behavior, and CLI scripts.
 - SQLite path resolution relative to the project root.
@@ -68,6 +69,11 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-05-31: `scripts/test_fast.sh` passed after per-chat Telegram watchlist
+  support was introduced, with `ruff` and 44 focused tests.
+- 2026-05-31: `scripts/check.sh` passed after per-chat Telegram watchlist
+  support was introduced, with `ruff`, 63 coverage-wrapped tests, coverage
+  report, and compile check.
 - 2026-05-31: `scripts/test_fast.sh` passed after development economy workflow
   updates, with `ruff` and 40 focused tests.
 - 2026-05-31: `scripts/check.sh` passed after development economy workflow
@@ -486,7 +492,7 @@ Status: in progress.
 
 ## Phase 4: Productize User Workflows
 
-1. Add watchlist configuration.
+1. Done: add watchlist configuration with per-chat Telegram watchlists and list commands.
 2. Add a richer CLI report mode for recent analyses.
 3. Improve Telegram commands for custom ticker scans and status visibility.
 4. Add user-visible error summaries for failed market data, OpenAI, and Telegram operations.

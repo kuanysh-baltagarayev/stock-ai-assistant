@@ -122,6 +122,7 @@ class TelegramSubscription(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    watchlist_symbols: Mapped[list[str]] = mapped_column(JSON, default=list)
     last_alert_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

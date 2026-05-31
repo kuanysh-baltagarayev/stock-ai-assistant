@@ -349,10 +349,14 @@ Available commands:
 - `/start` or `/subscribe` to activate the chat.
 - `/unsubscribe` to stop alerts.
 - `/status` to see subscription state and last digest time.
+- `/watchlist` to view the personal ticker list.
+- `/add AAPL MSFT` to add tickers to the personal list.
+- `/remove AAPL` to remove tickers from the personal list.
 - `/analyze AAPL` to analyze one ticker.
 - `/scan AAPL MSFT NVDA` to scan a list of tickers.
+- `/scan mine` to scan the personal watchlist.
 
-Scheduled digests use `TELEGRAM_DEFAULT_TICKERS` and send the strongest candidates from that list.
+Scheduled digests use the personal watchlist when it exists and fall back to `TELEGRAM_DEFAULT_TICKERS` when it does not.
 On first use, and for major or high-risk alerts, Telegram includes a short contextual disclaimer instead of repeating the same warning on every line.
 
 ## Scoring Model
