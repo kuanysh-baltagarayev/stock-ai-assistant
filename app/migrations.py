@@ -118,6 +118,23 @@ def _upgrade_0008_telegram_min_confidence(connection: Connection) -> None:
     )
 
 
+def _upgrade_0009_telegram_alert_deduplication(connection: Connection) -> None:
+    columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("telegram_subscriptions")
+    }
+    if "last_digest_fingerprint" in columns:
+        return
+    connection.execute(
+        text(
+            """
+            ALTER TABLE telegram_subscriptions
+            ADD COLUMN last_digest_fingerprint VARCHAR(64)
+            """
+        )
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -158,6 +175,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0008_telegram_min_confidence",
         description="Add per-chat Telegram minimum confidence threshold.",
         upgrade=_upgrade_0008_telegram_min_confidence,
+    ),
+    Migration(
+        revision="0009_telegram_alert_deduplication",
+        description="Add per-chat Telegram alert deduplication fingerprint.",
+        upgrade=_upgrade_0009_telegram_alert_deduplication,
     ),
 )
 

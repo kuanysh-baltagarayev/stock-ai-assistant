@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import json
 from datetime import datetime, timezone
@@ -742,6 +743,23 @@ class TelegramBotService:
 
             response = await asyncio.to_thread(scan_tickers, tickers, None)
             min_confidence = getattr(subscriber, "min_confidence", None)
+            digest_fingerprint = self._digest_fingerprint(
+                response.results,
+                response.errors,
+                summary_notes=getattr(response.summary, "notes", None),
+                digest_mode=mode,
+                min_confidence=min_confidence,
+            )
+            if getattr(subscriber, "last_digest_fingerprint", None) == digest_fingerprint:
+                logger.info(
+                    "telegram_digest_skipped",
+                    extra={
+                        "component": "telegram",
+                        "chat_id": subscriber.chat_id,
+                        "reason": "duplicate_digest",
+                    },
+                )
+                continue
             digest = self._digest_text(
                 response.results,
                 response.errors,
@@ -761,7 +779,7 @@ class TelegramBotService:
                 },
             )
             await self._send_message(subscriber.chat_id, digest)
-            self._mark_last_alert(subscriber.id)
+            self._mark_last_alert(subscriber.id, digest_fingerprint=digest_fingerprint)
 
     def _analyze_and_persist(self, ticker: str) -> Any:
         db = SessionLocal()
@@ -960,6 +978,7 @@ class TelegramBotService:
             sub.quiet_hours_end_minute = None
             sub.max_alerts_per_day = None
             sub.market_hours_only = False
+            sub.last_digest_fingerprint = None
             sub.daily_alert_count = 0
             sub.daily_alert_date = None
             sub.last_alert_at = None
@@ -988,7 +1007,7 @@ class TelegramBotService:
             return []
         return self._watchlist_tickers_for_subscription(sub)
 
-    def _mark_last_alert(self, subscription_id: int) -> None:
+    def _mark_last_alert(self, subscription_id: int, *, digest_fingerprint: str | None = None) -> None:
         db = SessionLocal()
         try:
             sub = db.get(TelegramSubscription, subscription_id)
@@ -1001,6 +1020,8 @@ class TelegramBotService:
                 sub.daily_alert_count = 0
             sub.daily_alert_count = (sub.daily_alert_count or 0) + 1
             sub.last_alert_at = now
+            if digest_fingerprint is not None:
+                sub.last_digest_fingerprint = digest_fingerprint
             db.commit()
             logger.debug(
                 "telegram_alert_timestamp_updated",
@@ -1872,6 +1893,42 @@ class TelegramBotService:
         if disclaimer:
             lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
+
+    def _digest_fingerprint(
+        self,
+        results: list[Any],
+        errors: list[Any],
+        *,
+        summary_notes: list[str] | None = None,
+        digest_mode: str = "market_open",
+        min_confidence: float | None = None,
+    ) -> str:
+        limit = 5 if digest_mode == "weekly_review" else 3
+        top = self._filter_results_by_confidence(results[:limit], min_confidence)
+        payload = {
+            "mode": digest_mode,
+            "min_confidence": min_confidence,
+            "results": [
+                {
+                    "ticker": item.ticker,
+                    "recommendation": item.recommendation,
+                    "final_score": round(float(item.final_score), 4),
+                    "price": round(float(item.price), 4),
+                    "short_reason": str(item.short_reason),
+                }
+                for item in top
+            ],
+            "errors": [
+                {
+                    "ticker": item.ticker,
+                    "error": str(item.error),
+                }
+                for item in errors[:3]
+            ],
+            "summary_notes": [str(note) for note in (summary_notes or [])],
+        }
+        encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def _digest_heading(self, digest_mode: str) -> str:
         headings = {

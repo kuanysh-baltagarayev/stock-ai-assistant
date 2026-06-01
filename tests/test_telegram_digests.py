@@ -135,3 +135,36 @@ class TelegramDigestModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Скрыто низкоуверенных сигналов: 1", payload)
         self.assertIn("AAPL", payload)
         self.assertNotIn("MSFT", payload)
+
+    async def test_scheduled_digest_skips_duplicate_alerts(self) -> None:
+        self.service._upsert_subscription(
+            1001,
+            username="alice",
+            active=True,
+            watchlist_symbols=["AAPL"],
+        )
+        fake_scan = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="AAPL",
+                    recommendation="NEUTRAL",
+                    final_score=61.0,
+                    price=189.12,
+                    short_reason="sample reason",
+                    confidence=0.93,
+                )
+            ],
+            errors=[],
+            summary=SimpleNamespace(partial_failure=False, message="ok", failed_tickers=[]),
+        )
+        send_mock = AsyncMock()
+
+        with (
+            patch("app.services.telegram_bot.scan_tickers", return_value=fake_scan),
+            patch.object(self.service, "_send_message", send_mock),
+            patch.object(self.service, "_scheduled_digest_mode", return_value="close"),
+        ):
+            await self.service._send_digest_to_active_subscribers()
+            await self.service._send_digest_to_active_subscribers()
+
+        self.assertEqual(send_mock.await_count, 1)

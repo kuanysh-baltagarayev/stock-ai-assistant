@@ -154,6 +154,7 @@ class TelegramPreferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(subscription.daily_alert_count, 0)
         self.assertIsNone(subscription.daily_alert_date)
         self.assertIsNone(subscription.last_alert_at)
+        self.assertIsNone(subscription.last_digest_fingerprint)
         self.assertIn("данные списка и уведомлений очищены", send_mock.await_args.args[1])
 
     async def test_digest_skips_market_hours_only_subscribers_when_market_closed(self) -> None:

@@ -22,6 +22,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - Telegram analysis responses include inline follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
 - Telegram analysis and detail responses surface data-quality warnings for stale, delayed, low-confidence, or source-disagreeing data.
 - Telegram analysis responses also include company event calendar snippets when yfinance profile fields expose upcoming earnings or dividend dates.
+- Scheduled Telegram digests skip duplicate payloads for the same chat until the underlying digest content changes.
 - SQLite snapshot storage for completed analyses.
 - SQLite raw source snapshot storage with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
