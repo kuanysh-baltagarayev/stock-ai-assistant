@@ -371,7 +371,7 @@ python scripts/check_telegram.py
 Available commands:
 
 - `/start` or `/subscribe` to activate the chat.
-- `/unsubscribe` to stop alerts.
+- `/unsubscribe` to stop alerts and clear personal watchlist and alert-state data.
 - `/status` to see subscription state and last digest time.
 - `/watchlist` to view the personal ticker list.
 - `/add AAPL MSFT` to add tickers to the personal list.

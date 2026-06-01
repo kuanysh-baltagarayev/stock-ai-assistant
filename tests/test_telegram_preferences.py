@@ -94,6 +94,48 @@ class TelegramPreferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Настройки уведомлений", send_mock.await_args_list[-1].args[1])
         self.assertIn("Market-hours-only", send_mock.await_args_list[-1].args[1])
 
+    async def test_unsubscribe_clears_personal_data(self) -> None:
+        self.service._upsert_subscription(
+            505,
+            username="erin",
+            active=True,
+            watchlist_symbols=["AAPL", "NVDA"],
+            preferences={
+                "quiet_hours_start_minute": 22 * 60,
+                "quiet_hours_end_minute": 7 * 60,
+                "max_alerts_per_day": 2,
+                "market_hours_only": True,
+                "daily_alert_count": 3,
+                "daily_alert_date": "2026-06-01",
+                "last_alert_at": datetime(2026, 6, 1, 8, 0, tzinfo=timezone.utc),
+            },
+        )
+        send_mock = AsyncMock()
+
+        with patch.object(self.service, "_send_message", send_mock):
+            await self.service._handle_update(
+                {
+                    "message": {
+                        "chat": {"id": 505},
+                        "from": {"username": "erin"},
+                        "text": "/unsubscribe",
+                    }
+                }
+            )
+
+        subscription = self.service._subscription_for_chat(505)
+        self.assertIsNotNone(subscription)
+        self.assertFalse(subscription.is_active)
+        self.assertEqual(subscription.watchlist_symbols, [])
+        self.assertIsNone(subscription.quiet_hours_start_minute)
+        self.assertIsNone(subscription.quiet_hours_end_minute)
+        self.assertIsNone(subscription.max_alerts_per_day)
+        self.assertFalse(subscription.market_hours_only)
+        self.assertEqual(subscription.daily_alert_count, 0)
+        self.assertIsNone(subscription.daily_alert_date)
+        self.assertIsNone(subscription.last_alert_at)
+        self.assertIn("данные списка и уведомлений очищены", send_mock.await_args.args[1])
+
     async def test_digest_skips_market_hours_only_subscribers_when_market_closed(self) -> None:
         self.service._upsert_subscription(
             202,

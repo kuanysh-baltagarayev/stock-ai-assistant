@@ -81,6 +81,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/check.sh` passed after adding unsubscribe cleanup for
+  per-chat Telegram data, with `ruff`, 98 coverage-wrapped tests, coverage
+  report, and compile check.
 - 2026-06-01: `scripts/check.sh` passed after adding user-visible operation
   error summaries to CLI and Telegram scan/digest output, with `ruff`, 97
   coverage-wrapped tests, coverage report, and compile check.
@@ -570,7 +573,7 @@ Status: in progress.
 6. Done: add Telegram-only source-backed workflows: `/why`, `/sources`, `/events`, `/freshness`, `/calendar`, `/risk`, and `/audit` against saved analysis and source snapshots.
 7. Done: add scheduled Telegram digests for pre-market, market open, close, after-hours, and weekly review.
 8. Done: add Telegram chat allowlist via `TELEGRAM_ALLOWED_CHAT_IDS`.
-9. Add per-chat data deletion or cleanup behavior.
+9. Done: add per-chat data deletion or cleanup behavior.
 10. Add alert deduplication and confidence thresholds.
 11. Done: replace buy/sell-like labels with neutral research labels in API, CLI, Telegram, docs, and tests.
 12. Done: add contextual disclaimer behavior for first use, high-risk events, and major alerts.

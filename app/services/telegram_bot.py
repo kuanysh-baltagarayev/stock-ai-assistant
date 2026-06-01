@@ -344,10 +344,10 @@ class TelegramBotService:
             return
 
         if action == "unsubscribe":
-            self._upsert_subscription(int(chat_id), username=username, active=False)
+            self._clear_subscription_state(int(chat_id), username=username)
             await self._send_message(
                 int(chat_id),
-                "Подписка отключена.",
+                "Подписка отключена, данные списка и уведомлений очищены.",
                 reply_markup=self._main_keyboard(),
             )
             return
@@ -901,6 +901,40 @@ class TelegramBotService:
             db.rollback()
             logger.exception(
                 "telegram_subscription_update_failed",
+                extra={"component": "telegram", "chat_id": chat_id},
+            )
+        finally:
+            db.close()
+
+    def _clear_subscription_state(self, chat_id: int, username: str | None) -> None:
+        db = SessionLocal()
+        try:
+            sub = (
+                db.query(TelegramSubscription)
+                .filter(TelegramSubscription.chat_id == chat_id)
+                .one_or_none()
+            )
+            if sub is None:
+                return
+            sub.username = username or sub.username
+            sub.is_active = False
+            sub.watchlist_symbols = []
+            sub.quiet_hours_start_minute = None
+            sub.quiet_hours_end_minute = None
+            sub.max_alerts_per_day = None
+            sub.market_hours_only = False
+            sub.daily_alert_count = 0
+            sub.daily_alert_date = None
+            sub.last_alert_at = None
+            db.commit()
+            logger.info(
+                "telegram_subscription_cleared",
+                extra={"component": "telegram", "chat_id": chat_id},
+            )
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "telegram_subscription_clear_failed",
                 extra={"component": "telegram", "chat_id": chat_id},
             )
         finally:
