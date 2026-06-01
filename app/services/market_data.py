@@ -2,8 +2,12 @@ import logging
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from threading import Lock
 from typing import Any, TypeVar
+from urllib import error as urlerror
+from urllib import parse
+from urllib import request as urlrequest
 
 import pandas as pd
 import yfinance as yf
@@ -66,30 +70,15 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
     provider_call_budget = getattr(settings, "provider_call_budget", None)
 
     try:
-        history = _with_retries(
-            f"download market history for {symbol}",
-            symbol,
-            lambda: _download_history(symbol, settings.market_data_timeout_seconds),
-            settings.market_data_max_attempts,
-            settings.market_data_retry_backoff_seconds,
-            before_attempt=lambda _: _consume_provider_call(
-                provider_call_budget,
-                symbol=symbol,
-                action="download market history",
-            ),
-        )
-
-        if history is None or history.empty or "Close" not in history.columns:
-            raise MarketDataError(
-                f"No historical price data returned for {symbol}.", status_code=404
-            )
-
-        history = history.dropna(subset=["Close"]).copy()
-        if history.empty:
-            raise MarketDataError(
-                f"Historical price data for {symbol} has no valid close prices.",
-                status_code=404,
-            )
+        history, history_provider = _acquire_history(symbol, settings, provider_call_budget)
+        history_profile = ProviderContract.from_name(history_provider)
+        history_payload = history_profile.to_payload()
+        if history_provider == DEFAULT_PROVIDER_NAME:
+            extraction_method = "yfinance"
+            parser_version = f"yfinance-{getattr(yf, '__version__', 'unknown')}"
+        else:
+            extraction_method = history_provider
+            parser_version = f"{history_provider}-csv-v1"
 
         stock = yf.Ticker(symbol)
 
@@ -139,12 +128,12 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
         fx = _build_fx_metadata(currency=currency, fetched_at=fetched_at)
         event_calendar = _build_event_calendar(info=info, fetched_at=fetched_at)
         source_provenance = {
-            "provider_name": DEFAULT_PROVIDER_NAME,
-            "source_url": provider_payload["source_url"],
-            "source_tier": provider_payload["source_tier"],
-            "data_category": provider_payload["data_category"],
-            "extraction_method": "yfinance",
-            "parser_version": f"yfinance-{getattr(yf, '__version__', 'unknown')}",
+            "provider_name": history_provider,
+            "source_url": history_payload["source_url"],
+            "source_tier": history_payload["source_tier"],
+            "data_category": history_payload["data_category"],
+            "extraction_method": extraction_method,
+            "parser_version": parser_version,
             "observed_at": fetched_at,
             "published_at": latest_history_timestamp,
             "fetched_at": fetched_at,
@@ -154,15 +143,15 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
 
         if db is not None:
             try:
-                record_provider_success(db=db, name=DEFAULT_PROVIDER_NAME, **provider_payload)
+                record_provider_success(db=db, name=history_provider, **history_payload)
             except Exception:
                 logger.exception(
                     "provider_registry_success_record_failed",
-                    extra={"component": "persistence", "provider": DEFAULT_PROVIDER_NAME},
+                    extra={"component": "persistence", "provider": history_provider},
                 )
 
         collection = MarketDataCollection(
-            provider=provider_profile,
+            provider=history_profile,
             ticker=symbol,
             price=price,
             currency=currency,
@@ -178,12 +167,12 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             fx=fx,
             event_calendar=event_calendar,
             source_provenance=source_provenance,
-            provider_name=DEFAULT_PROVIDER_NAME,
-            source_url=provider_profile.source_url,
-            source_tier=provider_profile.source_tier,
-            data_category=provider_profile.data_category,
-            extraction_method="yfinance",
-            parser_version=f"yfinance-{getattr(yf, '__version__', 'unknown')}",
+            provider_name=history_provider,
+            source_url=history_profile.source_url,
+            source_tier=history_profile.source_tier,
+            data_category=history_profile.data_category,
+            extraction_method=extraction_method,
+            parser_version=parser_version,
             cache_hit=False,
         )
         market = collection.to_market_dict()
@@ -206,6 +195,69 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
         raise
 
 
+def _validate_history(history: Any, symbol: str) -> pd.DataFrame:
+    if history is None or not isinstance(history, pd.DataFrame) or history.empty or "Close" not in history.columns:
+        raise MarketDataError(
+            f"No historical price data returned for {symbol}.", status_code=404
+        )
+    cleaned = history.dropna(subset=["Close"]).copy()
+    if cleaned.empty:
+        raise MarketDataError(
+            f"Historical price data for {symbol} has no valid close prices.",
+            status_code=404,
+        )
+    return cleaned
+
+
+def _acquire_history(
+    symbol: str, settings: Any, provider_call_budget: int | None
+) -> tuple[pd.DataFrame, str]:
+    """Fetch daily price history from yfinance, falling back to Stooq.
+
+    yfinance is web-scraped and breaks periodically (format changes, IP bans),
+    so a second end-of-day source keeps scans alive when it fails. Budget
+    exhaustion (429) is not retried against the fallback.
+    """
+    try:
+        history = _with_retries(
+            f"download market history for {symbol}",
+            symbol,
+            lambda: _download_history(symbol, settings.market_data_timeout_seconds),
+            settings.market_data_max_attempts,
+            settings.market_data_retry_backoff_seconds,
+            before_attempt=lambda _: _consume_provider_call(
+                provider_call_budget,
+                symbol=symbol,
+                action="download market history",
+            ),
+        )
+        return _validate_history(history, symbol), DEFAULT_PROVIDER_NAME
+    except MarketDataError as exc:
+        if exc.status_code == 429:
+            raise
+        try:
+            fallback = _validate_history(
+                _download_history_alpha_vantage(
+                    symbol,
+                    settings.market_data_timeout_seconds,
+                    getattr(settings, "alpha_vantage_api_key", None),
+                ),
+                symbol,
+            )
+        except Exception:
+            raise exc
+        logger.info(
+            "market_data_provider_fallback",
+            extra={
+                "component": "market_data",
+                "ticker": symbol,
+                "provider": _FALLBACK_PROVIDER_NAME,
+                "reason": str(exc),
+            },
+        )
+        return fallback, _FALLBACK_PROVIDER_NAME
+
+
 def _download_history(symbol: str, timeout_seconds: float) -> pd.DataFrame:
     history = yf.download(
         symbol,
@@ -226,6 +278,70 @@ def _download_history(symbol: str, timeout_seconds: float) -> pd.DataFrame:
         else:
             history = history.droplevel(-1, axis=1)
     return history if isinstance(history, pd.DataFrame) else pd.DataFrame()
+
+
+_ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
+_FALLBACK_PROVIDER_NAME = "alpha_vantage"
+
+
+def _download_history_alpha_vantage(
+    symbol: str, timeout_seconds: float, api_key: str | None
+) -> pd.DataFrame:
+    """Fetch daily OHLCV history from Alpha Vantage as a yfinance fallback.
+
+    Requires ALPHA_VANTAGE_API_KEY (free tier). Without a key this is a no-op
+    that returns an empty DataFrame, so the fallback simply stays inactive.
+    Returns a frame shaped like the yfinance one (DatetimeIndex with
+    Open/High/Low/Close/Volume columns), or empty on any problem (including the
+    free-tier rate-limit notice).
+    """
+    if not api_key:
+        return pd.DataFrame()
+
+    query = parse.urlencode(
+        {
+            "function": "TIME_SERIES_DAILY",
+            "symbol": symbol,
+            "outputsize": "full",  # full history so MA200 has enough data points
+            "datatype": "csv",
+            "apikey": api_key,
+        }
+    )
+    request = urlrequest.Request(
+        f"{_ALPHA_VANTAGE_URL}?{query}",
+        headers={"User-Agent": "stock-ai-assistant/1.0"},
+    )
+    try:
+        with urlrequest.urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
+            raw = response.read().decode("utf-8", "replace")
+    except (urlerror.URLError, TimeoutError, ValueError):
+        return pd.DataFrame()
+
+    # On rate limits / errors AV returns a JSON note instead of CSV.
+    if not raw.strip().lower().startswith("timestamp"):
+        return pd.DataFrame()
+
+    try:
+        frame = pd.read_csv(StringIO(raw))
+    except (pd.errors.ParserError, ValueError):
+        return pd.DataFrame()
+    if frame.empty or "timestamp" not in frame.columns or "close" not in frame.columns:
+        return pd.DataFrame()
+
+    frame = frame.rename(
+        columns={
+            "timestamp": "Date",
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume",
+        }
+    )
+    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce", utc=True)
+    frame = frame.dropna(subset=["Date"]).set_index("Date").sort_index()
+    keep = [column for column in ("Open", "High", "Low", "Close", "Volume") if column in frame.columns]
+    return frame[keep]
 
 
 def extract_fundamentals(info: dict[str, Any]) -> Fundamentals:

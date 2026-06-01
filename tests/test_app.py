@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import unittest
 
 import pandas as pd
@@ -219,6 +219,7 @@ class AppSmokeTests(unittest.TestCase):
         with (
             patch("app.services.market_data.get_settings", return_value=settings),
             patch("app.services.market_data.yf.download", side_effect=RuntimeError("temporary")),
+            patch("app.services.market_data._download_history_alpha_vantage", return_value=pd.DataFrame()),
             patch("app.services.market_data.record_provider_success") as record_success,
             patch("app.services.market_data.record_provider_failure") as record_failure,
         ):
@@ -229,6 +230,86 @@ class AppSmokeTests(unittest.TestCase):
         record_failure.assert_called_once()
         self.assertEqual(record_failure.call_args.kwargs["name"], "yfinance")
         self.assertEqual(record_failure.call_args.kwargs["failure_mode"], "unavailable")
+
+    def test_alpha_vantage_csv_parses_into_history_frame(self) -> None:
+        csv = (
+            "timestamp,open,high,low,close,volume\n"
+            "2026-05-28,100.5,102.0,100.0,101.5,1200\n"
+            "2026-05-27,100.0,101.0,99.0,100.5,1000\n"
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = csv.encode("utf-8")
+
+        with patch("app.services.market_data.urlrequest.urlopen", return_value=response):
+            frame = market_data._download_history_alpha_vantage("AAPL", 5.0, "demo-key")
+
+        self.assertEqual(list(frame.columns), ["Open", "High", "Low", "Close", "Volume"])
+        self.assertEqual(len(frame), 2)
+        # rows arrive newest-first; parser must sort ascending by date
+        self.assertEqual(float(frame["Close"].iloc[-1]), 101.5)
+
+    def test_alpha_vantage_noop_without_api_key(self) -> None:
+        with patch("app.services.market_data.urlrequest.urlopen") as urlopen_mock:
+            frame = market_data._download_history_alpha_vantage("AAPL", 5.0, None)
+
+        self.assertTrue(frame.empty)
+        urlopen_mock.assert_not_called()
+
+    def test_alpha_vantage_returns_empty_on_rate_limit_notice(self) -> None:
+        notice = '{"Information": "rate limit reached, please try later"}'
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = notice.encode("utf-8")
+
+        with patch("app.services.market_data.urlrequest.urlopen", return_value=response):
+            frame = market_data._download_history_alpha_vantage("AAPL", 5.0, "demo-key")
+
+        self.assertTrue(frame.empty)
+
+    def test_market_data_falls_back_to_alpha_vantage_when_yfinance_fails(self) -> None:
+        fallback_history = pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0]},
+            index=pd.date_range("2026-05-25", periods=3, tz="UTC"),
+        )
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=1,
+            market_data_retry_backoff_seconds=0.0,
+            alpha_vantage_api_key="demo-key",
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download", side_effect=RuntimeError("temporary")),
+            patch("app.services.market_data._download_history_alpha_vantage", return_value=fallback_history),
+            patch("app.services.market_data.yf.Ticker", return_value=SimpleNamespace()),
+            patch("app.services.market_data._safe_info", return_value={}),
+            patch("app.services.market_data._safe_fast_info", return_value={}),
+        ):
+            data = market_data.get_market_data("aapl")
+
+        self.assertEqual(data["price"], 102.0)
+        self.assertEqual(data["provider_name"], "alpha_vantage")
+        self.assertEqual(data["source_provenance"]["provider_name"], "alpha_vantage")
+        self.assertEqual(data["source_tier"], "Tier 2")
+
+    def test_market_data_budget_exhaustion_does_not_fall_back(self) -> None:
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=1,
+            market_data_retry_backoff_seconds=0.0,
+            market_data_cache_ttl_seconds=0,
+            provider_call_budget=0,
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data._download_history_alpha_vantage") as fallback_mock,
+        ):
+            with self.assertRaises(market_data.MarketDataError) as exc:
+                market_data.get_market_data("aapl")
+
+        self.assertEqual(exc.exception.status_code, 429)
+        fallback_mock.assert_not_called()
 
     def test_market_data_flags_stale_and_disagreement(self) -> None:
         history = pd.DataFrame(

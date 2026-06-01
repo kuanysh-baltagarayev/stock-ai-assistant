@@ -25,6 +25,7 @@ class Settings(BaseModel):
     openai_api_key: str | None = Field(default=None)
     openai_model: str = Field(default="gpt-4.1-mini")
     fred_api_key: str | None = Field(default=None)
+    alpha_vantage_api_key: str | None = Field(default=None)
     market_data_timeout_seconds: float = Field(default=20.0)
     market_data_max_attempts: int = Field(default=3)
     market_data_retry_backoff_seconds: float = Field(default=1.5)
@@ -164,6 +165,7 @@ def get_settings() -> Settings:
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
         fred_api_key=os.getenv("FRED_API_KEY") or None,
+        alpha_vantage_api_key=os.getenv("ALPHA_VANTAGE_API_KEY") or None,
         market_data_timeout_seconds=_parse_float(
             os.getenv("MARKET_DATA_TIMEOUT_SECONDS"),
             env_name="MARKET_DATA_TIMEOUT_SECONDS",

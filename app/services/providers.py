@@ -140,6 +140,28 @@ def provider_registry_payload(name: str) -> dict[str, Any]:
             ],
         }
 
+    if name == "alpha_vantage":
+        return {
+            "source_url": "https://www.alphavantage.co",
+            "source_tier": "Tier 2",
+            "data_category": "market_data",
+            "capability_list": [
+                "historical_prices",
+            ],
+            "legal_terms_note": (
+                "Free-tier daily data via API key (ALPHA_VANTAGE_API_KEY). "
+                "Respect the free-tier request limits and upstream terms."
+            ),
+            "cache_ttl_seconds": 3600,
+            "retry_attempts": 2,
+            "failure_taxonomy": [
+                "unavailable",
+                "stale",
+                "rate_limited",
+                "parse_failed",
+            ],
+        }
+
     if name == "edgar":
         return {
             "source_url": "https://www.sec.gov/cgi-bin/browse-edgar",
