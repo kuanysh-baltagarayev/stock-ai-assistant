@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -94,11 +95,17 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             symbol=symbol,
             provider_call_budget=provider_call_budget,
         )
+        finnhub_price = _finnhub_quote(
+            symbol,
+            settings.market_data_timeout_seconds,
+            getattr(settings, "finnhub_api_key", None),
+        )
         fast_price = _to_float(_fast_info_value(fast_info, "last_price"))
         current_price = _to_float(info.get("currentPrice"))
         regular_market_price = _to_float(info.get("regularMarketPrice"))
         close_price = _to_float(history["Close"].iloc[-1])
         price, price_source = _first_number_with_source(
+            (finnhub_price, "finnhub.quote"),
             (fast_price, "fast_info.last_price"),
             (current_price, "info.currentPrice"),
             (regular_market_price, "info.regularMarketPrice"),
@@ -282,6 +289,37 @@ def _download_history(symbol: str, timeout_seconds: float) -> pd.DataFrame:
 
 _ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
 _FALLBACK_PROVIDER_NAME = "alpha_vantage"
+_FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+
+
+def _finnhub_quote(symbol: str, timeout_seconds: float, api_key: str | None) -> float | None:
+    """Return the latest real-time price from Finnhub's free /quote endpoint.
+
+    Requires FINNHUB_API_KEY; without it this is a no-op returning None, so the
+    price simply falls back to yfinance/history sources. Best-effort: any error
+    yields None rather than failing the whole market-data fetch.
+    """
+    if not api_key:
+        return None
+
+    query = parse.urlencode({"symbol": symbol, "token": api_key})
+    request = urlrequest.Request(
+        f"{_FINNHUB_QUOTE_URL}?{query}",
+        headers={"User-Agent": "stock-ai-assistant/1.0"},
+    )
+    try:
+        with urlrequest.urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+    except (urlerror.URLError, TimeoutError, ValueError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    price = _to_float(payload.get("c"))
+    # Finnhub returns c=0 for unknown symbols or when no quote is available.
+    if price is None or price <= 0:
+        return None
+    return price
 
 
 def _download_history_alpha_vantage(

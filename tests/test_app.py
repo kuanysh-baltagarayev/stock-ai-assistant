@@ -265,6 +265,60 @@ class AppSmokeTests(unittest.TestCase):
 
         self.assertTrue(frame.empty)
 
+    def test_finnhub_quote_returns_current_price(self) -> None:
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = (
+            b'{"c": 312.06, "h": 315.0, "l": 309.5, "o": 311.7, "pc": 310.85}'
+        )
+
+        with patch("app.services.market_data.urlrequest.urlopen", return_value=response):
+            price = market_data._finnhub_quote("AAPL", 5.0, "demo-key")
+
+        self.assertEqual(price, 312.06)
+
+    def test_finnhub_quote_noop_without_key(self) -> None:
+        with patch("app.services.market_data.urlrequest.urlopen") as urlopen_mock:
+            price = market_data._finnhub_quote("AAPL", 5.0, None)
+
+        self.assertIsNone(price)
+        urlopen_mock.assert_not_called()
+
+    def test_finnhub_quote_none_for_unknown_symbol(self) -> None:
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"c": 0, "pc": 0}'
+
+        with patch("app.services.market_data.urlrequest.urlopen", return_value=response):
+            price = market_data._finnhub_quote("ZZZZ", 5.0, "demo-key")
+
+        self.assertIsNone(price)
+
+    def test_market_data_prefers_finnhub_quote_for_price(self) -> None:
+        history = pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0]},
+            index=pd.date_range("2026-05-25", periods=3, tz="UTC"),
+        )
+        settings = SimpleNamespace(
+            market_data_timeout_seconds=5.0,
+            market_data_max_attempts=1,
+            market_data_retry_backoff_seconds=0.0,
+            finnhub_api_key="demo-key",
+        )
+
+        with (
+            patch("app.services.market_data.get_settings", return_value=settings),
+            patch("app.services.market_data.yf.download", return_value=history),
+            patch("app.services.market_data.yf.Ticker", return_value=SimpleNamespace()),
+            patch("app.services.market_data._safe_info", return_value={}),
+            patch("app.services.market_data._safe_fast_info", return_value={}),
+            patch("app.services.market_data._finnhub_quote", return_value=311.5),
+        ):
+            data = market_data.get_market_data("aapl")
+
+        self.assertEqual(data["price"], 311.5)
+        self.assertEqual(data["price_source"], "finnhub.quote")
+        # history/technicals still come from yfinance
+        self.assertEqual(data["provider_name"], "yfinance")
+
     def test_market_data_falls_back_to_alpha_vantage_when_yfinance_fails(self) -> None:
         fallback_history = pd.DataFrame(
             {"Close": [100.0, 101.0, 102.0]},
