@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
+from app.services.edgar_collector import fetch_recent_filings
 from app.services.market_data import InvalidTickerError, normalize_ticker
 from app.services.operation_summaries import format_operation_summary
 from app.services.research_labels import research_label_to_russian
@@ -128,18 +129,21 @@ class TelegramBotService:
                 ],
                 [
                     {"text": "События", "callback_data": self._callback_data("events", ticker)},
+                    {"text": "Подачи SEC", "callback_data": self._callback_data("filings", ticker)},
+                ],
+                [
                     {"text": "Свежесть", "callback_data": self._callback_data("freshness", ticker)},
-                ],
-                [
                     {"text": "Риск", "callback_data": self._callback_data("risk", ticker)},
+                ],
+                [
                     {"text": "Аудит", "callback_data": self._callback_data("audit", ticker)},
-                ],
-                [
                     {"text": "Пересканировать", "callback_data": self._callback_data("rescan", ticker)},
-                    {"text": "Добавить в список", "callback_data": self._callback_data("watchlist_add", ticker)},
                 ],
                 [
+                    {"text": "Добавить в список", "callback_data": self._callback_data("watchlist_add", ticker)},
                     {"text": "Убрать из списка", "callback_data": self._callback_data("watchlist_remove", ticker)},
+                ],
+                [
                     {"text": "Заглушить", "callback_data": self._callback_data("mute", ticker)},
                 ],
             ]
@@ -587,7 +591,7 @@ class TelegramBotService:
                 )
             return
 
-        if action in {"why", "sources", "events", "freshness", "calendar", "risk", "audit"}:
+        if action in {"why", "sources", "events", "filings", "freshness", "calendar", "risk", "audit"}:
             await self._handle_detail_command(
                 int(chat_id),
                 action=action,
@@ -653,7 +657,7 @@ class TelegramBotService:
     ) -> None:
         followup_keyboard = self._analysis_followup_keyboard(ticker)
 
-        if action in {"why", "sources", "events", "freshness", "audit"}:
+        if action in {"why", "sources", "events", "filings", "freshness", "audit"}:
             await self._handle_detail_command(
                 chat_id,
                 action=action,
@@ -807,6 +811,18 @@ class TelegramBotService:
             return
         if action == "audit":
             await self._send_message(chat_id, self._audit_text(ticker), reply_markup=reply_markup)
+            return
+        if action == "filings":
+            filings_ticker = ticker or (args[0].strip().upper() if args else None)
+            if not filings_ticker:
+                await self._send_message(
+                    chat_id,
+                    "Укажи тикер для /filings. Например: /filings AAPL",
+                    reply_markup=reply_markup,
+                )
+                return
+            text = await asyncio.to_thread(self._filings_text, filings_ticker)
+            await self._send_message(chat_id, text, reply_markup=reply_markup)
             return
         if ticker is None:
             await self._send_message(
@@ -1325,6 +1341,8 @@ class TelegramBotService:
             ("sources ", "sources"),
             ("/events ", "events"),
             ("events ", "events"),
+            ("/filings ", "filings"),
+            ("filings ", "filings"),
             ("/freshness ", "freshness"),
             ("freshness ", "freshness"),
             ("/calendar ", "calendar"),
@@ -1354,6 +1372,8 @@ class TelegramBotService:
             return "risk", []
         if lowered in {"/audit", "audit"}:
             return "audit", []
+        if lowered in {"/filings", "filings"}:
+            return "filings", []
 
         if lowered.startswith("/quiet ") or lowered.startswith("quiet "):
             parts = normalized.split(maxsplit=1)
@@ -1428,7 +1448,7 @@ class TelegramBotService:
             "• просмотр и изменение настроек уведомлений\n"
             "• анализ отдельных тикеров\n"
             "• сканирование рынка по списку из настроек, /scan mine или /scan AAPL MSFT\n"
-            "• source-backed детали: /why, /sources, /events, /freshness, /calendar, /risk, /audit\n"
+            "• source-backed детали: /why, /sources, /events, /filings, /freshness, /calendar, /risk, /audit\n"
         )
 
     def _welcome_text(self, is_first_use: bool = False) -> str:
@@ -1849,6 +1869,42 @@ class TelegramBotService:
                 f"{previous.recommendation} -> {latest.recommendation}"
             )
 
+        return self._trim_message("\n".join(lines))
+
+    def _filings_text(self, ticker: str) -> str:
+        """Fetch and format recent SEC EDGAR filings for a ticker."""
+        try:
+            collection = fetch_recent_filings(ticker)
+        except Exception as exc:
+            return (
+                f"Не удалось получить данные SEC EDGAR для {ticker.upper()}: {exc}\n"
+                "Проверь соединение с интернетом или повтори позже."
+            )
+
+        if collection.error:
+            return (
+                f"SEC EDGAR: {ticker.upper()}\n"
+                f"Ошибка: {collection.error}"
+            )
+
+        lines = [f"SEC EDGAR: {ticker.upper()}"]
+        if collection.company_name:
+            lines.append(f"Компания: {collection.company_name}")
+        if collection.cik:
+            lines.append(f"CIK: {collection.cik}")
+        lines.append(f"Запрошено: {collection.fetched_at.strftime('%Y-%m-%d %H:%M UTC')}")
+
+        if not collection.filings:
+            lines.append("\nПоследние подачи не найдены или раздел пустой.")
+        else:
+            lines.append("\nПоследние подачи:")
+            for filing in collection.filings:
+                lines.append(
+                    f"• {filing.filing_date}  {filing.form_type}  {filing.description}\n"
+                    f"  {filing.sec_url}"
+                )
+
+        lines.append("\nИсточник: SEC EDGAR (публичные данные SEC, Tier 1)")
         return self._trim_message("\n".join(lines))
 
     def _digest_text(

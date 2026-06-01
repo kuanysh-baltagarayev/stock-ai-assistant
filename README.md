@@ -382,7 +382,7 @@ Available commands:
 - `/quiet 22:00-07:00` or `/quiet off` to set quiet hours.
 - `/cap 3` or `/cap off` to set or clear the daily alert cap.
 - `/markethours on` or `/markethours off` to restrict scheduled digests to U.S. market hours.
-- `/why AAPL`, `/sources AAPL`, `/events AAPL`, `/freshness AAPL`, `/calendar today`, `/risk AAPL`, and `/audit AAPL` for source-backed detail views from saved snapshots.
+- `/why AAPL`, `/sources AAPL`, `/events AAPL`, `/filings AAPL`, `/freshness AAPL`, `/calendar today`, `/risk AAPL`, and `/audit AAPL` for source-backed detail views; `/filings` fetches live SEC EDGAR filing summaries (8-K, 10-Q, 10-K) from the official public API.
 - `/analyze AAPL` to analyze one ticker.
 - `/scan AAPL MSFT NVDA` to scan a list of tickers.
 - `/scan mine` to scan the personal watchlist.

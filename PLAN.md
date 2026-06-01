@@ -81,6 +81,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/check.sh` passed after adding SEC EDGAR filing collector,
+  exchange calendar service, and Telegram `/filings` command, with `ruff`, 142
+  coverage-wrapped tests, coverage report, and compile check.
 - 2026-06-01: `scripts/check.sh` passed after adding unsubscribe cleanup for
   per-chat Telegram data, with `ruff`, 98 coverage-wrapped tests, coverage
   report, and compile check.
@@ -437,8 +440,20 @@ quota, and review time.
 
 Suggested order for low-waste progress:
 
-1. Live SEC EDGAR filing summaries and official exchange calendar feeds with
+1. Done: Live SEC EDGAR filing summaries and official exchange calendar feeds with
    source-backed Telegram hooks.
+   - `app/services/edgar_collector.py`: fetches recent 8-K/10-Q/10-K filings via
+     EDGAR public API (Tier 1, no auth); registered in provider registry.
+   - `app/services/exchange_calendar.py`: NYSE holiday/early-close calendar for
+     2025-2026; `get_session_state`, `is_trading_day`, `next_trading_day`.
+   - Telegram `/filings TICKER` command and "Подачи SEC" inline button.
+   - 42 new offline tests in `test_edgar_collector.py` and `test_exchange_calendar.py`.
+
+2. Wire EDGAR filings into the analysis pipeline so that filing metadata is stored
+   as a `SourceSnapshot` alongside the market-data snapshot when analyzing a ticker.
+
+3. Integrate `exchange_calendar.py` into the scanner session model to replace the
+   simple weekday check with holiday-aware state classification.
 
 ## Operations, Budgets, And Runtime Boundaries
 

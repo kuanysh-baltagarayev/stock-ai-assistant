@@ -140,6 +140,33 @@ def provider_registry_payload(name: str) -> dict[str, Any]:
             ],
         }
 
+    if name == "edgar":
+        return {
+            "source_url": "https://www.sec.gov/cgi-bin/browse-edgar",
+            "source_tier": "Tier 1",
+            "data_category": "sec_filings",
+            "capability_list": [
+                "sec_8k",
+                "sec_10q",
+                "sec_10k",
+                "sec_def14a",
+                "company_cik_lookup",
+            ],
+            "legal_terms_note": (
+                "Public U.S. government data; free to access. "
+                "Respect EDGAR rate limits (~10 req/s per IP). "
+                "Include User-Agent header per EDGAR policy."
+            ),
+            "cache_ttl_seconds": 3600,
+            "retry_attempts": 2,
+            "failure_taxonomy": [
+                "unavailable",
+                "rate_limited",
+                "parse_failed",
+                "ticker_not_found",
+            ],
+        }
+
     return {
         "source_url": None,
         "source_tier": None,

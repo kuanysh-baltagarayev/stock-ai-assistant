@@ -18,7 +18,7 @@ def get_coverage_matrix() -> dict[str, list[str] | list[dict[str, str]]]:
             "Tier 3 browser-collected open web sources planned for future expansion",
         ],
         "calendars": [
-            "U.S. trading sessions and market-hours freshness notes",
+            "U.S. trading sessions and market-hours freshness notes (NYSE/NASDAQ holidays and early closes)",
             "Company event hints from yfinance profile fields",
             "Weekly review, pre-market, market-open, midday, close, and after-hours digest modes",
         ],
@@ -29,7 +29,7 @@ def get_coverage_matrix() -> dict[str, list[str] | list[dict[str, str]]]:
         ],
         "known_gaps": [
             "No live news ingestion through Playwright MCP yet",
-            "No exhaustive global exchange calendar coverage yet",
+            "Exchange calendar covers NYSE holidays/early-closes for 2025-2026 only; no automated feed yet",
             "Cross-listing mapping and provider aliases remain incomplete",
             "Live FX conversion provider is not wired in yet",
             "Browser-based collectors are not yet implemented",

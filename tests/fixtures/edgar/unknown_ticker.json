@@ -1,0 +1,13 @@
+{
+  "ticker": "XXXXNOTREAL",
+  "cik": null,
+  "company_name": null,
+  "filings": [],
+  "fetched_at": "2026-06-01T12:00:00+00:00",
+  "provider_name": "edgar",
+  "source_url": "https://www.sec.gov/cgi-bin/browse-edgar",
+  "source_tier": "Tier 1",
+  "data_category": "sec_filings",
+  "parser_version": "edgar-collector-v1",
+  "error": "Ticker 'XXXXNOTREAL' not found in EDGAR CIK map"
+}

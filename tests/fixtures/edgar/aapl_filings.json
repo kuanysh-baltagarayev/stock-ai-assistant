@@ -1,0 +1,35 @@
+{
+  "ticker": "AAPL",
+  "cik": 320193,
+  "company_name": "Apple Inc.",
+  "filings": [
+    {
+      "form_type": "10-Q",
+      "filing_date": "2026-05-02",
+      "accession_number": "0000320193-26-000012",
+      "description": "10-Q",
+      "sec_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000012/aapl-20260329.htm"
+    },
+    {
+      "form_type": "8-K",
+      "filing_date": "2026-05-01",
+      "accession_number": "0000320193-26-000011",
+      "description": "8-K",
+      "sec_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000011/0000320193-26-000011-index.htm"
+    },
+    {
+      "form_type": "10-K",
+      "filing_date": "2025-11-01",
+      "accession_number": "0000320193-25-000100",
+      "description": "10-K",
+      "sec_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000100/aapl-20250927.htm"
+    }
+  ],
+  "fetched_at": "2026-06-01T12:00:00+00:00",
+  "provider_name": "edgar",
+  "source_url": "https://www.sec.gov/cgi-bin/browse-edgar",
+  "source_tier": "Tier 1",
+  "data_category": "sec_filings",
+  "parser_version": "edgar-collector-v1",
+  "error": null
+}
