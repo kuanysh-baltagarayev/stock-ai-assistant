@@ -40,6 +40,7 @@ Implemented:
 - SQLite raw source snapshot persistence with provenance metadata and content hashes.
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
+- SQLite runtime budget counters for provider, OpenAI, and Telegram limits.
 - Normalized market-data provider contract plus offline fixture loader for future collectors.
 - Session-aware market analysis with exchange-hours freshness notes for U.S. equities.
 - Telegram bot service and entrypoint.
@@ -78,6 +79,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/check.sh` passed after persistent runtime budgets were
+  introduced, with `ruff`, 89 coverage-wrapped tests, coverage report, and
+  compile check.
 - 2026-06-01: `scripts/test_fast.sh` passed after Telegram event calendar
   summaries were introduced, with `ruff` and 69 focused tests.
 - 2026-06-01: `scripts/check.sh` passed after Telegram event calendar
@@ -218,8 +222,6 @@ Implemented:
 - Scheduler behavior is still basic and not yet idempotent or timezone-aware, even though per-chat quiet hours and daily caps are now enforced.
 - The current recommendation labels include buy/sell-like language and should be replaced with neutral research labels before wider practical use.
 - FX normalization metadata is stored, but no live FX conversion provider is wired in yet.
-- Runtime budget counters are in-memory and reset on process restart; persistent
-  budget accounting is not implemented yet.
 - `PLAYWRIGHT_PAGE_BUDGET` is parsed and shown in diagnostics, but there are no
   Playwright collectors yet, so there is nothing to enforce against.
 

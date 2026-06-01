@@ -17,6 +17,7 @@ from app.config import ConfigurationError, PROJECT_ROOT, get_settings, resolve_d
 from app.api.routes import health, root
 from app.database import Base
 from app.diagnostics import build_startup_diagnostics, enforce_local_api_policy
+from app.migrations import apply_migrations
 from app.models import AnalysisSnapshot
 from app.models import InstrumentRegistry
 from app.models import ProviderRegistry
@@ -262,6 +263,28 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(data["data_quality"]["confidence"], 0.5)
         self.assertEqual(data["price_adjustment_policy"], "raw_close")
         self.assertEqual(data["fx"]["base_currency"], "USD")
+
+    def test_runtime_budgets_persist_across_module_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "budgets.db"
+            engine = create_engine(f"sqlite:///{db_path}")
+            apply_migrations(engine)
+
+            with patch("app.database.engine", engine):
+                from app.services import runtime_budget
+
+                runtime_budget.reset_runtime_budgets(clear_persistent=True)
+                first = runtime_budget.consume_runtime_budget("openai_calls", 3, amount=2)
+                runtime_budget._COUNTERS.clear()
+                snapshot = runtime_budget.runtime_budget_snapshot("openai_calls", 3)
+                second = runtime_budget.consume_runtime_budget("openai_calls", 3)
+
+            self.assertEqual(first.used, 2)
+            self.assertEqual(first.remaining, 1)
+            self.assertEqual(snapshot.used, 2)
+            self.assertEqual(snapshot.remaining, 1)
+            self.assertEqual(second.used, 3)
+            self.assertEqual(second.remaining, 0)
 
     def test_market_data_rejects_empty_ticker(self) -> None:
         with self.assertRaises(market_data.InvalidTickerError):

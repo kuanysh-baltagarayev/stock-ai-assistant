@@ -42,6 +42,7 @@ class MigrationTests(unittest.TestCase):
                     "0004_source_snapshots",
                     "0005_telegram_watchlists",
                     "0006_telegram_preferences",
+                    "0007_runtime_budget_counters",
                 ],
             )
 
@@ -58,7 +59,7 @@ class MigrationTests(unittest.TestCase):
                     text("SELECT COUNT(*) FROM schema_migrations")
                 ).scalar_one()
 
-            self.assertEqual(revision_count, 6)
+            self.assertEqual(revision_count, 7)
 
     def test_init_db_uses_migrations(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -95,6 +95,12 @@ def _upgrade_0006_telegram_preferences(connection: Connection) -> None:
         )
 
 
+def _upgrade_0007_runtime_budget_counters(connection: Connection) -> None:
+    import app.models  # noqa: F401 - registers SQLAlchemy models before create_all
+
+    Base.metadata.create_all(bind=connection, tables=[app.models.RuntimeBudgetCounter.__table__])
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -125,6 +131,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0006_telegram_preferences",
         description="Add per-chat Telegram alert preferences.",
         upgrade=_upgrade_0006_telegram_preferences,
+    ),
+    Migration(
+        revision="0007_runtime_budget_counters",
+        description="Persist runtime budget counters in SQLite.",
+        upgrade=_upgrade_0007_runtime_budget_counters,
     ),
 )
 

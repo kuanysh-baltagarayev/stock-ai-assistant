@@ -86,6 +86,19 @@ class ProviderRegistry(Base):
     )
 
 
+class RuntimeBudgetCounter(Base):
+    __tablename__ = "runtime_budget_counters"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+
+
 class SourceSnapshot(Base):
     __tablename__ = "source_snapshots"
 
