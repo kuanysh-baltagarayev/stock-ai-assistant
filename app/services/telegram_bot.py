@@ -25,6 +25,7 @@ from app.services.runtime_budget import (
     runtime_budget_snapshot,
 )
 from app.services.scanner import analyze_ticker, scan_tickers
+from app.services.market_hours import should_defer_alert, time_until_market_open
 
 
 logger = logging.getLogger(__name__)
@@ -2345,6 +2346,33 @@ class TelegramBotService:
         response = self._request_json("sendMessage", parse.urlencode(payload).encode("utf-8"))
         if not response.get("ok"):
             raise RuntimeError(f"Telegram sendMessage failed: {response}")
+
+    async def send_alert_with_market_context(
+        self,
+        chat_id: int,
+        alert_text: str,
+        is_high_impact: bool = False,
+    ) -> None:
+        """Send alert, deferring to market open if outside trading hours.
+
+        Args:
+            chat_id: Telegram chat ID
+            alert_text: Alert message
+            is_high_impact: If True (FOMC, jobs), send immediately regardless of hours
+        """
+        now = datetime.now(ZoneInfo("America/New_York"))
+
+        if should_defer_alert(now, is_high_impact=is_high_impact):
+            # Outside market hours and not high-impact
+            time_to_open = time_until_market_open(now)
+            deferred_note = (
+                f"ℹ️ Alert buffered (market closed, opens in "
+                f"{int(time_to_open.total_seconds() // 3600)}h)\n\n{alert_text}"
+            )
+            await self._send_message(chat_id, deferred_note)
+        else:
+            # Market open or high-impact event
+            await self._send_message(chat_id, alert_text)
 
     def _request_json(self, method: str, data: bytes | None = None) -> dict[str, Any]:
         token = self.settings.telegram_bot_token
