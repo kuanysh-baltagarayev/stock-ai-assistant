@@ -13,6 +13,7 @@ from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
 from app.services.edgar_collector import fetch_recent_filings
+from app.services.news_collector import build_news_context, high_impact_news
 from app.services.history import build_snapshot_audit_entries, list_recent_snapshots
 from app.services.runtime_budget import (
     RuntimeBudgetExceeded,
@@ -556,7 +557,7 @@ class TelegramBotService(
                 )
             return
 
-        if action in {"why", "sources", "events", "filings", "freshness", "calendar", "risk", "audit"}:
+        if action in {"why", "sources", "events", "filings", "freshness", "calendar", "risk", "audit", "news"}:
             await self._handle_detail_command(
                 int(chat_id),
                 action=action,
@@ -787,6 +788,11 @@ class TelegramBotService(
                 )
                 return
             text = await asyncio.to_thread(self._filings_text, filings_ticker)
+            await self._send_message(chat_id, text, reply_markup=reply_markup)
+            return
+        if action == "news":
+            news_ticker = ticker or (args[0].strip().upper() if args else None)
+            text = await asyncio.to_thread(self._news_text, news_ticker)
             await self._send_message(chat_id, text, reply_markup=reply_markup)
             return
         if ticker is None:
@@ -1157,6 +1163,8 @@ class TelegramBotService(
             ("risk ", "risk"),
             ("/audit ", "audit"),
             ("audit ", "audit"),
+            ("/news ", "news"),
+            ("news ", "news"),
         ):
             if lowered.startswith(prefix):
                 parts = normalized.split(maxsplit=1)
@@ -1180,6 +1188,8 @@ class TelegramBotService(
             return "audit", []
         if lowered in {"/filings", "filings"}:
             return "filings", []
+        if lowered in {"/news", "news"}:
+            return "news", []
 
         if lowered.startswith("/quiet ") or lowered.startswith("quiet "):
             parts = normalized.split(maxsplit=1)
@@ -1329,6 +1339,43 @@ class TelegramBotService(
                 f"{previous.recommendation} -> {latest.recommendation}"
             )
 
+        return self._trim_message("\n".join(lines))
+
+    def _news_text(self, ticker: str | None) -> str:
+        """Fetch and format news + sentiment for a ticker (or market-wide)."""
+        scope = ticker.upper() if ticker else "Рынок и макро"
+        try:
+            context = build_news_context(ticker, self.settings)
+        except Exception as exc:
+            return (
+                f"Не удалось получить новости для {scope}: {exc}\n"
+                "Проверь соединение или повтори позже."
+            )
+
+        if not context.items:
+            return (
+                f"Новости: {scope}\n"
+                "Свежих новостей не найдено (или не настроены ключи источников)."
+            )
+
+        label_ru = {"positive": "позитивный 📈", "negative": "негативный 📉"}.get(
+            context.overall_sentiment_label, "нейтральный ➖"
+        )
+        lines = [f"Новости: {scope}", f"Общий настрой: {label_ru}"]
+        if context.summary:
+            lines.append(context.summary)
+
+        high_impact = {id(item) for item in high_impact_news(context)}
+        lines.append("\nЗаголовки:")
+        for item in context.items:
+            mark = {"positive": "📈", "negative": "📉"}.get(item.sentiment_label, "➖")
+            flag = "‼️ " if id(item) in high_impact else ""
+            source = f" ({item.source})" if item.source else ""
+            lines.append(f"{flag}{mark} {item.title}{source}")
+            if item.url:
+                lines.append(f"  {item.url}")
+
+        lines.append("\nИсточники: Alpha Vantage, Finnhub, GDELT, ФРС (RSS)")
         return self._trim_message("\n".join(lines))
 
     def _filings_text(self, ticker: str) -> str:

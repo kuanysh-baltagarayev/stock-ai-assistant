@@ -27,6 +27,7 @@ class FormattingMixin:
             "• анализ портфеля (/portfolio)\n"
             "• backtest accuracy (/backtest AAPL)\n"
             "• source-backed детали: /why, /sources, /events, /filings, /freshness, /calendar, /risk, /audit\n"
+            "• новости и настрой: /news AAPL (или /news для рынка и макро)\n"
         )
 
     def _welcome_text(self, is_first_use: bool = False) -> str:

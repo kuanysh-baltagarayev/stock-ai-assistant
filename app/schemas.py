@@ -58,6 +58,25 @@ class SecFilingsContext(BaseModel):
     recent_filings: list[SecFiling] = Field(default_factory=list)
 
 
+class NewsArticle(BaseModel):
+    title: str
+    url: str | None = None
+    source: str | None = None
+    published_at: datetime | None = None
+    summary: str | None = None
+    sentiment_score: float | None = None
+    sentiment_label: str = "neutral"
+    relevance: float | None = None
+    category: str = "ticker"
+
+
+class NewsContext(BaseModel):
+    summary: str | None = None
+    overall_sentiment_score: float | None = None
+    overall_sentiment_label: str = "neutral"
+    articles: list[NewsArticle] = Field(default_factory=list)
+
+
 class Scores(BaseModel):
     momentum_score: float
     valuation_score: float
@@ -83,6 +102,7 @@ class AnalyzeResponse(BaseModel):
     market_session: "MarketSession | None" = None
     event_calendar: "EventCalendar | None" = None
     sec_filings: "SecFilingsContext | None" = None
+    news: "NewsContext | None" = None
     operation_notes: list[str] = Field(default_factory=list)
 
 

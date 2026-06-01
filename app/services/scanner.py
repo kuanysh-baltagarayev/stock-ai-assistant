@@ -24,6 +24,7 @@ from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.fred_collector import fetch_macro_indicators
 from app.services.macro_context import build_macro_context, macro_context_summary
+from app.services.news_collector import build_news_context, high_impact_news
 from app.services.risk_overlay import calculate_risk_overlay, risk_overlay_notes
 from app.services.sector_sensitivity import macro_impact_notes, get_sector_sensitivity
 from app.services.instruments import upsert_instrument
@@ -47,6 +48,7 @@ def analyze_ticker(
     db: Session | None = None,
     use_ai_explanation: bool = True,
     include_edgar_context: bool = True,
+    include_news: bool = True,
 ) -> AnalyzeResponse:
     logger.debug("analysis_started", extra={"component": "scanner", "ticker": ticker})
     market = get_market_data(ticker, db=db)
@@ -77,6 +79,7 @@ def analyze_ticker(
         _save_instrument(db, market["ticker"], market["info"], market["currency"])
     settings = get_settings()
     market_session = _build_market_session(market)
+    news_payload, news_notes = _build_news(market["ticker"], settings, include_news)
 
     payload = {
         "ticker": market["ticker"],
@@ -95,6 +98,7 @@ def analyze_ticker(
         "market_session": market_session,
         "event_calendar": market.get("event_calendar"),
         "sec_filings": sec_filings_payload,
+        "news": news_payload,
     }
 
     if use_ai_explanation:
@@ -102,21 +106,24 @@ def analyze_ticker(
     else:
         explanation = rule_based_explanation(_json_ready(payload), scoring.reasons)
 
+    operation_notes = _build_operation_notes(
+        market=market,
+        explanation=explanation,
+        settings=settings,
+        used_ai_explanation=use_ai_explanation,
+        market_session=market_session,
+        event_calendar=market.get("event_calendar"),
+        sec_filings=payload.get("sec_filings"),
+        risk_score=scoring.scores.risk_score,
+        fundamentals=fundamentals,
+        generated_at=payload.get("generated_at"),
+    )
+    operation_notes.extend(news_notes)
+
     response = AnalyzeResponse(
         **payload,
         explanation=explanation,
-        operation_notes=_build_operation_notes(
-            market=market,
-            explanation=explanation,
-            settings=settings,
-            used_ai_explanation=use_ai_explanation,
-            market_session=market_session,
-            event_calendar=market.get("event_calendar"),
-            sec_filings=payload.get("sec_filings"),
-            risk_score=scoring.scores.risk_score,
-            fundamentals=fundamentals,
-            generated_at=payload.get("generated_at"),
-        ),
+        operation_notes=operation_notes,
     )
     if db is not None:
         _save_snapshot(db, response)
@@ -130,6 +137,54 @@ def analyze_ticker(
         },
     )
     return response
+
+
+def _build_news(
+    symbol: str, settings: Any, include_news: bool
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Build the news payload and operation notes; never raises."""
+    if not include_news:
+        return None, []
+    try:
+        context = build_news_context(symbol, settings)
+    except Exception:
+        logger.warning(
+            "news_context_failed",
+            extra={"component": "news", "ticker": symbol},
+            exc_info=True,
+        )
+        return None, []
+
+    if not context.items:
+        return None, []
+
+    payload = {
+        "summary": context.summary,
+        "overall_sentiment_score": context.overall_sentiment_score,
+        "overall_sentiment_label": context.overall_sentiment_label,
+        "articles": [
+            {
+                "title": item.title,
+                "url": item.url,
+                "source": item.source,
+                "published_at": item.published_at,
+                "summary": item.summary,
+                "sentiment_score": item.sentiment_score,
+                "sentiment_label": item.sentiment_label,
+                "relevance": item.relevance,
+                "category": item.category,
+            }
+            for item in context.items
+        ],
+    }
+
+    notes: list[str] = []
+    if context.summary:
+        notes.append(f"News: {context.summary}")
+    for item in high_impact_news(context)[:2]:
+        direction = "negative" if (item.sentiment_score or 0) < 0 else "positive"
+        notes.append(f"High-impact news ({direction}, {item.source}): {item.title}")
+    return payload, notes
 
 
 def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
@@ -149,6 +204,7 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
                 db=db,
                 use_ai_explanation=False,
                 include_edgar_context=False,
+                include_news=False,
             )
         except MarketDataError as exc:
             errors.append(ScanError(ticker=ticker, error=str(exc)))
