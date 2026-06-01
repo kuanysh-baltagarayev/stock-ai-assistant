@@ -217,10 +217,14 @@ def _download_history(symbol: str, timeout_seconds: float) -> pd.DataFrame:
         timeout=max(1, int(timeout_seconds)),
     )
     if isinstance(history, pd.DataFrame) and isinstance(history.columns, pd.MultiIndex):
-        if symbol in history.columns.get_level_values(0):
-            history = history[symbol]
-        elif "Close" in history.columns.get_level_values(-1):
-            history = history.xs("Close", axis=1, level=-1, drop_level=True)
+        # yfinance returns columns like ('Close', 'AAPL'); the ticker may sit on
+        # either level depending on version, so drop whichever level holds it.
+        if symbol in history.columns.get_level_values(-1):
+            history = history.xs(symbol, axis=1, level=-1, drop_level=True)
+        elif symbol in history.columns.get_level_values(0):
+            history = history.xs(symbol, axis=1, level=0, drop_level=True)
+        else:
+            history = history.droplevel(-1, axis=1)
     return history if isinstance(history, pd.DataFrame) else pd.DataFrame()
 
 
