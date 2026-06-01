@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from app.schemas import Fundamentals, Scores, TechnicalIndicators
 from app.services.research_labels import (
@@ -6,6 +7,9 @@ from app.services.research_labels import (
     research_label_for_score,
     research_label_to_title,
 )
+
+if TYPE_CHECKING:
+    from app.services.macro_context import MacroContext
 
 
 RESEARCH_LABELS = set(NEUTRAL_RESEARCH_LABELS)
@@ -23,15 +27,33 @@ def score_stock(
     price: float,
     technicals: TechnicalIndicators,
     fundamentals: Fundamentals,
+    macro_context: MacroContext | None = None,
 ) -> ScoringResult:
+    """Score a stock with optional macroeconomic context.
+
+    Args:
+        price: Current stock price
+        technicals: Technical indicators (MA, RSI, etc.)
+        fundamentals: Fundamental metrics (P/E, dividend, etc.)
+        macro_context: Optional MacroContext for adaptive weighting
+
+    Returns:
+        ScoringResult with scores, recommendation, and reasons
+    """
     momentum_score, momentum_reasons = _momentum_score(price, technicals)
     valuation_score, valuation_reasons = _valuation_score(fundamentals)
     risk_score, risk_reasons = _risk_score(technicals)
 
+    # Determine weights based on macro context
+    if macro_context:
+        momentum_w, valuation_w, risk_w = _adaptive_weights(macro_context)
+    else:
+        momentum_w, valuation_w, risk_w = 0.45, 0.35, 0.20
+
     final_score = (
-        momentum_score * 0.45
-        + valuation_score * 0.35
-        + (100 - risk_score) * 0.20
+        momentum_score * momentum_w
+        + valuation_score * valuation_w
+        + (100 - risk_score) * risk_w
     )
     final_score = round(_clamp(final_score), 2)
     recommendation = research_label_for_score(final_score, risk_score)
@@ -219,6 +241,49 @@ def _short_reason(recommendation: str, reasons: list[str]) -> str:
     if not reasons:
         return f"{base}: not enough strong signals; review manually."
     return f"{base}: " + "; ".join(reasons[:3]) + "."
+
+
+def _adaptive_weights(macro_context: MacroContext) -> tuple[float, float, float]:
+    """Determine score weights based on macroeconomic context.
+
+    Standard weights: momentum=0.45, valuation=0.35, risk=0.20
+
+    Adaptive adjustments:
+    - HIGH volatility: boost momentum (techicals matter more in fast markets),
+      reduce valuation (long-term fundamentals less relevant)
+    - RISING Fed rates: boost risk assessment, reduce valuation
+    - ELEVATED inflation: boost risk (duration risk), reduce valuation
+
+    Returns:
+        Tuple of (momentum_weight, valuation_weight, risk_weight)
+    """
+    momentum_w = 0.45
+    valuation_w = 0.35
+    risk_w = 0.20
+
+    # High volatility: short-term technicals matter more
+    if macro_context.volatility_level == "high":
+        momentum_w += 0.05
+        valuation_w -= 0.05
+
+    # Fed rate rising: risk increases (duration risk, refinancing stress)
+    if macro_context.rate_direction == "rising":
+        risk_w += 0.03
+        valuation_w -= 0.03
+
+    # Elevated inflation: real returns under pressure, duration risk
+    if macro_context.inflation_level == "elevated":
+        risk_w += 0.02
+        valuation_w -= 0.02
+        momentum_w += 0.01
+
+    # Normalize weights to sum to 1.0
+    total = momentum_w + valuation_w + risk_w
+    return (
+        round(momentum_w / total, 3),
+        round(valuation_w / total, 3),
+        round(risk_w / total, 3),
+    )
 
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 100.0) -> float:
