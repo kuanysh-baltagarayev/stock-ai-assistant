@@ -210,7 +210,7 @@ python scripts/scan_market.py --recent
 python scripts/scan_market.py --recent AAPL
 ```
 
-`--recent` prints saved analyses from SQLite with score, recommendation, market session, data-quality, source, and note context.
+`--recent` prints saved analyses from SQLite with score, recommendation, market session, data-quality, source, note context, and a short aggregate summary.
 
 Telegram `/analyze` responses also attach inline follow-up buttons so you can jump straight to sources, freshness, risk, rescan, and watchlist actions without retyping commands.
 

@@ -107,6 +107,9 @@ class ScanMarketScriptTests(unittest.TestCase):
         self.assertIn("source=yfinance confidence=0.91", output)
         self.assertIn("reason=AAPL short reason", output)
         self.assertIn("notes=Market is open.", output)
+        self.assertIn("Summary: latest=2026-06-01T10:00:00+00:00 avg_score=77.70 tickers=1 warnings=0", output)
+        self.assertIn("Recommendations: NEUTRAL=1", output)
+        self.assertIn("Providers: yfinance", output)
 
     def test_main_recent_mode_without_tickers_reads_all_recent_snapshots(self) -> None:
         fake_db = SimpleNamespace(close=MagicMock())
@@ -129,6 +132,47 @@ class ScanMarketScriptTests(unittest.TestCase):
         recent_mock.assert_called_once_with(fake_db, limit=3, ticker=None)
         self.assertTrue(fake_db.close.called)
         self.assertIn("No saved analyses found.", stdout.getvalue())
+
+    def test_main_recent_json_includes_summary(self) -> None:
+        fake_db = SimpleNamespace(close=MagicMock())
+        recent_rows = [
+            SimpleNamespace(
+                id=7,
+                ticker="AAPL",
+                price=189.12,
+                final_score=77.7,
+                recommendation="NEUTRAL",
+                created_at=SimpleNamespace(isoformat=MagicMock(return_value="2026-06-01T10:00:00+00:00")),
+                payload={
+                    "short_reason": "AAPL short reason",
+                    "data_quality": {"summary": "fresh", "confidence": 0.91},
+                    "market_session": {"status": "open", "freshness_state": "fresh"},
+                    "source_provenance": {"provider_name": "yfinance"},
+                    "operation_notes": ["Market is open."],
+                },
+            )
+        ]
+        stdout = io.StringIO()
+
+        with (
+            patch.object(
+                scan_market,
+                "parse_args",
+                return_value=Namespace(tickers=["aapl"], json=True, recent=True, recent_limit=5),
+            ),
+            patch.object(scan_market, "init_db"),
+            patch.object(scan_market, "SessionLocal", return_value=fake_db),
+            patch.object(scan_market, "list_recent_snapshots", return_value=recent_rows),
+            redirect_stdout(stdout),
+        ):
+            exit_code = scan_market.main()
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["mode"], "recent")
+        self.assertEqual(payload["summary"]["count"], 1)
+        self.assertEqual(payload["summary"]["average_final_score"], "77.70")
+        self.assertEqual(payload["summary"]["recommendation_counts"], {"NEUTRAL": 1})
 
 
 class RunApiScriptTests(unittest.TestCase):

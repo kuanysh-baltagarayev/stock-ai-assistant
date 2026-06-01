@@ -1,7 +1,9 @@
 from argparse import ArgumentParser, Namespace
+from collections import Counter
 from pathlib import Path
 import json
 import logging
+from statistics import mean
 import sys
 
 
@@ -71,6 +73,7 @@ def main() -> int:
                     {
                         "mode": "recent",
                         "snapshots": [_serialize_recent_snapshot(row) for row in recent_snapshots or []],
+                        "summary": _recent_snapshot_summary(recent_snapshots or []),
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -146,6 +149,22 @@ def print_recent_report(rows) -> None:
     if not rows:
         print("No saved analyses found.")
         return
+
+    summary = _recent_snapshot_summary(rows)
+    print(
+        "Summary: "
+        f"latest={summary['latest_created_at']} "
+        f"avg_score={summary['average_final_score']} "
+        f"tickers={summary['unique_tickers']} "
+        f"warnings={summary['warning_count']}"
+    )
+    if summary["recommendation_counts"]:
+        rec_counts = ", ".join(
+            f"{label}={count}" for label, count in sorted(summary["recommendation_counts"].items())
+        )
+        print(f"Recommendations: {rec_counts}")
+    if summary["source_providers"]:
+        print(f"Providers: {', '.join(summary['source_providers'])}")
 
     for row in rows:
         report = _recent_snapshot_report(row)
@@ -228,6 +247,41 @@ def _serialize_recent_snapshot(snapshot) -> dict:
         **report,
         "payload": payload,
     }
+
+
+def _recent_snapshot_summary(rows) -> dict[str, object]:
+    if not rows:
+        return {
+            "count": 0,
+            "unique_tickers": 0,
+            "latest_created_at": None,
+            "average_final_score": None,
+            "recommendation_counts": {},
+            "source_providers": [],
+            "warning_count": 0,
+        }
+
+    reports = [_recent_snapshot_report(row) for row in rows]
+    recommendation_counts = Counter(report["recommendation"] for report in reports)
+    source_providers = sorted({report["source_provider"] for report in reports if report["source_provider"] != "n/a"})
+    warning_count = sum(1 for row in rows if _recent_data_quality_summary(row) not in {"fresh", "ok", "n/a"})
+
+    return {
+        "count": len(rows),
+        "unique_tickers": len({report["ticker"] for report in reports}),
+        "latest_created_at": max(report["created_at"] for report in reports),
+        "average_final_score": f"{mean(float(report["final_score"]) for report in reports):.2f}",
+        "recommendation_counts": dict(sorted(recommendation_counts.items())),
+        "source_providers": source_providers,
+        "warning_count": warning_count,
+    }
+
+
+def _recent_data_quality_summary(snapshot) -> str:
+    payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+    data_quality = payload.get("data_quality") if isinstance(payload.get("data_quality"), dict) else {}
+    summary = data_quality.get("summary")
+    return summary if isinstance(summary, str) else "n/a"
 
 
 def _first_present(*values):
