@@ -1300,6 +1300,10 @@ class TelegramBotService:
         if operation_notes:
             lines.extend(["", "Операционные заметки:"])
             lines.extend(f"- {self._translate_text(note)}" for note in operation_notes)
+        quality_lines = self._data_quality_warning_lines(getattr(analysis, "data_quality", None))
+        if quality_lines:
+            lines.extend(["", "Качество данных:"])
+            lines.extend(f"- {line}" for line in quality_lines)
         event_calendar = getattr(analysis, "event_calendar", None)
         event_lines = self._event_calendar_lines(event_calendar)
         if event_lines:
@@ -1397,6 +1401,10 @@ class TelegramBotService:
                     f"Data quality: {data_quality.get('summary') or 'ok'}",
                 ]
             )
+            quality_lines = self._data_quality_warning_lines(data_quality)
+            if quality_lines:
+                lines.extend(["", "Quality warnings:"])
+                lines.extend(f"• {line}" for line in quality_lines)
         if source_snapshot is not None:
             lines.extend(
                 [
@@ -1436,6 +1444,10 @@ class TelegramBotService:
             lines.append(f"Note: {self._translate_text(str(freshness_note))}")
         if data_quality.get("summary"):
             lines.append(f"Data quality: {self._translate_text(str(data_quality.get('summary')))}")
+        quality_lines = self._data_quality_warning_lines(data_quality)
+        if quality_lines:
+            lines.extend(["", "Quality warnings:"])
+            lines.extend(f"- {line}" for line in quality_lines)
         event_lines = self._event_calendar_lines(event_calendar)
         if event_lines:
             lines.extend(["", "Upcoming company events:"])
@@ -1473,6 +1485,10 @@ class TelegramBotService:
         ]
         if market_session.get("freshness_note"):
             lines.append(f"Note: {self._translate_text(str(market_session.get('freshness_note')))}")
+        quality_lines = self._data_quality_warning_lines(data_quality)
+        if quality_lines:
+            lines.extend(["", "Quality warnings:"])
+            lines.extend(f"- {line}" for line in quality_lines)
         event_lines = self._event_calendar_lines(event_calendar)
         if event_lines:
             lines.extend(["", "Upcoming company events:"])
@@ -1503,6 +1519,10 @@ class TelegramBotService:
         ]
         if payload.get("short_reason"):
             lines.append(f"Short reason: {self._translate_text(str(payload.get('short_reason')))}")
+        quality_lines = self._data_quality_warning_lines(data_quality)
+        if quality_lines:
+            lines.extend(["", "Quality warnings:"])
+            lines.extend(f"- {line}" for line in quality_lines)
         event_lines = self._event_calendar_lines(event_calendar)
         if event_lines:
             lines.extend(["", "Upcoming company events:"])
@@ -1767,6 +1787,36 @@ class TelegramBotService:
             )
 
         return "\n".join(notes)
+
+    def _data_quality_warning_lines(self, data_quality: Any) -> list[str]:
+        if not data_quality:
+            return []
+
+        def _get(name: str, default: Any = None) -> Any:
+            if isinstance(data_quality, dict):
+                return data_quality.get(name, default)
+            return getattr(data_quality, name, default)
+
+        lines: list[str] = []
+        summary = _get("summary")
+        if summary:
+            lines.append(self._translate_text(str(summary)))
+
+        confidence = _get("confidence", 1.0)
+        if isinstance(confidence, (int, float)) and confidence < 0.8:
+            lines.append(f"Низкая уверенность данных: {confidence:.2f}")
+
+        if _get("source_disagreed"):
+            lines.append("Источники не совпадают между собой.")
+        if _get("stale"):
+            lines.append("Данные выглядят устаревшими.")
+        if _get("delayed"):
+            lines.append("Поток данных может запаздывать.")
+        if _get("missing"):
+            lines.append("Есть пропуски в исходных данных.")
+        if _get("estimated"):
+            lines.append("Часть значений оценочная, а не подтверждённая.")
+        return lines
 
     def _scan_disclaimer(self, results: list[Any]) -> str:
         if not results:

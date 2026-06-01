@@ -18,6 +18,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - CLI scanner for a default watchlist, custom tickers, JSON output, and recent-analysis reports.
 - Telegram bot with `/analyze`, `/scan`, watchlists, preferences, source-backed detail commands, and session-aware scheduled digests.
 - Telegram analysis responses include inline follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
+- Telegram analysis and detail responses surface data-quality warnings for stale, delayed, low-confidence, or source-disagreeing data.
 - Telegram analysis responses also include company event calendar snippets when yfinance profile fields expose upcoming earnings or dividend dates.
 - SQLite snapshot storage for completed analyses.
 - SQLite raw source snapshot storage with provenance metadata and content hashes.

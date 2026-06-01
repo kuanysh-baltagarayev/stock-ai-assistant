@@ -36,12 +36,22 @@ class TelegramDisclaimerTests(unittest.TestCase):
             scores=SimpleNamespace(final_score=86.0, momentum_score=70.0, valuation_score=65.0, risk_score=40.0),
             short_reason="HIGH_INTEREST: sample reason.",
             explanation="Sample explanation.",
+            data_quality=SimpleNamespace(
+                stale=True,
+                delayed=True,
+                source_disagreed=True,
+                confidence=0.65,
+                summary="fresh but delayed",
+            ),
         )
 
         text = self.service._analysis_text(analysis)
 
         self.assertIn("Крупный сигнал", text)
         self.assertIn("AAPL: Высокий интерес", text)
+        self.assertIn("Качество данных:", text)
+        self.assertIn("Низкая уверенность данных", text)
+        self.assertIn("Источники не совпадают", text)
 
     def test_digest_text_adds_contextual_disclaimer_for_risk_and_major_alerts(self) -> None:
         results = [
@@ -67,6 +77,37 @@ class TelegramDisclaimerTests(unittest.TestCase):
 
         self.assertIn("Крупные сигналы (1)", text)
         self.assertIn("Рискованные сигналы (1)", text)
+
+    def test_risk_text_surfaces_data_quality_warnings(self) -> None:
+        snapshot = SimpleNamespace(
+            payload={
+                "scores": {
+                    "risk_score": 78.0,
+                    "final_score": 24.0,
+                },
+                "recommendation": "CAUTION",
+                "data_quality": {
+                    "confidence": 0.42,
+                    "summary": "source disagreement detected",
+                    "source_disagreed": True,
+                    "stale": True,
+                },
+                "market_session": {"status": "closed"},
+                "short_reason": "sample",
+                "explanation": "sample",
+                "event_calendar": None,
+            },
+            final_score=24.0,
+            recommendation="CAUTION",
+            created_at=None,
+        )
+
+        with patch.object(self.service, "_latest_analysis_snapshot", return_value=snapshot):
+            text = self.service._risk_text("NVDA")
+
+        self.assertIn("Quality warnings:", text)
+        self.assertIn("Низкая уверенность данных", text)
+        self.assertIn("Источники не совпадают", text)
 
     def test_send_message_respects_telegram_send_budget(self) -> None:
         service = TelegramBotService(

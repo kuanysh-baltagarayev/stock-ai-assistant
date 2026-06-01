@@ -79,6 +79,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/check.sh` passed after Telegram data-quality warnings
+  were surfaced in analysis, freshness, sources, and risk views, with `ruff`,
+  90 coverage-wrapped tests, coverage report, and compile check.
 - 2026-06-01: `scripts/check.sh` passed after persistent runtime budgets were
   introduced, with `ruff`, 89 coverage-wrapped tests, coverage report, and
   compile check.
@@ -214,7 +217,7 @@ Implemented:
 - Source coverage is still narrow: the app currently depends on `yfinance` for market data and does not yet ingest news or other open web sources through Playwright MCP.
 - Session awareness is now present for U.S. equities in the core analysis path, but broader exchange calendars and news freshness windows for economy and politics are still not modeled.
 - Telegram UX is still basic: it still lacks live news ingestion and configurable digest calendars.
-- Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, does not flag stale/low-confidence data prominently, and does not show source coverage gaps in every Telegram answer.
+- Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, and it still does not show source coverage gaps in every Telegram answer.
 - Instrument identity exists for the U.S.-centric MVP, but cross-listing mapping, provider aliases, and global identifier coverage remain incomplete.
 - Corporate actions are currently represented as a raw-close policy with no auto-adjustment, and broader adjusted-price handling is still limited.
 - OpenAI explanations do not yet have a dedicated prompt-injection and source-grounding safety layer for future web/news ingestion.
