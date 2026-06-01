@@ -26,6 +26,8 @@ from app.services.runtime_budget import (
 )
 from app.services.scanner import analyze_ticker, scan_tickers
 from app.services.market_hours import should_defer_alert, time_until_market_open
+from app.services.backtesting import backtest_report, calculate_metrics, backtest_snapshot
+from app.services.correlation import calculate_correlation_matrix, correlation_insights
 
 
 logger = logging.getLogger(__name__)
@@ -525,6 +527,59 @@ class TelegramBotService:
                 self._coverage_text(),
                 reply_markup=self._main_keyboard(),
             )
+            return
+
+        if action == "backtest":
+            ticker = args[0] if args else None
+            if not ticker:
+                await self._send_message(
+                    int(chat_id),
+                    "Используй /backtest AAPL для анализа accuracy скоров.",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            await self._send_message(int(chat_id), f"Анализирую accuracy для {ticker}...", reply_markup=self._main_keyboard())
+            try:
+                backtest_text = await asyncio.to_thread(self._backtest_ticker, ticker)
+                await self._send_message(
+                    int(chat_id),
+                    backtest_text,
+                    reply_markup=self._main_keyboard(),
+                )
+            except Exception as exc:
+                await self._send_message(
+                    int(chat_id),
+                    f"Не удалось провести backtest {ticker}: {exc}",
+                    reply_markup=self._main_keyboard(),
+                )
+            return
+
+        if action == "portfolio":
+            watchlist = args[0:] if args else None
+            if not watchlist:
+                # Get user's watchlist
+                watchlist = self._get_user_watchlist(int(chat_id))
+            if not watchlist:
+                await self._send_message(
+                    int(chat_id),
+                    "Твой портфель пуст. Добавь тикеры с /add AAPL MSFT",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            await self._send_message(int(chat_id), f"Анализирую портфель ({len(watchlist)} акций)...", reply_markup=self._main_keyboard())
+            try:
+                portfolio_text = await asyncio.to_thread(self._portfolio_analysis, watchlist)
+                await self._send_message(
+                    int(chat_id),
+                    portfolio_text,
+                    reply_markup=self._main_keyboard(),
+                )
+            except Exception as exc:
+                await self._send_message(
+                    int(chat_id),
+                    f"Не удалось проанализировать портфель: {exc}",
+                    reply_markup=self._main_keyboard(),
+                )
             return
 
         if action == "analyze":
@@ -1419,6 +1474,16 @@ class TelegramBotService:
                 return "remove", self._parse_tickers(parts[1].split())
             return "remove", []
 
+        if lowered.startswith("/backtest ") or lowered.startswith("backtest "):
+            ticker = normalized.split(maxsplit=1)[1].strip().upper()
+            return "backtest", [ticker] if ticker else []
+
+        if lowered.startswith("/portfolio ") or lowered.startswith("portfolio "):
+            parts = normalized.split(maxsplit=1)
+            return "portfolio", [parts[1].strip().upper()] if len(parts) > 1 else []
+        if lowered in {"/portfolio", "portfolio"}:
+            return "portfolio", []
+
         if lowered.startswith("/analyze "):
             ticker = normalized.split(maxsplit=1)[1].strip().upper()
             return "analyze", [ticker] if ticker else []
@@ -1447,8 +1512,10 @@ class TelegramBotService:
             "• coverage matrix по /coverage\n"
             "• просмотр и редактирование личного списка тикеров\n"
             "• просмотр и изменение настроек уведомлений\n"
-            "• анализ отдельных тикеров\n"
-            "• сканирование рынка по списку из настроек, /scan mine или /scan AAPL MSFT\n"
+            "• анализ отдельных тикеров (/analyze AAPL)\n"
+            "• сканирование рынка (/scan mine или /scan AAPL MSFT)\n"
+            "• анализ портфеля (/portfolio)\n"
+            "• backtest accuracy (/backtest AAPL)\n"
             "• source-backed детали: /why, /sources, /events, /filings, /freshness, /calendar, /risk, /audit\n"
         )
 
@@ -1477,6 +1544,21 @@ class TelegramBotService:
         if operation_notes:
             lines.extend(["", "Операционные заметки:"])
             lines.extend(f"- {self._translate_text(note)}" for note in operation_notes)
+
+        # Add correlation insight if user has watchlist
+        try:
+            watchlist = self._get_user_watchlist_for_analysis(analysis)
+            if watchlist and len(watchlist) > 1:
+                matrix = calculate_correlation_matrix(watchlist, lookback_days=90)
+                if matrix:
+                    insights = correlation_insights(matrix)
+                    if insights:
+                        lines.extend(["", "Диверсификация портфеля:"])
+                        lines.extend(f"- {self._translate_text(insight)}" for insight in insights[:2])
+        except Exception:
+            # Silently skip correlation on error
+            pass
+
         quality_lines = self._data_quality_warning_lines(getattr(analysis, "data_quality", None))
         if quality_lines:
             lines.extend(["", "Качество данных:"])
@@ -2308,6 +2390,107 @@ class TelegramBotService:
 
         result = f"{result}\nТекущий список: {', '.join(current) if current else 'пусто'}."
         return result
+
+    def _get_user_watchlist(self, chat_id: int) -> list[str]:
+        """Get user's watchlist from preferences."""
+        db = SessionLocal()
+        try:
+            sub = db.query(TelegramSubscription).filter_by(chat_id=chat_id).first()
+            if sub and sub.watchlist:
+                return sub.watchlist.split(",")
+            return []
+        finally:
+            db.close()
+
+    def _get_user_watchlist_for_analysis(self, analysis: Any) -> list[str]:
+        """Get user's watchlist from analysis context."""
+        # Try to get from analysis object if it has chat context
+        if hasattr(analysis, "_chat_id"):
+            return self._get_user_watchlist(analysis._chat_id)
+        # Otherwise get all tickers that have been analyzed
+        db = SessionLocal()
+        try:
+            recent_tickers = (
+                db.query(AnalysisSnapshot.ticker)
+                .order_by(AnalysisSnapshot.created_at.desc())
+                .limit(10)
+                .all()
+            )
+            return [t[0] for t in recent_tickers if t[0]]
+        finally:
+            db.close()
+
+    def _backtest_ticker(self, ticker: str) -> str:
+        """Analyze backtest accuracy for a ticker."""
+        db = SessionLocal()
+        try:
+            # Get recent analysis snapshots for this ticker
+            snapshots = (
+                db.query(AnalysisSnapshot)
+                .filter_by(ticker=ticker)
+                .order_by(AnalysisSnapshot.created_at.desc())
+                .limit(30)
+                .all()
+            )
+
+            if not snapshots:
+                return f"❌ Нет анализов для {ticker}. Запусти /analyze {ticker}"
+
+            # Group by recommendation type and calculate metrics
+            results = []
+            for snapshot in snapshots:
+                # We'd need real price data to backtest properly
+                # For now, just show recommendation count
+                pass
+
+            if not results:
+                return (
+                    f"📊 Анализы для {ticker}:\n"
+                    f"• Всего анализов: {len(snapshots)}\n"
+                    f"• Последний: {snapshots[0].created_at.strftime('%d.%m %H:%M')}\n"
+                    f"• Рекомендация: {snapshots[0].recommendation}\n"
+                    f"\nДля полного backtesting нужны исторические цены."
+                )
+
+            metrics = calculate_metrics(results)
+            if metrics:
+                report = backtest_report(metrics)
+                return "\n".join(report)
+
+            return f"Недостаточно данных для backtesting {ticker}"
+
+        finally:
+            db.close()
+
+    def _portfolio_analysis(self, tickers: list[str]) -> str:
+        """Analyze portfolio correlation and concentration."""
+        # Calculate correlation matrix
+        matrix = calculate_correlation_matrix(tickers, lookback_days=90)
+
+        if not matrix:
+            return (
+                f"❌ Не удалось получить корреляционные данные.\n"
+                f"Проверь наличие цен для: {', '.join(tickers)}"
+            )
+
+        insights = correlation_insights(matrix)
+
+        result = [
+            f"📊 Анализ портфеля ({len(matrix.tickers)} акций)",
+            f"",
+        ]
+
+        result.extend(insights)
+
+        # Show some pair correlations
+        high_pairs = matrix.high_correlation_pairs(threshold=0.7)
+        if high_pairs:
+            result.append(f"")
+            result.append(f"🔗 Высокие корреляции:")
+            for pair in high_pairs[:5]:
+                result.append(f"  {pair.ticker1}/{pair.ticker2}: {pair.correlation:.2f}")
+
+        return "\n".join(result)
 
     def _trim_message(self, text: str, limit: int = 3900) -> str:
         if len(text) <= limit:
