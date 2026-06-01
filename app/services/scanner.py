@@ -23,6 +23,7 @@ from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.fred_collector import fetch_macro_indicators
 from app.services.macro_context import build_macro_context, macro_context_summary
+from app.services.risk_overlay import calculate_risk_overlay, risk_overlay_notes
 from app.services.sector_sensitivity import macro_impact_notes, get_sector_sensitivity
 from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
@@ -500,6 +501,14 @@ def _build_operation_notes(
     notes.extend(_economic_events_notes(generated_at))
     notes.extend(_macro_context_notes(generated_at))
     notes.extend(_sector_sensitivity_notes(market.get("info", {}).get("sector"), generated_at))
+    notes.extend(
+        _risk_overlay_notes(
+            market.get("data_quality", {}).get("risk_score") or 50,
+            market.get("info", {}).get("sector"),
+            {"dividend_yield": market.get("info", {}).get("dividendYield")},
+            generated_at,
+        )
+    )
 
     if used_ai_explanation:
         if not getattr(settings, "openai_api_key", None):
@@ -622,6 +631,41 @@ def _sector_sensitivity_notes(sector: str | None, generated_at: Any) -> list[str
         logger.debug(
             "sector_sensitivity_notes_failed",
             extra={"component": "sector_sensitivity", "sector": sector},
+            exc_info=True,
+        )
+        return []
+
+
+def _risk_overlay_notes(
+    risk_score: float,
+    sector: str | None,
+    fundamentals: Any,
+    generated_at: Any,
+) -> list[str]:
+    """Return notes about risk overlay based on macro conditions."""
+    if not isinstance(generated_at, datetime):
+        return []
+
+    try:
+        macro = build_macro_context(generated_at)
+        sector_sensitivity = get_sector_sensitivity(sector) if sector else None
+        dividend_yield = None
+        if isinstance(fundamentals, dict):
+            dividend_yield = fundamentals.get("dividend_yield")
+        elif hasattr(fundamentals, "dividend_yield"):
+            dividend_yield = fundamentals.dividend_yield
+
+        overlay = calculate_risk_overlay(
+            risk_score,
+            macro_context=macro,
+            sector_sensitivity=sector_sensitivity,
+            dividend_yield=dividend_yield,
+        )
+        return risk_overlay_notes(overlay)
+    except Exception:
+        logger.debug(
+            "risk_overlay_notes_failed",
+            extra={"component": "risk_overlay"},
             exc_info=True,
         )
         return []
