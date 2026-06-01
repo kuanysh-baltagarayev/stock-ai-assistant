@@ -86,6 +86,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("/ready", root_response.endpoints)
         self.assertIn("/providers", root_response.endpoints)
         self.assertIn("/providers/{name}", root_response.endpoints)
+        self.assertIn("/coverage", root_response.endpoints)
         self.assertEqual(health_response.status, "ok")
         self.assertEqual(health_response.app, "Stock AI Assistant")
 
@@ -1020,6 +1021,19 @@ class ApiRouteTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["name"], "yfinance")
         self.assertEqual(body["cache_ttl_seconds"], 3600)
+
+    def test_coverage_endpoint_serializes_matrix(self) -> None:
+        with (
+            patch("app.services.telegram_bot.TelegramBotService.start", new=AsyncMock(return_value=None)),
+            patch("app.services.telegram_bot.TelegramBotService.stop", new=AsyncMock(return_value=None)),
+            TestClient(app) as client,
+        ):
+            response = client.get("/coverage")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("U.S. listed equities on major exchanges", body["supported_markets"])
+        self.assertIn("No live news ingestion through Playwright MCP yet", body["known_gaps"])
 
     def test_ready_endpoint_reports_database_ok(self) -> None:
         with (

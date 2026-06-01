@@ -176,6 +176,15 @@ class ProviderRead(BaseModel):
     updated_at: datetime
 
 
+class CoverageResponse(BaseModel):
+    supported_markets: list[str]
+    supported_asset_classes: list[str]
+    source_tiers: list[str]
+    calendars: list[str]
+    currencies: list[str]
+    known_gaps: list[str]
+
+
 class SourceProvenance(BaseModel):
     provider_name: str
     source_url: str | None = None

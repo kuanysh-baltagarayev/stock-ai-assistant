@@ -152,3 +152,10 @@ class TelegramDisclaimerTests(unittest.TestCase):
 
         self.assertIn("Telegram send budget", text)
         self.assertIn("3/3 осталось", text)
+
+    def test_coverage_text_lists_supported_and_known_gap_sections(self) -> None:
+        text = self.service._coverage_text()
+
+        self.assertIn("Coverage matrix:", text)
+        self.assertIn("Supported markets:", text)
+        self.assertIn("Known gaps:", text)

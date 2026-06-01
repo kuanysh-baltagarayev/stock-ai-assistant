@@ -8,6 +8,7 @@ from app.database import check_database, get_db
 from app.schemas import (
     AnalysisSnapshotRead,
     AnalysisSnapshotDetail,
+    CoverageResponse,
     AnalyzeResponse,
     HealthResponse,
     InstrumentRead,
@@ -18,6 +19,7 @@ from app.schemas import (
     ScanResponse,
 )
 from app.services.history import get_snapshot_by_id, list_recent_snapshots
+from app.services.coverage import get_coverage_matrix
 from app.services.market_data import MarketDataError
 from app.services.instruments import get_instrument_by_symbol
 from app.services.providers import get_provider_by_name, list_providers
@@ -44,6 +46,7 @@ def root() -> RootResponse:
             "/instruments/{symbol}",
             "/providers",
             "/providers/{name}",
+            "/coverage",
         ],
         docs_url="/docs",
         health_url="/health",
@@ -59,6 +62,19 @@ def health() -> HealthResponse:
         app=settings.app_name,
         generated_at=datetime.now(timezone.utc),
         database=settings.database_url,
+    )
+
+
+@router.get("/coverage", response_model=CoverageResponse)
+def coverage() -> CoverageResponse:
+    matrix = get_coverage_matrix()
+    return CoverageResponse(
+        supported_markets=matrix["supported_markets"],
+        supported_asset_classes=matrix["supported_asset_classes"],
+        source_tiers=matrix["source_tiers"],
+        calendars=matrix["calendars"],
+        currencies=matrix["currencies"],
+        known_gaps=matrix["known_gaps"],
     )
 
 

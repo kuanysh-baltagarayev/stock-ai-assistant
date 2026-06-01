@@ -33,6 +33,7 @@ and user value.
 Implemented:
 
 - FastAPI app with `/`, `/health`, `/analyze/{ticker}`, `/scan`, and `/analyses/recent`.
+- FastAPI coverage matrix endpoint at `/coverage`.
 - Deterministic technical indicators and scoring.
 - Market data retrieval through `yfinance`.
 - Optional OpenAI explanation with rule-based fallback.
@@ -51,6 +52,7 @@ Implemented:
 - Telegram alert preferences with quiet hours, daily caps, and market-hours-only digests.
 - Telegram source-backed detail commands for saved analysis and source snapshots, including audit comparisons across saved snapshots.
 - Telegram analysis follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
+- Telegram `/coverage` command that exposes the supported coverage matrix and known gaps.
 - Telegram company event calendar summaries derived from yfinance profile fields, including earnings and dividend hints.
 - Session-aware scheduled digests for pre-market, market-open, midday, close, after-hours, and weekly review.
 - Response-level operation notes for OpenAI fallback, data-quality warnings, partial scan failures, and Telegram budget status.
@@ -79,6 +81,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/check.sh` passed after adding the coverage matrix
+  endpoint and Telegram `/coverage` command, with `ruff`, 93 coverage-wrapped
+  tests, coverage report, and compile check.
 - 2026-06-01: `scripts/check.sh` passed after adding `scripts/run_api.py
   --smoke` local HTTP startup verification, with `ruff`, 91 coverage-wrapped
   tests, coverage report, and compile check.

@@ -14,6 +14,7 @@ from app.database import SessionLocal, init_db
 from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
 from app.services.market_data import InvalidTickerError, normalize_ticker
 from app.services.research_labels import research_label_to_russian
+from app.services.coverage import format_coverage_text
 from app.services.history import build_snapshot_audit_entries, list_recent_snapshots
 from app.services.runtime_budget import (
     RuntimeBudgetExceeded,
@@ -475,6 +476,14 @@ class TelegramBotService:
             await self._send_message(
                 int(chat_id),
                 self._status_text(int(chat_id)),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "coverage":
+            await self._send_message(
+                int(chat_id),
+                self._coverage_text(),
                 reply_markup=self._main_keyboard(),
             )
             return
@@ -1115,6 +1124,18 @@ class TelegramBotService:
         finally:
             db.close()
 
+    def _coverage_text(self) -> str:
+        return self._trim_message(
+            "\n".join(
+                [
+                    "Coverage matrix:",
+                    format_coverage_text(),
+                    "",
+                    "Unsupported areas stay explicit rather than falling back to incomplete coverage.",
+                ]
+            )
+        )
+
     def live_check(self) -> dict[str, Any]:
         if not self.settings.telegram_bot_token:
             raise RuntimeError("Telegram bot token is missing.")
@@ -1158,6 +1179,8 @@ class TelegramBotService:
             return "unsubscribe", []
         if lowered in {"/status", "status", self._button_status().lower()}:
             return "status", []
+        if lowered in {"/coverage", "coverage"}:
+            return "coverage", []
         if lowered in {"/watchlist", "watchlist", self._button_watchlist().lower()}:
             return "watchlist", []
         if lowered in {"/prefs", "prefs", "/preferences", "preferences", self._button_preferences().lower()}:
@@ -1268,6 +1291,7 @@ class TelegramBotService:
             "Доступно:\n"
             "• подписка и отписка\n"
             "• статус подписки\n"
+            "• coverage matrix по /coverage\n"
             "• просмотр и редактирование личного списка тикеров\n"
             "• просмотр и изменение настроек уведомлений\n"
             "• анализ отдельных тикеров\n"
