@@ -514,7 +514,7 @@ class TelegramBotService:
             return
 
         if action == "scan":
-            tickers = self._configured_tickers()
+            tickers = args or self._configured_tickers()
             if not tickers:
                 await self._send_message(
                     int(chat_id),
@@ -522,9 +522,13 @@ class TelegramBotService:
                     reply_markup=self._main_keyboard(),
                 )
                 return
+            if args:
+                scan_intro = f"Запускаю сканирование: {', '.join(tickers)}..."
+            else:
+                scan_intro = "Запускаю сканирование рынка..."
             await self._send_message(
                 int(chat_id),
-                "Запускаю сканирование рынка...",
+                scan_intro,
                 reply_markup=self._main_keyboard(),
             )
             try:
@@ -1105,6 +1109,8 @@ class TelegramBotService:
             last_alert = sub.last_alert_at.isoformat() if sub.last_alert_at else "ещё не отправлял"
             watchlist = self._watchlist_tickers_for_subscription(sub)
             watchlist_text = ", ".join(watchlist) if watchlist else "пусто"
+            configured = self._configured_tickers()
+            configured_tickers = ", ".join(configured) if configured else "пусто"
             send_budget = runtime_budget_snapshot(
                 "telegram_sends",
                 getattr(self.settings, "telegram_send_budget", None),
@@ -1119,6 +1125,7 @@ class TelegramBotService:
                 f"Частота рассылки: {self.settings.telegram_digest_interval_minutes} мин.\n"
                 f"Telegram send budget: {budget_text}\n"
                 f"Твой список: {watchlist_text}\n"
+                f"Список для /scan: {configured_tickers}\n"
                 f"{self._preferences_summary_text(sub)}"
             )
         finally:
@@ -1161,7 +1168,7 @@ class TelegramBotService:
         }
 
     def _configured_tickers(self) -> list[str]:
-        raw = self.settings.telegram_default_tickers
+        raw = getattr(self.settings, "telegram_default_tickers", "")
         tickers = [item.strip().upper() for item in raw.split(",")]
         return [ticker for ticker in tickers if ticker]
 
@@ -1191,6 +1198,11 @@ class TelegramBotService:
             return "back", []
         if lowered in {"/scan mine", "scan mine"}:
             return "scan_mine", []
+        if lowered.startswith("/scan ") or lowered.startswith("scan "):
+            parts = normalized.split(maxsplit=1)
+            if len(parts) == 2:
+                return "scan", self._parse_tickers(parts[1].split())
+            return "scan", []
         if lowered in {"/scan", "scan", self._button_scan().lower()}:
             return "scan", []
 
@@ -1295,7 +1307,7 @@ class TelegramBotService:
             "• просмотр и редактирование личного списка тикеров\n"
             "• просмотр и изменение настроек уведомлений\n"
             "• анализ отдельных тикеров\n"
-            "• сканирование рынка по списку из настроек или по команде /scan mine\n"
+            "• сканирование рынка по списку из настроек, /scan mine или /scan AAPL MSFT\n"
             "• source-backed детали: /why, /sources, /events, /freshness, /calendar, /risk, /audit\n"
         )
 
@@ -1948,7 +1960,7 @@ class TelegramBotService:
         tickers: list[str] = []
         for item in args:
             if not item.startswith("/"):
-                tickers.append(item)
+                tickers.append(item.strip().upper())
         return tickers
 
     def _normalize_watchlist_symbols(self, tickers: list[str]) -> tuple[list[str], list[str]]:

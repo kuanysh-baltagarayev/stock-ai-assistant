@@ -45,6 +45,7 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
     def test_resolve_action_recognizes_watchlist_commands(self) -> None:
         self.assertEqual(self.service._resolve_action("/watchlist"), ("watchlist", []))
         self.assertEqual(self.service._resolve_action("/scan mine"), ("scan_mine", []))
+        self.assertEqual(self.service._resolve_action("/scan AAPL msft"), ("scan", ["AAPL", "MSFT"]))
         self.assertEqual(self.service._resolve_action("/add AAPL MSFT"), ("add", ["AAPL", "MSFT"]))
         self.assertEqual(self.service._resolve_action("/remove AAPL"), ("remove", ["AAPL"]))
 
@@ -98,6 +99,27 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
 
         scan_mock.assert_called_once_with(["AAPL", "NVDA"], None)
         self.assertIn("Запускаю сканирование твоего списка", send_mock.await_args_list[0].args[1])
+
+    async def test_scan_with_explicit_tickers_uses_command_arguments(self) -> None:
+        send_mock = AsyncMock()
+        scan_response = SimpleNamespace(results=[], errors=[], summary=SimpleNamespace())
+
+        with (
+            patch.object(self.service, "_send_message", send_mock),
+            patch("app.services.telegram_bot.scan_tickers", return_value=scan_response) as scan_mock,
+        ):
+            await self.service._handle_update(
+                {
+                    "message": {
+                        "chat": {"id": 203},
+                        "from": {"username": "bob"},
+                        "text": "/scan AAPL msft",
+                    }
+                }
+            )
+
+        scan_mock.assert_called_once_with(["AAPL", "MSFT"], None)
+        self.assertIn("Запускаю сканирование: AAPL, MSFT...", send_mock.await_args_list[0].args[1])
 
     async def test_digest_uses_personal_watchlists(self) -> None:
         self.service._upsert_subscription(301, username="carol", active=True, watchlist_symbols=["AAPL"])

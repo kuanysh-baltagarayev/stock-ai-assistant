@@ -133,6 +133,7 @@ class TelegramDisclaimerTests(unittest.TestCase):
                 telegram_send_budget=3,
                 telegram_digest_interval_minutes=1440,
                 telegram_allowed_chat_ids=[],
+                telegram_default_tickers="AAPL,MSFT,NVDA",
             )
         )
 
@@ -152,6 +153,7 @@ class TelegramDisclaimerTests(unittest.TestCase):
 
         self.assertIn("Telegram send budget", text)
         self.assertIn("3/3 осталось", text)
+        self.assertIn("Список для /scan: AAPL, MSFT, NVDA", text)
 
     def test_coverage_text_lists_supported_and_known_gap_sections(self) -> None:
         text = self.service._coverage_text()
