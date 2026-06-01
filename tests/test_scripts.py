@@ -63,6 +63,49 @@ class ScanMarketScriptTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["success_count"], 1)
         self.assertEqual(payload["summary"]["notes"], ["Example note."])
 
+    def test_main_renders_operation_summary_for_scan_errors(self) -> None:
+        fake_db = SimpleNamespace(close=MagicMock())
+        fake_response = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="AAPL",
+                    price=189.12,
+                    final_score=77.7,
+                    recommendation="NEUTRAL",
+                    short_reason="AAPL short reason",
+                )
+            ],
+            errors=[SimpleNamespace(ticker="NVDA", error="yfinance timeout")],
+            summary=SimpleNamespace(
+                requested_count=2,
+                success_count=1,
+                error_count=1,
+                partial_failure=True,
+                message="Scan completed with 1 successful tickers and 1 failures.",
+                failed_tickers=["NVDA"],
+                notes=["OpenAI response was unavailable, so a rule-based explanation was used."],
+            ),
+        )
+        stdout = io.StringIO()
+
+        with (
+            patch.object(
+                scan_market,
+                "parse_args",
+                return_value=Namespace(tickers=["aapl", "msft"], json=False, recent=False, recent_limit=10),
+            ),
+            patch.object(scan_market, "init_db"),
+            patch.object(scan_market, "SessionLocal", return_value=fake_db),
+            patch.object(scan_market, "scan_tickers", return_value=fake_response),
+            redirect_stdout(stdout),
+        ):
+            exit_code = scan_market.main()
+
+        self.assertEqual(exit_code, 0)
+        output = stdout.getvalue()
+        self.assertIn("Operation summary:", output)
+        self.assertIn("Сводка операций: market-data: 1, OpenAI: 1", output)
+
     def test_main_renders_recent_analysis_report(self) -> None:
         fake_db = SimpleNamespace(close=MagicMock())
         recent_rows = [

@@ -78,6 +78,27 @@ class TelegramDisclaimerTests(unittest.TestCase):
         self.assertIn("Крупные сигналы (1)", text)
         self.assertIn("Рискованные сигналы (1)", text)
 
+    def test_scan_text_surfaces_operation_summary_for_errors_and_notes(self) -> None:
+        results = [
+            SimpleNamespace(
+                ticker="AAPL",
+                recommendation="NEUTRAL",
+                final_score=77.7,
+                price=189.12,
+                short_reason="sample reason",
+            )
+        ]
+        errors = [SimpleNamespace(ticker="NVDA", error="yfinance timeout")]
+
+        text = self.service._scan_text(
+            results,
+            errors,
+            summary_notes=["OpenAI response was unavailable, so a rule-based explanation was used."],
+        )
+
+        self.assertIn("Сводка операций: market-data: 1, OpenAI: 1", text)
+        self.assertIn("Ошибки:", text)
+
     def test_risk_text_surfaces_data_quality_warnings(self) -> None:
         snapshot = SimpleNamespace(
             payload={

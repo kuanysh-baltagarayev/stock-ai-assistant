@@ -81,6 +81,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/check.sh` passed after adding user-visible operation
+  error summaries to CLI and Telegram scan/digest output, with `ruff`, 97
+  coverage-wrapped tests, coverage report, and compile check.
 - 2026-06-01: `scripts/check.sh` passed after adding aggregate summaries to
   the CLI recent-analysis report mode, with `ruff`, 95 coverage-wrapped
   tests, coverage report, and compile check.
@@ -562,7 +565,7 @@ Status: in progress.
 1. Done: add watchlist configuration with per-chat Telegram watchlists and list commands.
 2. Done: add a richer CLI report mode for recent analyses.
 3. Done: improve Telegram commands for custom ticker scans and status visibility.
-4. Add user-visible error summaries for failed market data, OpenAI, and Telegram operations.
+4. Done: add user-visible error summaries for failed market data, OpenAI, and Telegram operations.
 5. Done: add per-chat Telegram watchlists and alert preferences with quiet hours, daily caps, and market-hours-only mode.
 6. Done: add Telegram-only source-backed workflows: `/why`, `/sources`, `/events`, `/freshness`, `/calendar`, `/risk`, and `/audit` against saved analysis and source snapshots.
 7. Done: add scheduled Telegram digests for pre-market, market open, close, after-hours, and weekly review.

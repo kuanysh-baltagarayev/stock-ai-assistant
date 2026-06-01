@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.logging_config import configure_logging  # noqa: E402
 from app.database import SessionLocal, init_db  # noqa: E402
 from app.services.history import list_recent_snapshots  # noqa: E402
+from app.services.operation_summaries import format_operation_summary  # noqa: E402
 from app.services.scanner import scan_tickers  # noqa: E402
 
 
@@ -82,6 +83,7 @@ def main() -> int:
         else:
             print_recent_report(recent_snapshots or [])
     else:
+        summary_notes = getattr(response.summary, "notes", None)
         if args.json:
             print(
                 json.dumps(
@@ -89,6 +91,7 @@ def main() -> int:
                         "results": [_serialize(row) for row in response.results],
                         "errors": [_serialize(row) for row in response.errors],
                         "summary": _serialize(response.summary),
+                        "operation_summary": format_operation_summary(response.errors, summary_notes),
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -100,10 +103,15 @@ def main() -> int:
                 f"\nSummary: {response.summary.message} "
                 f"(success={response.summary.success_count}, errors={response.summary.error_count})"
             )
-            if getattr(response.summary, "notes", None):
+            if summary_notes:
                 print("\nNotes:")
-                for note in response.summary.notes:
+                for note in summary_notes:
                     print(f"- {note}")
+            operation_summary = format_operation_summary(response.errors, summary_notes)
+            if operation_summary:
+                print("\nOperation summary:")
+                for line in operation_summary:
+                    print(f"- {line}")
             if response.errors:
                 print("\nErrors:")
                 for item in response.errors:

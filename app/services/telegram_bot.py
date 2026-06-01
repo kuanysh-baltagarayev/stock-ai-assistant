@@ -13,6 +13,7 @@ from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
 from app.services.market_data import InvalidTickerError, normalize_ticker
+from app.services.operation_summaries import format_operation_summary
 from app.services.research_labels import research_label_to_russian
 from app.services.coverage import format_coverage_text
 from app.services.history import build_snapshot_audit_entries, list_recent_snapshots
@@ -1368,6 +1369,7 @@ class TelegramBotService:
             )
             lines.append(f"  {self._translate_text(item.short_reason)}")
         if errors:
+            lines.extend(["", *format_operation_summary(errors, summary_notes)])
             lines.append("Ошибки:")
             for item in errors[:5]:
                 lines.append(f"- {item.ticker}: {item.error}")
@@ -1744,6 +1746,7 @@ class TelegramBotService:
                 f"{item.ticker}: {recommendation}, оценка {item.final_score:.2f}, {self._translate_text(item.short_reason)}"
             )
         if errors:
+            lines.extend(["", *format_operation_summary(errors, summary_notes)])
             lines.append("Ошибки скана:")
             for item in errors[:3]:
                 lines.append(f"- {item.ticker}: {item.error}")
