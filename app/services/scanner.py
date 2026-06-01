@@ -23,6 +23,7 @@ from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.fred_collector import fetch_macro_indicators
 from app.services.macro_context import build_macro_context, macro_context_summary
+from app.services.sector_sensitivity import macro_impact_notes, get_sector_sensitivity
 from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
@@ -52,7 +53,12 @@ def analyze_ticker(
         _save_macro_indicators(db)
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
-    scoring = score_stock(market["price"], technicals, fundamentals)
+
+    # Build macro context for adaptive scoring
+    generated_at = datetime.now(timezone.utc)
+    macro = build_macro_context(generated_at)
+    scoring = score_stock(market["price"], technicals, fundamentals, macro_context=macro)
+
     if db is not None:
         _save_instrument(db, market["ticker"], market["info"], market["currency"])
     settings = get_settings()
@@ -60,7 +66,7 @@ def analyze_ticker(
 
     payload = {
         "ticker": market["ticker"],
-        "generated_at": datetime.now(timezone.utc),
+        "generated_at": generated_at,
         "price": market["price"],
         "currency": market["currency"],
         "price_adjustment_policy": market.get("price_adjustment_policy"),
@@ -493,6 +499,7 @@ def _build_operation_notes(
     notes.extend(_event_calendar_notes(str(market.get("ticker") or "UNKNOWN"), event_calendar))
     notes.extend(_economic_events_notes(generated_at))
     notes.extend(_macro_context_notes(generated_at))
+    notes.extend(_sector_sensitivity_notes(market.get("info", {}).get("sector"), generated_at))
 
     if used_ai_explanation:
         if not getattr(settings, "openai_api_key", None):
@@ -592,6 +599,29 @@ def _macro_context_notes(generated_at: Any) -> list[str]:
         logger.debug(
             "macro_context_notes_failed",
             extra={"component": "macro_context"},
+            exc_info=True,
+        )
+        return []
+
+
+def _sector_sensitivity_notes(sector: str | None, generated_at: Any) -> list[str]:
+    """Return notes about how macro conditions affect this sector."""
+    if not sector or not isinstance(generated_at, datetime):
+        return []
+
+    try:
+        macro = build_macro_context(generated_at)
+        notes = macro_impact_notes(
+            sector,
+            fed_rate_direction=macro.rate_direction,
+            inflation_level=macro.inflation_level,
+            growth_outlook=None,  # Not directly available from macro context
+        )
+        return notes
+    except Exception:
+        logger.debug(
+            "sector_sensitivity_notes_failed",
+            extra={"component": "sector_sensitivity", "sector": sector},
             exc_info=True,
         )
         return []
