@@ -19,6 +19,7 @@ from app.schemas import (
 )
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
 from app.services.edgar_collector import fetch_recent_filings
+from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.fred_collector import fetch_macro_indicators
 from app.services.instruments import upsert_instrument
@@ -487,6 +488,7 @@ def _build_operation_notes(
             notes.append(session_note)
 
     notes.extend(_event_calendar_notes(str(market.get("ticker") or "UNKNOWN"), event_calendar))
+    notes.extend(_economic_events_notes(market.get("generated_at")))
 
     if used_ai_explanation:
         if not getattr(settings, "openai_api_key", None):
@@ -572,6 +574,31 @@ def _save_edgar_filings(db: Session, ticker: str) -> None:
             "filing_count": len(collection.filings),
         },
     )
+
+
+def _economic_events_notes(generated_at: Any) -> list[str]:
+    """Return notes about upcoming important economic events."""
+    from datetime import datetime as dt
+
+    if not isinstance(generated_at, dt):
+        return []
+
+    try:
+        ref_date = generated_at.date()
+    except Exception:
+        return []
+
+    notes: list[str] = []
+    upcoming = upcoming_events(reference_date=ref_date, days_ahead=7)
+    if not upcoming:
+        return notes
+
+    high_importance = [e for e in upcoming if e.importance == "high"]
+    if high_importance:
+        event_names = ", ".join([e.name for e in high_importance[:3]])
+        notes.append(f"Upcoming high-impact economic events: {event_names}.")
+
+    return notes
 
 
 def _save_macro_indicators(db: Session) -> None:
