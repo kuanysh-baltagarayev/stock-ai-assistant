@@ -18,6 +18,7 @@ from app.schemas import (
     SourceProvenance,
 )
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
+from app.services.edgar_collector import fetch_recent_filings
 from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
@@ -43,6 +44,7 @@ def analyze_ticker(
     market = get_market_data(ticker, db=db)
     if db is not None:
         _save_source_snapshot(db, market)
+        _save_edgar_filings(db, market["ticker"])
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
     scoring = score_stock(market["price"], technicals, fundamentals)
@@ -497,3 +499,49 @@ def _event_calendar_notes(ticker: str, event_calendar: Any) -> list[str]:
         if name and scheduled_at is not None:
             notes.append(f"{ticker.upper()} {name} event around {scheduled_at.date().isoformat()}.")
     return notes
+
+
+def _save_edgar_filings(db: Session, ticker: str) -> None:
+    try:
+        collection = fetch_recent_filings(ticker)
+    except Exception:
+        logger.exception(
+            "edgar_filings_fetch_failed",
+            extra={"component": "edgar", "ticker": ticker},
+        )
+        return
+
+    if collection.error:
+        logger.warning(
+            "edgar_filings_error",
+            extra={"component": "edgar", "ticker": ticker, "error": collection.error},
+        )
+        return
+
+    if not collection.filings:
+        logger.debug(
+            "edgar_no_filings",
+            extra={"component": "edgar", "ticker": ticker},
+        )
+        return
+
+    try:
+        snapshot_dict = collection.as_source_snapshot_dict()
+        snapshot = upsert_source_snapshot(db, market=snapshot_dict)
+    except Exception:
+        logger.exception(
+            "edgar_snapshot_persist_failed",
+            extra={"component": "persistence", "ticker": ticker},
+        )
+        return
+
+    logger.info(
+        "edgar_filings_saved",
+        extra={
+            "component": "persistence",
+            "ticker": snapshot.ticker,
+            "provider_name": snapshot.provider_name,
+            "source_tier": snapshot.source_tier,
+            "filing_count": len(collection.filings),
+        },
+    )
