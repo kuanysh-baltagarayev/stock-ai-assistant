@@ -625,6 +625,26 @@ class TelegramBotService(
             await self._send_message(int(chat_id), msg, reply_markup=self._main_keyboard())
             return
 
+        if action == "chart":
+            ticker_c = args[0].strip().upper() if args else None
+            if not ticker_c:
+                await self._send_message(int(chat_id), "Укажи тикер: /chart AAPL", reply_markup=self._main_keyboard())
+                return
+            await self._send_message(int(chat_id), f"Строю график {ticker_c}...", reply_markup=self._main_keyboard())
+            try:
+                from app.services.charting import render_price_chart
+                from app.services.market_data import get_market_data
+
+                def _make_chart() -> bytes:
+                    market = get_market_data(ticker_c)
+                    return render_price_chart(ticker_c, market["history"])
+
+                png = await asyncio.to_thread(_make_chart)
+                await self._send_photo(int(chat_id), png, caption=f"{ticker_c} — цена и MA50/MA200")
+            except Exception as exc:
+                await self._send_message(int(chat_id), f"Не удалось построить график {ticker_c}: {exc}", reply_markup=self._main_keyboard())
+            return
+
         if action == "holdings":
             sub = self._subscription_for_chat(int(chat_id))
             holdings = dict(getattr(sub, "holdings", None) or {}) if sub else {}
@@ -1368,6 +1388,8 @@ class TelegramBotService(
             ("buy ", "holding_buy"),
             ("/sell ", "holding_sell"),
             ("sell ", "holding_sell"),
+            ("/chart ", "chart"),
+            ("chart ", "chart"),
         ):
             if lowered.startswith(prefix):
                 parts = normalized.split(maxsplit=1)
@@ -1397,6 +1419,8 @@ class TelegramBotService(
             return "alerts_list", []
         if lowered in {"/holdings", "holdings"}:
             return "holdings", []
+        if lowered in {"/chart", "chart"}:
+            return "chart", []
         if lowered in {"/alert_clear", "alert_clear"}:
             return "alert_clear", []
 
@@ -1840,6 +1864,55 @@ class TelegramBotService(
         response = self._request_json("sendMessage", parse.urlencode(payload).encode("utf-8"))
         if not response.get("ok"):
             raise RuntimeError(f"Telegram sendMessage failed: {response}")
+
+    def _send_photo_sync(self, chat_id: int, png_bytes: bytes, caption: str | None = None) -> None:
+        try:
+            consume_runtime_budget(
+                "telegram_sends",
+                getattr(self.settings, "telegram_send_budget", None),
+            )
+        except RuntimeBudgetExceeded as exc:
+            raise RuntimeError(f"Telegram send budget exhausted: {exc}") from exc
+
+        token = self.settings.telegram_bot_token
+        if not token:
+            raise RuntimeError("Telegram bot token is not configured.")
+
+        boundary = "----TelegramBotBoundary"
+        body_parts: list[bytes] = []
+        # chat_id field
+        body_parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat_id}\r\n".encode()
+        )
+        # optional caption
+        if caption:
+            body_parts.append(
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption[:1024]}\r\n".encode()
+            )
+        # photo file
+        body_parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"chart.png\"\r\nContent-Type: image/png\r\n\r\n".encode()
+            + png_bytes
+            + b"\r\n"
+        )
+        body_parts.append(f"--{boundary}--\r\n".encode())
+        body = b"".join(body_parts)
+
+        url = f"https://api.telegram.org/bot{token}/sendPhoto"
+        req = request.Request(url, data=body)
+        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        req.add_header("Content-Length", str(len(body)))
+        try:
+            with request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except urlerror.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Telegram sendPhoto failed {exc.code}: {detail}") from exc
+        if not result.get("ok"):
+            raise RuntimeError(f"Telegram sendPhoto failed: {result}")
+
+    async def _send_photo(self, chat_id: int, png_bytes: bytes, caption: str | None = None) -> None:
+        await asyncio.to_thread(self._send_photo_sync, chat_id, png_bytes, caption)
 
     async def send_alert_with_market_context(
         self,
