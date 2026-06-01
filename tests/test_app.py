@@ -361,7 +361,10 @@ class AppSmokeTests(unittest.TestCase):
         ):
             response = analyze_ticker("aapl", db=None, use_ai_explanation=True)
 
-        self.assertIn("OpenAI explanation is disabled", response.operation_notes[0])
+        self.assertTrue(
+            any("OpenAI explanation is disabled" in note for note in response.operation_notes),
+            f"Expected OpenAI message in operation_notes, got: {response.operation_notes}"
+        )
 
     def test_analyze_ticker_adds_market_session_for_closed_market(self) -> None:
         market = {

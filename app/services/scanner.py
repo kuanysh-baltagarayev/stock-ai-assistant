@@ -22,6 +22,7 @@ from app.services.edgar_collector import fetch_recent_filings
 from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.fred_collector import fetch_macro_indicators
+from app.services.macro_context import build_macro_context, macro_context_summary
 from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
@@ -90,6 +91,7 @@ def analyze_ticker(
             used_ai_explanation=use_ai_explanation,
             market_session=market_session,
             event_calendar=market.get("event_calendar"),
+            generated_at=payload.get("generated_at"),
         ),
     )
     if db is not None:
@@ -475,6 +477,7 @@ def _build_operation_notes(
     used_ai_explanation: bool,
     market_session: dict | None,
     event_calendar: dict | None,
+    generated_at: Any = None,
 ) -> list[str]:
     notes: list[str] = []
     data_quality = market.get("data_quality") or {}
@@ -488,7 +491,8 @@ def _build_operation_notes(
             notes.append(session_note)
 
     notes.extend(_event_calendar_notes(str(market.get("ticker") or "UNKNOWN"), event_calendar))
-    notes.extend(_economic_events_notes(market.get("generated_at")))
+    notes.extend(_economic_events_notes(generated_at))
+    notes.extend(_macro_context_notes(generated_at))
 
     if used_ai_explanation:
         if not getattr(settings, "openai_api_key", None):
@@ -574,6 +578,23 @@ def _save_edgar_filings(db: Session, ticker: str) -> None:
             "filing_count": len(collection.filings),
         },
     )
+
+
+def _macro_context_notes(generated_at: Any) -> list[str]:
+    """Return notes about macroeconomic context for alert interpretation."""
+    if not isinstance(generated_at, datetime):
+        return []
+
+    try:
+        macro = build_macro_context(generated_at)
+        return macro_context_summary(macro)
+    except Exception:
+        logger.debug(
+            "macro_context_notes_failed",
+            extra={"component": "macro_context"},
+            exc_info=True,
+        )
+        return []
 
 
 def _economic_events_notes(generated_at: Any) -> list[str]:
