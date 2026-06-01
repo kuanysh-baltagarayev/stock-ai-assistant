@@ -91,6 +91,28 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
                         },
                     ],
                 },
+                sec_filings={
+                    "summary": "Recent SEC filings: 10-Q (2026-04-30), 8-K (2026-05-15).",
+                    "cik": 320193,
+                    "company_name": "Apple Inc.",
+                    "fetched_at": "2026-06-01T00:00:00+00:00",
+                    "recent_filings": [
+                        {
+                            "form_type": "10-Q",
+                            "filing_date": "2026-04-30",
+                            "accession_number": "0000320193-26-000010",
+                            "description": "Quarterly report",
+                            "sec_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/aapl-20260329.htm",
+                        },
+                        {
+                            "form_type": "8-K",
+                            "filing_date": "2026-05-15",
+                            "accession_number": "0000320193-26-000020",
+                            "description": "Current report",
+                            "sec_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000020/0000320193-26-000020-index.htm",
+                        },
+                    ],
+                },
             )
             db.add(
                 AnalysisSnapshot(
@@ -150,6 +172,7 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
         confidence: float,
         source_disagreed: bool,
         event_calendar: dict | None = None,
+        sec_filings: dict | None = None,
     ) -> dict:
         return {
             "ticker": "AAPL",
@@ -189,6 +212,7 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
                 "freshness_note": freshness_note,
             },
             "event_calendar": event_calendar,
+            "sec_filings": sec_filings,
             "operation_notes": [],
         }
 
@@ -256,6 +280,8 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("provider: yfinance", send_mock.await_args_list[1].args[1])
         self.assertIn("freshness", send_mock.await_args_list[2].args[1].lower())
         self.assertIn("risk context", send_mock.await_args_list[3].args[1].lower())
+        self.assertIn("recent sec filings", send_mock.await_args_list[3].args[1].lower())
+        self.assertIn("10-q", send_mock.await_args_list[3].args[1].lower())
         self.assertIn("event and session context", send_mock.await_args_list[4].args[1])
         self.assertIn("upcoming company events", send_mock.await_args_list[4].args[1].lower())
         self.assertIn("changes vs older snapshot", send_mock.await_args_list[5].args[1].lower())

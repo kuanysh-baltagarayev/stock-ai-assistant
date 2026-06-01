@@ -52,6 +52,8 @@ class TelegramDigestModeTests(unittest.IsolatedAsyncioTestCase):
             (datetime(2026, 6, 1, 20, 30, tzinfo=timezone.utc), "close"),
             (datetime(2026, 6, 1, 22, 30, tzinfo=timezone.utc), "after_hours"),
             (datetime(2026, 6, 7, 16, 0, tzinfo=timezone.utc), "weekly_review"),
+            (datetime(2026, 7, 3, 16, 0, tzinfo=timezone.utc), "weekly_review"),
+            (datetime(2026, 12, 24, 18, 30, tzinfo=timezone.utc), "close"),
         ]
 
         for reference_time, expected_mode in cases:

@@ -31,6 +31,7 @@ from app.schemas import (
     TechnicalIndicators,
 )
 from app.services.ai_explainer import explain_analysis
+from app.services.edgar_collector import EdgarCollection, EdgarFiling
 from app.services import market_data
 from app.services.runtime_budget import reset_runtime_budgets
 from app.services.scanner import analyze_ticker, scan_tickers
@@ -54,6 +55,7 @@ def make_analysis(ticker: str, final_score: float) -> AnalyzeResponse:
         short_reason=f"{ticker} short reason",
         explanation=f"{ticker} explanation",
         event_calendar=None,
+        sec_filings=None,
     )
 
 
@@ -312,6 +314,21 @@ class AppSmokeTests(unittest.TestCase):
             short_reason="Neutral: sample reason.",
             reasons=["price is above MA50"],
         )
+        edgar_collection = EdgarCollection(
+            ticker="AAPL",
+            cik=320193,
+            company_name="Apple Inc.",
+            filings=[
+                EdgarFiling(
+                    form_type="10-Q",
+                    filing_date="2026-04-30",
+                    accession_number="0000320193-26-000010",
+                    description="Quarterly report",
+                    sec_url="https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/aapl-20260329.htm",
+                )
+            ],
+            fetched_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+        )
 
         with (
             patch("app.services.scanner.get_market_data", return_value=market),
@@ -319,6 +336,7 @@ class AppSmokeTests(unittest.TestCase):
             patch("app.services.scanner.calculate_indicators", return_value=technicals),
             patch("app.services.scanner.score_stock", return_value=scoring),
             patch("app.services.scanner.explain_analysis", return_value="Mock explanation"),
+            patch("app.services.scanner.fetch_recent_filings", return_value=edgar_collection),
         ):
             response = analyze_ticker("aapl", db=None, use_ai_explanation=True)
 
@@ -326,6 +344,9 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(response.price, 189.12)
         self.assertEqual(response.explanation, "Mock explanation")
         self.assertIsNotNone(response.generated_at.tzinfo)
+        self.assertIsNotNone(response.sec_filings)
+        self.assertEqual(response.sec_filings.recent_filings[0].form_type, "10-Q")
+        self.assertTrue(any("SEC filing" in note for note in response.operation_notes))
 
     def test_analyze_ticker_adds_operation_notes_for_openai_fallback(self) -> None:
         market = {
@@ -365,6 +386,80 @@ class AppSmokeTests(unittest.TestCase):
             any("OpenAI explanation is disabled" in note for note in response.operation_notes),
             f"Expected OpenAI message in operation_notes, got: {response.operation_notes}"
         )
+
+    def test_analyze_ticker_recent_8k_increases_risk_score(self) -> None:
+        market = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "info": {},
+            "data_quality": {"summary": "ok"},
+        }
+        fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
+        technicals = TechnicalIndicators(
+            change_1d_pct=1.0,
+            change_1m_pct=8.0,
+            change_6m_pct=20.0,
+            moving_average_50=180.0,
+            moving_average_200=170.0,
+            rsi=55.0,
+            volatility_pct=22.0,
+            max_drawdown_pct=-12.0,
+        )
+
+        with (
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_market_data", return_value=market),
+            patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
+            patch("app.services.scanner.calculate_indicators", return_value=technicals),
+            patch("app.services.scanner.explain_analysis", return_value="Mock explanation"),
+            patch("app.services.scanner.build_macro_context", return_value=None),
+            patch(
+                "app.services.scanner.fetch_recent_filings",
+                return_value=EdgarCollection(
+                    ticker="AAPL",
+                    cik=320193,
+                    company_name="Apple Inc.",
+                    filings=[],
+                    fetched_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+                ),
+            ),
+        ):
+            baseline = analyze_ticker("aapl", db=None, use_ai_explanation=True)
+
+        with (
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_market_data", return_value=market),
+            patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
+            patch("app.services.scanner.calculate_indicators", return_value=technicals),
+            patch("app.services.scanner.explain_analysis", return_value="Mock explanation"),
+            patch("app.services.scanner.build_macro_context", return_value=None),
+            patch(
+                "app.services.scanner.fetch_recent_filings",
+                return_value=EdgarCollection(
+                    ticker="AAPL",
+                    cik=320193,
+                    company_name="Apple Inc.",
+                    filings=[
+                        EdgarFiling(
+                            form_type="8-K",
+                            filing_date="2026-05-30",
+                            accession_number="0000320193-26-000020",
+                            description="Current report",
+                            sec_url="https://www.sec.gov/Archives/edgar/data/320193/000032019326000020/0000320193-26-000020-index.htm",
+                        )
+                    ],
+                    fetched_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+                ),
+            ),
+        ):
+            response = analyze_ticker("aapl", db=None, use_ai_explanation=True)
+
+        self.assertGreater(response.scores.risk_score, baseline.scores.risk_score)
+        self.assertLess(response.scores.final_score, baseline.scores.final_score)
+        self.assertIsNotNone(response.sec_filings)
+        self.assertTrue(any("8-K" in note for note in response.operation_notes))
 
     def test_analyze_ticker_adds_market_session_for_closed_market(self) -> None:
         market = {
@@ -500,6 +595,21 @@ class AppSmokeTests(unittest.TestCase):
             short_reason="Neutral: sample reason.",
             reasons=["price is above MA50"],
         )
+        edgar_collection = EdgarCollection(
+            ticker="AAPL",
+            cik=320193,
+            company_name="Apple Inc.",
+            filings=[
+                EdgarFiling(
+                    form_type="10-Q",
+                    filing_date="2026-04-30",
+                    accession_number="0000320193-26-000010",
+                    description="Quarterly report",
+                    sec_url="https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/aapl-20260329.htm",
+                )
+            ],
+            fetched_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "snapshot.db"
@@ -524,7 +634,8 @@ class AppSmokeTests(unittest.TestCase):
                     patch("app.services.market_data.time.sleep"),
                     patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
                     patch("app.services.scanner.calculate_indicators", return_value=technicals),
-                    patch("app.services.scanner.score_stock", return_value=scoring),
+                    patch("app.services.scanner.score_stock", return_value=scoring) as score_stock_mock,
+                    patch("app.services.scanner.fetch_recent_filings", return_value=edgar_collection),
                 ):
                     response = analyze_ticker("aapl", db=db, use_ai_explanation=False)
 
@@ -559,11 +670,18 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(edgar_source.ticker, "AAPL")
         self.assertEqual(edgar_source.provider_name, "edgar")
         self.assertEqual(edgar_source.source_tier, "Tier 1")
+        self.assertEqual(edgar_source.payload["payload_extra"]["filings"][0]["form_type"], "10-Q")
         self.assertEqual(response.price_adjustment_policy, "raw_close")
         self.assertEqual(response.source_provenance.provider_name, "yfinance")
         self.assertFalse(response.data_quality.stale)
         self.assertIsNotNone(response.fx)
         self.assertEqual(response.fx.base_currency, "USD")
+        self.assertIsNotNone(response.sec_filings)
+        score_stock_mock.assert_called_once()
+        self.assertEqual(
+            score_stock_mock.call_args.kwargs["event_calendar"],
+            market.get("event_calendar"),
+        )
 
     def test_scan_tickers_sorts_results_and_collects_errors(self) -> None:
         analysis_high = make_analysis("MSFT", 82.0)
@@ -586,6 +704,19 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("failures", response.summary.message)
         self.assertTrue(response.summary.notes)
         self.assertIn("Partial failure", response.summary.notes[0])
+
+    def test_scan_tickers_skips_edgar_fetches(self) -> None:
+        analysis = make_analysis("AAPL", 55.0)
+
+        with (
+            patch("app.services.scanner.analyze_ticker", return_value=analysis) as analyze_mock,
+            patch("app.services.scanner.fetch_recent_filings") as filings_mock,
+        ):
+            response = scan_tickers(["AAPL"], db=None)
+
+        self.assertEqual(len(response.results), 1)
+        analyze_mock.assert_called_once()
+        filings_mock.assert_not_called()
 
     def test_scan_tickers_adds_event_calendar_notes_to_summary(self) -> None:
         analysis = AnalyzeResponse(

@@ -3,13 +3,21 @@
 Alerts sent outside trading hours are buffered and sent at market open.
 High-impact economic events (FOMC, CPI) may trigger pre-market notifications.
 """
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.services.exchange_calendar import get_session_state
+from app.services.exchange_calendar import get_session_state, next_trading_day
 
 # US Eastern Time for market hours
 EST = ZoneInfo("America/New_York")
+
+
+def _to_est(when: datetime | None) -> datetime:
+    if when is None:
+        return datetime.now(EST)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(EST)
 
 
 def is_market_open(when: datetime | None = None) -> bool:
@@ -21,24 +29,7 @@ def is_market_open(when: datetime | None = None) -> bool:
     Returns:
         True if during 9:30 AM - 4:00 PM EST on a trading day.
     """
-    if when is None:
-        when = datetime.now(EST)
-    else:
-        # Convert to EST if not already
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        when = when.astimezone(EST)
-
-    session = get_session_state(when)
-    if session not in {"regular_open", "early_close"}:
-        return False
-
-    hour = when.hour
-    minute = when.minute
-    current_time = time(hour, minute)
-
-    # Trading hours: 9:30 AM - 4:00 PM EST
-    return time(9, 30) <= current_time < time(16, 0)
+    return get_session_state(_to_est(when)) == "regular_open"
 
 
 def next_market_open(when: datetime | None = None) -> datetime:
@@ -50,32 +41,15 @@ def next_market_open(when: datetime | None = None) -> datetime:
     Returns:
         Next market open datetime in EST.
     """
-    if when is None:
-        when = datetime.now(EST)
-    else:
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        when = when.astimezone(EST)
+    when = _to_est(when)
+    market_open_today = when.replace(hour=9, minute=30, second=0, microsecond=0)
+    session = get_session_state(when)
 
-    # Check if current time is before market open today
-    market_open_time = time(9, 30)
-    today = when.date()
+    if session in {"closed", "pre_market"} and when.time() < market_open_today.time():
+        return market_open_today
 
-    # Create a datetime at market open today to check session
-    today_at_open = datetime.combine(today, market_open_time, tzinfo=EST)
-    session = get_session_state(today_at_open)
-    if session in {"regular_open", "early_close"} and when.time() < market_open_time:
-        # Market opens today
-        return today_at_open
-
-    # Find next trading day and return its open time
-    current = today + timedelta(days=1)
-    while True:
-        current_at_open = datetime.combine(current, market_open_time, tzinfo=EST)
-        session = get_session_state(current_at_open)
-        if session in {"regular_open", "early_close"}:
-            return current_at_open
-        current += timedelta(days=1)
+    next_day = next_trading_day(when.date())
+    return datetime(next_day.year, next_day.month, next_day.day, 9, 30, tzinfo=EST)
 
 
 def time_until_market_open(when: datetime | None = None) -> timedelta:
@@ -87,13 +61,7 @@ def time_until_market_open(when: datetime | None = None) -> timedelta:
     Returns:
         Timedelta to next market open.
     """
-    if when is None:
-        when = datetime.now(EST)
-    else:
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        when = when.astimezone(EST)
-
+    when = _to_est(when)
     return next_market_open(when) - when
 
 

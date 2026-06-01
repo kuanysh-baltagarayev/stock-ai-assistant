@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from app.services.market_hours import (
@@ -48,6 +48,11 @@ class MarketHoursTests(unittest.TestCase):
         when = datetime(2025, 11, 27, 12, 0, tzinfo=EST)
         self.assertFalse(is_market_open(when))
 
+    def test_market_closed_after_early_close(self) -> None:
+        """On an early-close day, 1:30 PM ET is already closed."""
+        when = datetime(2026, 12, 24, 13, 30, tzinfo=EST)
+        self.assertFalse(is_market_open(when))
+
     def test_next_market_open_afternoon(self) -> None:
         """From afternoon, next market open is tomorrow."""
         # Wednesday June 4, 2026 at 3:00 PM
@@ -73,6 +78,13 @@ class MarketHoursTests(unittest.TestCase):
         next_open = next_market_open(when)
         # Should skip weekend, open Monday at 9:30 AM
         self.assertEqual(next_open.date().isoweekday(), 1)  # Monday
+        self.assertEqual(next_open.time(), time(9, 30))
+
+    def test_next_market_open_after_early_close_is_next_trading_day(self) -> None:
+        """After a 1 PM early close, next open should be the next trading day."""
+        when = datetime(2026, 12, 24, 13, 30, tzinfo=EST)
+        next_open = next_market_open(when)
+        self.assertEqual(next_open.date().isoformat(), "2026-12-28")
         self.assertEqual(next_open.time(), time(9, 30))
 
     def test_time_until_market_open(self) -> None:

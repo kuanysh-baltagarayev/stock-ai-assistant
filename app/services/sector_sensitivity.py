@@ -11,7 +11,6 @@ Different sectors respond differently to macro conditions:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 
 @dataclass(frozen=True)

@@ -55,7 +55,7 @@ def _build_snapshot_payload(market: dict[str, Any]) -> dict[str, Any]:
     if isinstance(history, pd.DataFrame):
         history_rows = _serialize_history(history)
 
-    return {
+    payload = {
         "ticker": _normalize_symbol(market.get("ticker")),
         "provider_name": market.get("provider_name") or "yfinance",
         "source_url": market.get("source_url"),
@@ -76,6 +76,10 @@ def _build_snapshot_payload(market: dict[str, Any]) -> dict[str, Any]:
         "info": market.get("info") or {},
         "history_rows": history_rows,
     }
+    payload_extra = market.get("payload_extra")
+    if isinstance(payload_extra, dict):
+        payload["payload_extra"] = payload_extra
+    return payload
 
 
 def _serialize_history(history: pd.DataFrame) -> list[dict[str, Any]]:

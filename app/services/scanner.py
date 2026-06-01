@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import logging
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -15,10 +15,11 @@ from app.schemas import (
     ScanResponse,
     ScanResult,
     ScanSummary,
+    SecFilingsContext,
     SourceProvenance,
 )
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
-from app.services.edgar_collector import fetch_recent_filings
+from app.services.edgar_collector import EdgarCollection, fetch_recent_filings
 from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.fred_collector import fetch_macro_indicators
@@ -45,12 +46,15 @@ def analyze_ticker(
     ticker: str,
     db: Session | None = None,
     use_ai_explanation: bool = True,
+    include_edgar_context: bool = True,
 ) -> AnalyzeResponse:
     logger.debug("analysis_started", extra={"component": "scanner", "ticker": ticker})
     market = get_market_data(ticker, db=db)
+    edgar_collection = _fetch_edgar_filings(market["ticker"]) if include_edgar_context else None
     if db is not None:
         _save_source_snapshot(db, market)
-        _save_edgar_filings(db, market["ticker"])
+        if edgar_collection is not None:
+            _save_edgar_filings(db, edgar_collection)
         _save_macro_indicators(db)
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
@@ -58,7 +62,16 @@ def analyze_ticker(
     # Build macro context for adaptive scoring
     generated_at = datetime.now(timezone.utc)
     macro = build_macro_context(generated_at)
-    scoring = score_stock(market["price"], technicals, fundamentals, macro_context=macro)
+    sec_filings_payload = _build_sec_filings_payload(edgar_collection)
+    scoring = score_stock(
+        market["price"],
+        technicals,
+        fundamentals,
+        macro_context=macro,
+        event_calendar=market.get("event_calendar"),
+        sec_filings=sec_filings_payload,
+        reference_time=generated_at,
+    )
 
     if db is not None:
         _save_instrument(db, market["ticker"], market["info"], market["currency"])
@@ -81,6 +94,7 @@ def analyze_ticker(
         "fx": _build_fx_normalization(market),
         "market_session": market_session,
         "event_calendar": market.get("event_calendar"),
+        "sec_filings": sec_filings_payload,
     }
 
     if use_ai_explanation:
@@ -98,6 +112,9 @@ def analyze_ticker(
             used_ai_explanation=use_ai_explanation,
             market_session=market_session,
             event_calendar=market.get("event_calendar"),
+            sec_filings=payload.get("sec_filings"),
+            risk_score=scoring.scores.risk_score,
+            fundamentals=fundamentals,
             generated_at=payload.get("generated_at"),
         ),
     )
@@ -127,7 +144,12 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
 
     for ticker in tickers:
         try:
-            analysis = analyze_ticker(ticker, db=db, use_ai_explanation=False)
+            analysis = analyze_ticker(
+                ticker,
+                db=db,
+                use_ai_explanation=False,
+                include_edgar_context=False,
+            )
         except MarketDataError as exc:
             errors.append(ScanError(ticker=ticker, error=str(exc)))
             logger.warning(
@@ -484,6 +506,9 @@ def _build_operation_notes(
     used_ai_explanation: bool,
     market_session: dict | None,
     event_calendar: dict | None,
+    sec_filings: dict | None,
+    risk_score: float,
+    fundamentals: Any,
     generated_at: Any = None,
 ) -> list[str]:
     notes: list[str] = []
@@ -498,14 +523,15 @@ def _build_operation_notes(
             notes.append(session_note)
 
     notes.extend(_event_calendar_notes(str(market.get("ticker") or "UNKNOWN"), event_calendar))
+    notes.extend(_sec_filing_notes(str(market.get("ticker") or "UNKNOWN"), sec_filings))
     notes.extend(_economic_events_notes(generated_at))
     notes.extend(_macro_context_notes(generated_at))
     notes.extend(_sector_sensitivity_notes(market.get("info", {}).get("sector"), generated_at))
     notes.extend(
         _risk_overlay_notes(
-            market.get("data_quality", {}).get("risk_score") or 50,
+            risk_score,
             market.get("info", {}).get("sector"),
-            {"dividend_yield": market.get("info", {}).get("dividendYield")},
+            fundamentals,
             generated_at,
         )
     )
@@ -550,7 +576,7 @@ def _event_calendar_notes(ticker: str, event_calendar: Any) -> list[str]:
     return notes
 
 
-def _save_edgar_filings(db: Session, ticker: str) -> None:
+def _fetch_edgar_filings(ticker: str) -> EdgarCollection | None:
     try:
         collection = fetch_recent_filings(ticker)
     except Exception:
@@ -558,20 +584,26 @@ def _save_edgar_filings(db: Session, ticker: str) -> None:
             "edgar_filings_fetch_failed",
             extra={"component": "edgar", "ticker": ticker},
         )
-        return
-
+        return None
     if collection.error:
         logger.warning(
             "edgar_filings_error",
             extra={"component": "edgar", "ticker": ticker, "error": collection.error},
         )
-        return
-
+        return None
     if not collection.filings:
         logger.debug(
             "edgar_no_filings",
             extra={"component": "edgar", "ticker": ticker},
         )
+        return None
+    return collection
+
+
+def _save_edgar_filings(db: Session, collection: EdgarCollection) -> None:
+    ticker = collection.ticker
+
+    if not collection.filings:
         return
 
     try:
@@ -594,6 +626,65 @@ def _save_edgar_filings(db: Session, ticker: str) -> None:
             "filing_count": len(collection.filings),
         },
     )
+
+
+def _build_sec_filings_payload(collection: EdgarCollection | None) -> dict[str, Any] | None:
+    if collection is None or not collection.filings:
+        return None
+
+    summary_forms = ", ".join(
+        f"{filing.form_type} ({filing.filing_date})" for filing in collection.filings[:3]
+    )
+    return SecFilingsContext(
+        summary=f"Recent SEC filings: {summary_forms}.",
+        cik=collection.cik,
+        company_name=collection.company_name,
+        fetched_at=collection.fetched_at,
+        recent_filings=[
+            {
+                "form_type": filing.form_type,
+                "filing_date": filing.filing_date,
+                "accession_number": filing.accession_number,
+                "description": filing.description,
+                "sec_url": filing.sec_url,
+            }
+            for filing in collection.filings[:5]
+        ],
+    ).model_dump(mode="json")
+
+
+def _sec_filing_notes(ticker: str, sec_filings: Any) -> list[str]:
+    if not sec_filings:
+        return []
+
+    filings = getattr(sec_filings, "recent_filings", None)
+    if filings is None and isinstance(sec_filings, dict):
+        filings = sec_filings.get("recent_filings")
+    if not filings:
+        return []
+
+    notes: list[str] = []
+    summary = getattr(sec_filings, "summary", None)
+    if summary is None and isinstance(sec_filings, dict):
+        summary = sec_filings.get("summary")
+    if summary:
+        notes.append(f"{ticker.upper()} {summary}")
+
+    filing = filings[0]
+    if isinstance(filing, dict):
+        form_type = filing.get("form_type")
+        filing_date = filing.get("filing_date")
+        description = filing.get("description")
+    else:
+        form_type = getattr(filing, "form_type", None)
+        filing_date = getattr(filing, "filing_date", None)
+        description = getattr(filing, "description", None)
+    if form_type and filing_date:
+        detail = f"{ticker.upper()} latest SEC filing: {form_type} on {filing_date}"
+        if description:
+            detail = f"{detail} ({description})"
+        notes.append(detail + ".")
+    return notes
 
 
 def _macro_context_notes(generated_at: Any) -> list[str]:

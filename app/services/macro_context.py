@@ -38,7 +38,6 @@ def build_macro_context(
     Returns:
         MacroContext with current economic conditions and alerts.
     """
-    from datetime import timedelta
 
     ref_date = reference_date.date()
 

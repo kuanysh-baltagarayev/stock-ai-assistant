@@ -1,5 +1,4 @@
 import unittest
-from datetime import date
 
 from app.services.economic_surprise import (
     calculate_surprise,

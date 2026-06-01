@@ -24,9 +24,10 @@ from app.services.runtime_budget import (
     consume_runtime_budget,
     runtime_budget_snapshot,
 )
+from app.services.exchange_calendar import get_market_hours_info, get_session_state
 from app.services.scanner import analyze_ticker, scan_tickers
 from app.services.market_hours import should_defer_alert, time_until_market_open
-from app.services.backtesting import backtest_report, calculate_metrics, backtest_snapshot
+from app.services.backtesting import backtest_report, calculate_metrics
 from app.services.correlation import calculate_correlation_matrix, correlation_insights
 
 
@@ -1242,10 +1243,7 @@ class TelegramBotService:
     def _is_market_session_open(self, moment: datetime | None = None) -> bool:
         reference = moment or datetime.now(timezone.utc)
         local_reference = reference.astimezone(ZoneInfo("America/New_York"))
-        if local_reference.weekday() >= 5:
-            return False
-        current_minutes = local_reference.hour * 60 + local_reference.minute
-        return 9 * 60 + 30 <= current_minutes < 16 * 60
+        return get_session_state(local_reference) == "regular_open"
 
     def _digest_skip_reason(self, subscription: TelegramSubscription) -> str | None:
         now = datetime.now(timezone.utc)
@@ -1568,6 +1566,10 @@ class TelegramBotService:
         if event_lines:
             lines.extend(["", "События:"])
             lines.extend(event_lines)
+        filing_lines = self._sec_filing_lines(getattr(analysis, "sec_filings", None))
+        if filing_lines:
+            lines.extend(["", "SEC filings:"])
+            lines.extend(filing_lines)
         disclaimer = self._analysis_disclaimer(analysis)
         if disclaimer:
             lines.extend(["", disclaimer])
@@ -1777,6 +1779,7 @@ class TelegramBotService:
         market_session = payload.get("market_session") or {}
         data_quality = payload.get("data_quality") or {}
         event_calendar = payload.get("event_calendar") or {}
+        sec_filings = payload.get("sec_filings") or {}
         explanation = payload.get("explanation") or ""
         lines = [
             f"{ticker.upper()}: risk context",
@@ -1796,6 +1799,10 @@ class TelegramBotService:
         if event_lines:
             lines.extend(["", "Upcoming company events:"])
             lines.extend(event_lines)
+        filing_lines = self._sec_filing_lines(sec_filings)
+        if filing_lines:
+            lines.extend(["", "Recent SEC filings:"])
+            lines.extend(filing_lines)
         if explanation:
             lines.extend(["", self._translate_text(str(explanation))])
         return self._trim_message("\n".join(lines))
@@ -1828,16 +1835,13 @@ class TelegramBotService:
             )
 
         now = datetime.now(timezone.utc)
-        local_now = now.astimezone(ZoneInfo("America/New_York"))
-        market_open = local_now.replace(hour=9, minute=30, second=0, microsecond=0)
-        market_close = local_now.replace(hour=16, minute=0, second=0, microsecond=0)
-        session = "weekend" if local_now.weekday() >= 5 else "open" if market_open <= local_now < market_close else "closed"
+        hours_info = get_market_hours_info(now)
         lines = [
             "Today: U.S. equity session baseline",
-            f"Reference time: {local_now.isoformat()}",
-            f"Session: {session}",
-            f"Regular open: {market_open.isoformat()}",
-            f"Regular close: {market_close.isoformat()}",
+            f"Reference time: {hours_info['reference_time_et']}",
+            f"Session: {hours_info['state']}",
+            f"Next open: {hours_info['next_open']}",
+            f"Market close: {hours_info['market_close'] or 'n/a'}",
             "",
             "Use /calendar AAPL to see the latest stored market session for a ticker.",
         ]
@@ -1884,6 +1888,42 @@ class TelegramBotService:
                 )
             if note:
                 parts.append(self._translate_text(str(note)))
+            lines.append(" | ".join(parts))
+
+        return lines
+
+    def _sec_filing_lines(self, sec_filings: Any) -> list[str]:
+        if not sec_filings:
+            return []
+
+        filings = getattr(sec_filings, "recent_filings", None)
+        if filings is None and isinstance(sec_filings, dict):
+            filings = sec_filings.get("recent_filings")
+        if not filings:
+            return []
+
+        lines: list[str] = []
+        summary = getattr(sec_filings, "summary", None)
+        if summary is None and isinstance(sec_filings, dict):
+            summary = sec_filings.get("summary")
+        if summary:
+            lines.append(self._translate_text(str(summary)))
+
+        for filing in filings[:3]:
+            if isinstance(filing, dict):
+                form_type = filing.get("form_type") or "filing"
+                filing_date = filing.get("filing_date")
+                description = filing.get("description")
+            else:
+                form_type = getattr(filing, "form_type", "filing")
+                filing_date = getattr(filing, "filing_date", None)
+                description = getattr(filing, "description", None)
+
+            parts = [f"• {form_type}"]
+            if filing_date:
+                parts.append(str(filing_date))
+            if description:
+                parts.append(self._translate_text(str(description)))
             lines.append(" | ".join(parts))
 
         return lines
@@ -2112,18 +2152,23 @@ class TelegramBotService:
         if reference.tzinfo is None:
             reference = reference.replace(tzinfo=timezone.utc)
         local_reference = reference.astimezone(ZoneInfo("America/New_York"))
-
-        if local_reference.weekday() >= 5:
-            return "weekly_review"
-
+        session_state = get_session_state(local_reference)
         current_minutes = local_reference.hour * 60 + local_reference.minute
-        if current_minutes < 9 * 60 + 30:
+
+        if session_state in {"weekend", "holiday"}:
+            return "weekly_review"
+        if session_state == "pre_market":
             return "pre_market"
+        if session_state in {"after_hours", "early_close"}:
+            return "close" if current_minutes < 17 * 60 else "after_hours"
+        if session_state == "closed":
+            return "after_hours"
+
         if current_minutes < 10 * 60 + 30:
             return "market_open"
         if current_minutes < 15 * 60 + 30:
             return "midday"
-        if current_minutes < 17 * 60:
+        if current_minutes < 16 * 60:
             return "close"
         return "after_hours"
 
@@ -2477,7 +2522,7 @@ class TelegramBotService:
 
         result = [
             f"📊 Анализ портфеля ({len(matrix.tickers)} акций)",
-            f"",
+            "",
         ]
 
         result.extend(insights)
@@ -2485,8 +2530,8 @@ class TelegramBotService:
         # Show some pair correlations
         high_pairs = matrix.high_correlation_pairs(threshold=0.7)
         if high_pairs:
-            result.append(f"")
-            result.append(f"🔗 Высокие корреляции:")
+            result.append("")
+            result.append("🔗 Высокие корреляции:")
             for pair in high_pairs[:5]:
                 result.append(f"  {pair.ticker1}/{pair.ticker2}: {pair.correlation:.2f}")
 

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from app.schemas import Fundamentals, Scores, TechnicalIndicators
 from app.services.research_labels import (
@@ -23,11 +24,21 @@ class ScoringResult:
     reasons: list[str]
 
 
+@dataclass(frozen=True)
+class EventCatalyst:
+    category: str
+    severity: float
+    reason: str
+
+
 def score_stock(
     price: float,
     technicals: TechnicalIndicators,
     fundamentals: Fundamentals,
     macro_context: MacroContext | None = None,
+    event_calendar: object | None = None,
+    sec_filings: object | None = None,
+    reference_time: datetime | None = None,
 ) -> ScoringResult:
     """Score a stock with optional macroeconomic context.
 
@@ -42,7 +53,13 @@ def score_stock(
     """
     momentum_score, momentum_reasons = _momentum_score(price, technicals)
     valuation_score, valuation_reasons = _valuation_score(fundamentals)
-    risk_score, risk_reasons = _risk_score(technicals)
+    risk_score, risk_reasons = _risk_score(
+        technicals,
+        macro_context=macro_context,
+        event_calendar=event_calendar,
+        sec_filings=sec_filings,
+        reference_time=reference_time,
+    )
 
     # Determine weights based on macro context
     if macro_context:
@@ -194,7 +211,14 @@ def _valuation_score(fundamentals: Fundamentals) -> tuple[float, list[str]]:
     return _clamp(score), reasons
 
 
-def _risk_score(technicals: TechnicalIndicators) -> tuple[float, list[str]]:
+def _risk_score(
+    technicals: TechnicalIndicators,
+    *,
+    macro_context: MacroContext | None = None,
+    event_calendar: object | None = None,
+    sec_filings: object | None = None,
+    reference_time: datetime | None = None,
+) -> tuple[float, list[str]]:
     score = 35.0
     reasons: list[str] = []
 
@@ -229,7 +253,250 @@ def _risk_score(technicals: TechnicalIndicators) -> tuple[float, list[str]]:
         score += 5
         reasons.append("daily move is unusually large")
 
+    catalyst_adjustment, catalyst_reasons = _event_catalyst_risk_adjustment(
+        macro_context=macro_context,
+        event_calendar=event_calendar,
+        sec_filings=sec_filings,
+        reference_time=reference_time,
+    )
+    score += catalyst_adjustment
+    reasons.extend(catalyst_reasons)
+
     return _clamp(score), reasons
+
+
+def _event_catalyst_risk_adjustment(
+    *,
+    macro_context: MacroContext | None = None,
+    event_calendar: object | None = None,
+    sec_filings: object | None = None,
+    reference_time: datetime | None = None,
+) -> tuple[float, list[str]]:
+    now = reference_time or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    catalysts = (
+        _macro_event_catalyst(macro_context)
+        + _company_event_catalyst(event_calendar, now=now)
+        + _sec_filing_catalyst(sec_filings, now=now)
+    )
+    if not catalysts:
+        return 0.0, []
+
+    catalysts.sort(key=lambda catalyst: catalyst.severity, reverse=True)
+    weights = (1.0, 0.6, 0.35)
+    adjustment = 0.0
+    for index, catalyst in enumerate(catalysts[:3]):
+        adjustment += catalyst.severity * weights[index]
+
+    category_count = len({catalyst.category for catalyst in catalysts})
+    if category_count >= 3:
+        adjustment += 4.0
+    elif category_count == 2:
+        adjustment += 2.0
+
+    reasons: list[str] = []
+    for catalyst in catalysts[:2]:
+        if catalyst.reason not in reasons:
+            reasons.append(catalyst.reason)
+    if category_count >= 2:
+        reasons.append("multiple near-term catalysts can amplify event risk")
+
+    return min(round(adjustment, 2), 20.0), reasons
+
+
+def _macro_event_catalyst(macro_context: MacroContext | None) -> list[EventCatalyst]:
+    if macro_context is None or not macro_context.upcoming_high_impact_events:
+        return []
+
+    event_count = len(macro_context.upcoming_high_impact_events)
+    if event_count >= 3:
+        return [
+            EventCatalyst(
+                category="macro",
+                severity=9.0,
+                reason="multiple high-impact macro events are imminent",
+            )
+        ]
+    if event_count == 2:
+        return [
+            EventCatalyst(
+                category="macro",
+                severity=7.0,
+                reason="two high-impact macro events are imminent",
+            )
+        ]
+    return [
+        EventCatalyst(
+            category="macro",
+            severity=4.0,
+            reason="a high-impact macro event is imminent",
+        )
+    ]
+
+
+def _company_event_catalyst(
+    event_calendar: object | None,
+    *,
+    now: datetime,
+) -> list[EventCatalyst]:
+    if not event_calendar:
+        return []
+
+    events = getattr(event_calendar, "upcoming_events", None)
+    if events is None and isinstance(event_calendar, dict):
+        events = event_calendar.get("upcoming_events")
+    if not events:
+        return []
+
+    nearest_earnings_days: int | None = None
+    for event in events:
+        if isinstance(event, dict):
+            name = str(event.get("name") or "").lower()
+            scheduled_at = event.get("scheduled_at") or event.get("window_start_at")
+        else:
+            name = str(getattr(event, "name", "")).lower()
+            scheduled_at = getattr(event, "scheduled_at", None) or getattr(
+                event,
+                "window_start_at",
+                None,
+            )
+        if name != "earnings":
+            continue
+        scheduled_dt = _parse_datetime_like(scheduled_at)
+        if scheduled_dt is None:
+            continue
+        days_until = (scheduled_dt.date() - now.date()).days
+        if days_until < 0:
+            continue
+        if nearest_earnings_days is None or days_until < nearest_earnings_days:
+            nearest_earnings_days = days_until
+
+    if nearest_earnings_days is None:
+        return []
+    if nearest_earnings_days <= 3:
+        return [
+            EventCatalyst(
+                category="company_event",
+                severity=9.0,
+                reason="earnings are imminent and can sharply raise event risk",
+            )
+        ]
+    if nearest_earnings_days <= 7:
+        return [
+            EventCatalyst(
+                category="company_event",
+                severity=6.0,
+                reason="upcoming earnings keep event risk elevated",
+            )
+        ]
+    if nearest_earnings_days <= 14:
+        return [
+            EventCatalyst(
+                category="company_event",
+                severity=3.0,
+                reason="earnings are approaching",
+            )
+        ]
+    return []
+
+
+def _sec_filing_catalyst(
+    sec_filings: object | None,
+    *,
+    now: datetime,
+) -> list[EventCatalyst]:
+    if not sec_filings:
+        return []
+
+    filings = getattr(sec_filings, "recent_filings", None)
+    if filings is None and isinstance(sec_filings, dict):
+        filings = sec_filings.get("recent_filings")
+    if not filings:
+        return []
+
+    strongest: EventCatalyst | None = None
+    for filing in filings[:3]:
+        if isinstance(filing, dict):
+            form_type = str(filing.get("form_type") or "").upper()
+            filing_date = filing.get("filing_date")
+        else:
+            form_type = str(getattr(filing, "form_type", "")).upper()
+            filing_date = getattr(filing, "filing_date", None)
+
+        filing_dt = _parse_filing_date(filing_date)
+        if not form_type or filing_dt is None:
+            continue
+
+        age_days = max(0, (now.date() - filing_dt.date()).days)
+        severity = 0.0
+        reason: str | None = None
+
+        if form_type == "8-K":
+            if age_days <= 7:
+                severity = 8.0
+                reason = "recent 8-K adds event risk"
+            elif age_days <= 30:
+                severity = 4.0
+                reason = "recent 8-K still adds event risk"
+        elif form_type in {"10-Q", "10-Q/A"}:
+            if age_days <= 14:
+                severity = 6.0
+                reason = "fresh 10-Q adds reporting-event risk"
+            elif age_days <= 45:
+                severity = 3.0
+                reason = "recent 10-Q keeps reporting risk elevated"
+        elif form_type in {"10-K", "10-K/A"}:
+            if age_days <= 21:
+                severity = 5.0
+                reason = "fresh 10-K adds annual-report event risk"
+            elif age_days <= 60:
+                severity = 2.0
+                reason = "recent 10-K keeps event risk elevated"
+        elif form_type in {"S-1", "DEF 14A"} and age_days <= 30:
+            severity = 4.0
+            reason = f"recent {form_type} adds event risk"
+
+        if severity <= 0 or reason is None:
+            continue
+
+        catalyst = EventCatalyst(category="sec_filing", severity=severity, reason=reason)
+        if strongest is None or catalyst.severity > strongest.severity:
+            strongest = catalyst
+
+    return [strongest] if strongest is not None else []
+
+
+def _parse_filing_date(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _parse_datetime_like(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _recommendation(final_score: float, risk_score: float) -> str:

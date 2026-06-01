@@ -42,6 +42,22 @@ class EventCalendar(BaseModel):
     upcoming_events: list[CalendarEvent] = Field(default_factory=list)
 
 
+class SecFiling(BaseModel):
+    form_type: str
+    filing_date: str
+    accession_number: str
+    description: str | None = None
+    sec_url: str | None = None
+
+
+class SecFilingsContext(BaseModel):
+    summary: str | None = None
+    cik: int | None = None
+    company_name: str | None = None
+    fetched_at: datetime | None = None
+    recent_filings: list[SecFiling] = Field(default_factory=list)
+
+
 class Scores(BaseModel):
     momentum_score: float
     valuation_score: float
@@ -66,6 +82,7 @@ class AnalyzeResponse(BaseModel):
     fx: "FXNormalization | None" = None
     market_session: "MarketSession | None" = None
     event_calendar: "EventCalendar | None" = None
+    sec_filings: "SecFilingsContext | None" = None
     operation_notes: list[str] = Field(default_factory=list)
 
 

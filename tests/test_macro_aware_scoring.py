@@ -132,6 +132,155 @@ class MacroAwareScoringTests(unittest.TestCase):
         # (though not guaranteed to be strictly ordered)
         self.assertNotEqual(result_low.scores.final_score, result_high.scores.final_score)
 
+    def test_recent_8k_increases_risk_score(self) -> None:
+        reference_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+        result_without_filing = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            macro_context=None,
+            reference_time=reference_time,
+        )
+        result_with_filing = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            macro_context=None,
+            sec_filings={
+                "recent_filings": [
+                    {
+                        "form_type": "8-K",
+                        "filing_date": "2026-05-30",
+                        "description": "Current report",
+                    }
+                ]
+            },
+            reference_time=reference_time,
+        )
+
+        self.assertGreater(
+            result_with_filing.scores.risk_score,
+            result_without_filing.scores.risk_score,
+        )
+        self.assertLess(
+            result_with_filing.scores.final_score,
+            result_without_filing.scores.final_score,
+        )
+        self.assertTrue(any("8-K" in reason for reason in result_with_filing.reasons))
+
+    def test_stale_filing_does_not_change_risk_score(self) -> None:
+        reference_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+        baseline = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            macro_context=None,
+            reference_time=reference_time,
+        )
+        stale = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            macro_context=None,
+            sec_filings={
+                "recent_filings": [
+                    {
+                        "form_type": "10-Q",
+                        "filing_date": "2025-01-15",
+                        "description": "Old quarterly report",
+                    }
+                ]
+            },
+            reference_time=reference_time,
+        )
+
+        self.assertEqual(stale.scores.risk_score, baseline.scores.risk_score)
+        self.assertEqual(stale.scores.final_score, baseline.scores.final_score)
+
+    def test_catalyst_cluster_increases_risk_more_than_routine_filing(self) -> None:
+        reference_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+        filing_only = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            macro_context=None,
+            sec_filings={
+                "recent_filings": [
+                    {
+                        "form_type": "8-K",
+                        "filing_date": "2026-05-30",
+                        "description": "Current report",
+                    }
+                ]
+            },
+            reference_time=reference_time,
+        )
+        clustered = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            macro_context=MacroContext(
+                reference_date=reference_time,
+                upcoming_high_impact_events=["FOMC", "CPI"],
+                recent_macro_data={},
+                volatility_level="high",
+                rate_direction="stable",
+                inflation_level="moderate",
+            ),
+            event_calendar={
+                "upcoming_events": [
+                    {
+                        "name": "earnings",
+                        "scheduled_at": "2026-06-03T20:00:00+00:00",
+                    }
+                ]
+            },
+            sec_filings={
+                "recent_filings": [
+                    {
+                        "form_type": "8-K",
+                        "filing_date": "2026-05-30",
+                        "description": "Current report",
+                    }
+                ]
+            },
+            reference_time=reference_time,
+        )
+
+        self.assertGreater(clustered.scores.risk_score, filing_only.scores.risk_score)
+        self.assertLess(clustered.scores.final_score, filing_only.scores.final_score)
+        self.assertTrue(
+            any("multiple near-term catalysts" in reason for reason in clustered.reasons)
+        )
+
+    def test_distant_earnings_do_not_add_event_risk(self) -> None:
+        reference_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+        baseline = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            macro_context=None,
+            reference_time=reference_time,
+        )
+        distant_earnings = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            macro_context=None,
+            event_calendar={
+                "upcoming_events": [
+                    {
+                        "name": "earnings",
+                        "scheduled_at": "2026-07-01T20:00:00+00:00",
+                    }
+                ]
+            },
+            reference_time=reference_time,
+        )
+
+        self.assertEqual(distant_earnings.scores.risk_score, baseline.scores.risk_score)
+        self.assertEqual(distant_earnings.scores.final_score, baseline.scores.final_score)
+
 
 if __name__ == "__main__":
     unittest.main()

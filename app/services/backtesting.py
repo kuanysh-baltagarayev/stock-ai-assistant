@@ -6,8 +6,7 @@ to measure model accuracy and identify systematic biases.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Literal
+from datetime import datetime, timezone
 
 from app.models import AnalysisSnapshot
 
@@ -192,10 +191,10 @@ def backtest_report(metrics: BacktestMetrics) -> list[str]:
     """
     report = [
         f"📊 Backtesting Report ({metrics.total_scores} scores analyzed)",
-        f"",
+        "",
         f"Overall Accuracy: {metrics.accuracy_pct}% ({metrics.correct_predictions}/{metrics.total_scores})",
         f"Average hold period: {metrics.avg_days_held:.0f} days",
-        f"",
+        "",
     ]
 
     if metrics.buy_recommendations > 0:

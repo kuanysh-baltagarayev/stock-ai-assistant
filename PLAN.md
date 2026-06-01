@@ -54,7 +54,14 @@ Implemented:
 - Telegram analysis follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
 - Telegram `/coverage` command that exposes the supported coverage matrix and known gaps.
 - Telegram company event calendar summaries derived from yfinance profile fields, including earnings and dividend hints.
+- `analyze_ticker` now threads recent SEC EDGAR filing summaries into the main
+  analysis payload, operation notes, and Telegram risk/detail views.
+- Recent SEC filing types and recency now feed into scoring as explicit
+  event-risk inputs, lowering `final_score` when fresh 8-K/10-Q/10-K activity
+  raises near-term uncertainty.
 - Session-aware scheduled digests for pre-market, market-open, midday, close, after-hours, and weekly review.
+- Telegram market-hours gating, digest timing, and session baseline views now use
+  the NYSE holiday and early-close calendar instead of simple weekday checks.
 - Response-level operation notes for OpenAI fallback, data-quality warnings, partial scan failures, and Telegram budget status.
 - readiness endpoint with a database probe.
 - Smoke tests for API routes, persistence, scanner behavior, and CLI scripts.
@@ -81,6 +88,23 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/check.sh` passed after making event-risk scoring
+  cluster-aware across earnings dates, recent SEC filings, and high-impact macro
+  events, with `ruff`, 274 coverage-wrapped tests, coverage report, and compile
+  check.
+- 2026-06-01: `scripts/check.sh` passed after making recent SEC filing types and
+  recency explicit scoring inputs, wiring filing-driven risk into
+  `AnalyzeResponse`, and aligning risk-overlay notes with the actual computed
+  risk score, with `ruff`, 269 coverage-wrapped tests, coverage report, and
+  compile check.
+- 2026-06-01: `scripts/check.sh` passed after threading SEC EDGAR filing context
+  into `AnalyzeResponse`, Telegram analysis/risk views, and raw source snapshot
+  payloads, with `ruff`, 269 coverage-wrapped tests, coverage report, and
+  compile check.
+- 2026-06-01: `scripts/check.sh` passed after aligning Telegram market-hours and
+  digest session handling with the exchange calendar, fixing early-close market
+  open logic, and making EDGAR snapshot persistence tests deterministic, with
+  `ruff`, 268 coverage-wrapped tests, coverage report, and compile check.
 - 2026-06-01: `scripts/check.sh` passed after adding SEC EDGAR filing collector,
   exchange calendar service, and Telegram `/filings` command, with `ruff`, 142
   coverage-wrapped tests, coverage report, and compile check.
@@ -448,11 +472,51 @@ Suggested order for low-waste progress:
    - Telegram `/filings TICKER` command and "Подачи SEC" inline button.
    - 42 new offline tests in `test_edgar_collector.py` and `test_exchange_calendar.py`.
 
-2. Wire EDGAR filings into the analysis pipeline so that filing metadata is stored
-   as a `SourceSnapshot` alongside the market-data snapshot when analyzing a ticker.
+2. Done: persist EDGAR filing metadata as a `SourceSnapshot` alongside the
+   market-data snapshot during `analyze_ticker`.
+   - `app/services/scanner.py` saves the `edgar` source snapshot when filings are
+     available and logs collector failures without breaking analysis.
+   - Offline persistence coverage now mocks EDGAR fetches so the repo check does
+     not depend on external network availability.
 
-3. Integrate `exchange_calendar.py` into the scanner session model to replace the
-   simple weekday check with holiday-aware state classification.
+3. Done: route Telegram market-hours gating and scheduled digest timing through
+   `exchange_calendar.py` so holidays and early closes are handled consistently.
+   - `app/services/market_hours.py` now treats only `regular_open` as open and
+     computes next open via `next_trading_day(...)`.
+   - `app/services/telegram_bot.py` now uses exchange-calendar session states for
+     market-hours-only skips, digest mode selection, and the calendar baseline view.
+
+4. Done: surface stored EDGAR filing summaries directly in analysis payloads,
+   operation notes, and risk/event interpretation so filing context affects the
+   main `/analyze` output instead of only the separate `/filings` view.
+   - `AnalyzeResponse.sec_filings` now carries recent forms, dates, and SEC URLs.
+   - Telegram `/analyze` and `/risk` render recent filing context from the saved
+     analysis payload.
+   - `SourceSnapshot.payload` now preserves collector-specific `payload_extra`,
+     so EDGAR filing lists are retained in raw snapshot storage.
+
+5. Done: use recent SEC filing types and recency as explicit event-risk inputs
+   in scoring, so fresh 8-K/10-Q/10-K activity influences risk and `final_score`
+   instead of remaining display-only context.
+   - `app/services/scoring.py` now applies filing-age/type penalties to
+     `risk_score`, capped to avoid overpowering the rest of the model.
+   - `app/services/scanner.py` passes the built SEC filing context into scoring
+     and uses the actual computed risk score when generating risk-overlay notes.
+
+6. Done: calibrate event-risk integration across earnings calendar, SEC filings,
+   and macro events so the score can distinguish "routine fresh disclosure" from
+   "material catalyst cluster" instead of stacking each source independently.
+   - `app/services/scoring.py` now builds a single catalyst-aware event-risk
+     adjustment with diminishing weights and a cluster bonus across macro,
+     earnings, and filing signals instead of naively stacking every source.
+   - `app/services/scanner.py` passes company event calendars into scoring, so
+     scheduled earnings materially affect risk in the main analysis path.
+   - Focused tests now cover routine filing risk, distant earnings, and
+     multi-signal catalyst clusters.
+
+7. Next: feed sector sensitivity into the same event-risk layer so macro and
+   earnings catalysts hit sectors asymmetrically instead of treating all
+   tickers as equally exposed to the same calendar.
 
 ## Operations, Budgets, And Runtime Boundaries
 
