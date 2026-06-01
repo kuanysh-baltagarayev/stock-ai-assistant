@@ -12,6 +12,13 @@ from zoneinfo import ZoneInfo
 from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
+from app.services.alert_rules import (
+    evaluate_rules,
+    format_rule,
+    is_recently_fired,
+    mark_fired,
+    parse_rule,
+)
 from app.services.edgar_collector import fetch_recent_filings
 from app.services.news_collector import build_news_context, high_impact_news
 from app.services.history import build_snapshot_audit_entries, list_recent_snapshots
@@ -76,6 +83,9 @@ class TelegramBotService(
             self._tasks.append(
                 asyncio.create_task(self._digest_loop(), name="telegram-digest-loop")
             )
+        self._tasks.append(
+            asyncio.create_task(self._alert_loop(), name="telegram-alert-loop")
+        )
         logger.info(
             "telegram_bot_started",
             extra={
@@ -132,6 +142,71 @@ class TelegramBotService(
                 raise
             except Exception:  # pragma: no cover - resilience path
                 logger.exception("Telegram digest loop failed")
+
+    async def _alert_loop(self) -> None:
+        """Check threshold alert rules every 5 minutes and push triggered ones."""
+        while self._running:
+            try:
+                await asyncio.sleep(300)
+                await self._check_alert_rules()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # pragma: no cover - resilience path
+                logger.exception("Telegram alert loop failed")
+
+    async def _check_alert_rules(self) -> None:
+        subscribers = self._active_subscribers()
+        if not subscribers:
+            return
+
+        # Gather distinct tickers across all subscribers with rules.
+        ticker_to_subs: dict[str, list[TelegramSubscription]] = {}
+        for sub in subscribers:
+            for rule in list(getattr(sub, "alert_rules", None) or []):
+                ticker = rule.get("ticker", "").upper()
+                if ticker:
+                    ticker_to_subs.setdefault(ticker, []).append(sub)
+
+        if not ticker_to_subs:
+            return
+
+        from app.services.market_data import get_market_data
+
+        for ticker, subs in ticker_to_subs.items():
+            try:
+                market = await asyncio.to_thread(get_market_data, ticker)
+            except Exception:
+                continue
+
+            price = float(market.get("price", 0) or 0)
+            info = market.get("info") or {}
+            prev_close = float(info.get("previousClose") or 0) or None
+            recommendation = None  # recommendation requires full analyze_ticker; skip for speed
+
+            for sub in subs:
+                skip_reason = self._digest_skip_reason(sub)
+                if skip_reason:
+                    continue
+                rules = list(getattr(sub, "alert_rules", None) or [])
+                fired = [
+                    r for r in evaluate_rules(rules, ticker=ticker, price=price, prev_close=prev_close, recommendation=recommendation)
+                    if not is_recently_fired(r)
+                ]
+                if not fired:
+                    continue
+
+                # Update last_fired_at in the stored rules.
+                updated_rules = []
+                for r in rules:
+                    match = next((f for f in fired if f.get("ticker") == r.get("ticker") and f.get("kind") == r.get("kind") and f.get("value") == r.get("value")), None)
+                    updated_rules.append(mark_fired(r) if match else r)
+                self._upsert_subscription(sub.chat_id, username=None, active=True, preferences={"alert_rules": updated_rules})
+
+                for rule in fired:
+                    reason = rule.get("reason", format_rule(rule))
+                    text = f"🔔 Алерт сработал!\n{reason}"
+                    await self._send_message(sub.chat_id, text)
+                    self._mark_last_alert(sub.id)
 
     async def _handle_update(self, update: dict[str, Any]) -> None:
         callback_query = update.get("callback_query")
@@ -492,6 +567,120 @@ class TelegramBotService(
                 )
             return
 
+        if action == "holding_buy":
+            # /buy AAPL 10 175.5  (ticker shares cost_basis)
+            parts = args
+            if len(parts) < 3:
+                await self._send_message(
+                    int(chat_id),
+                    "Формат: /buy AAPL 10 175.50  (тикер кол-во цена_покупки)",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            try:
+                ticker_b = parts[0].strip().upper()
+                shares = float(parts[1])
+                cost = float(parts[2])
+            except (ValueError, IndexError):
+                await self._send_message(int(chat_id), "Неверный формат. Пример: /buy AAPL 10 175.50", reply_markup=self._main_keyboard())
+                return
+            sub = self._subscription_for_chat(int(chat_id))
+            holdings = dict(getattr(sub, "holdings", None) or {}) if sub else {}
+            if ticker_b in holdings:
+                # Average down/up existing position.
+                existing = holdings[ticker_b]
+                total_shares = existing["shares"] + shares
+                avg_cost = (existing["shares"] * existing["cost_basis"] + shares * cost) / total_shares
+                holdings[ticker_b] = {"shares": total_shares, "cost_basis": avg_cost}
+            else:
+                holdings[ticker_b] = {"shares": shares, "cost_basis": cost}
+            self._upsert_subscription(int(chat_id), username=None, active=True, preferences={"holdings": holdings})
+            await self._send_message(
+                int(chat_id),
+                f"✅ {ticker_b}: добавлено {shares} акц. по ${cost:.2f}\nПросмотр: /holdings",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "holding_sell":
+            # /sell AAPL [shares]
+            parts = args
+            if not parts:
+                await self._send_message(int(chat_id), "Формат: /sell AAPL 10  (или /sell AAPL для всей позиции)", reply_markup=self._main_keyboard())
+                return
+            ticker_s = parts[0].strip().upper()
+            shares_to_sell = float(parts[1]) if len(parts) > 1 else None
+            sub = self._subscription_for_chat(int(chat_id))
+            holdings = dict(getattr(sub, "holdings", None) or {}) if sub else {}
+            if ticker_s not in holdings:
+                await self._send_message(int(chat_id), f"{ticker_s} нет в портфеле.", reply_markup=self._main_keyboard())
+                return
+            if shares_to_sell is None or shares_to_sell >= holdings[ticker_s]["shares"]:
+                del holdings[ticker_s]
+                msg = f"✅ {ticker_s}: позиция закрыта."
+            else:
+                holdings[ticker_s]["shares"] -= shares_to_sell
+                msg = f"✅ {ticker_s}: продано {shares_to_sell} акц. Осталось {holdings[ticker_s]['shares']:.2f}."
+            self._upsert_subscription(int(chat_id), username=None, active=True, preferences={"holdings": holdings})
+            await self._send_message(int(chat_id), msg, reply_markup=self._main_keyboard())
+            return
+
+        if action == "holdings":
+            sub = self._subscription_for_chat(int(chat_id))
+            holdings = dict(getattr(sub, "holdings", None) or {}) if sub else {}
+            if not holdings:
+                await self._send_message(int(chat_id), "Портфель пуст. Добавь: /buy AAPL 10 175.50", reply_markup=self._main_keyboard())
+                return
+            await self._send_message(int(chat_id), "Считаю P&L...", reply_markup=self._main_keyboard())
+            text = await asyncio.to_thread(self._holdings_pnl_text, holdings)
+            await self._send_message(int(chat_id), text, reply_markup=self._main_keyboard())
+            return
+
+        if action == "alert_add":
+            rule_text = " ".join(args).strip()
+            rule = parse_rule(rule_text) if rule_text else None
+            if rule is None:
+                await self._send_message(
+                    int(chat_id),
+                    "Формат: /alert AAPL < 300  |  /alert AAPL > 350  |  /alert AAPL move 5  |  /alert AAPL sell",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            sub = self._subscription_for_chat(int(chat_id))
+            existing = list(getattr(sub, "alert_rules", None) or []) if sub else []
+            existing.append(rule)
+            self._upsert_subscription(int(chat_id), username=None, active=True, preferences={"alert_rules": existing})
+            await self._send_message(
+                int(chat_id),
+                f"✅ Алерт добавлен: {format_rule(rule)}\nПросмотр всех: /alerts",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "alerts_list":
+            sub = self._subscription_for_chat(int(chat_id))
+            rules = list(getattr(sub, "alert_rules", None) or []) if sub else []
+            await self._send_message(
+                int(chat_id),
+                self._alert_rules_text(rules),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "alert_clear":
+            ticker_arg = args[0].strip().upper() if args else None
+            sub = self._subscription_for_chat(int(chat_id))
+            rules = list(getattr(sub, "alert_rules", None) or []) if sub else []
+            if ticker_arg:
+                rules = [r for r in rules if r.get("ticker", "").upper() != ticker_arg]
+                msg = f"Алерты для {ticker_arg} удалены."
+            else:
+                rules = []
+                msg = "Все алерты удалены."
+            self._upsert_subscription(int(chat_id), username=None, active=True, preferences={"alert_rules": rules})
+            await self._send_message(int(chat_id), msg, reply_markup=self._main_keyboard())
+            return
+
         if action == "analyze":
             ticker = args[0] if args else None
             if not ticker:
@@ -693,6 +882,11 @@ class TelegramBotService(
 
         mode = digest_mode or self._scheduled_digest_mode(reference_time)
 
+        # Fetch market-wide news once per digest cycle (respects rate limits).
+        news_context = await asyncio.to_thread(
+            build_news_context, None, self.settings, include_macro=True
+        )
+
         for subscriber in subscribers:
             skip_reason = self._digest_skip_reason(subscriber)
             if skip_reason:
@@ -712,6 +906,7 @@ class TelegramBotService(
                 continue
 
             response = await asyncio.to_thread(scan_tickers, tickers, None)
+            impact_items = high_impact_news(news_context)
             min_confidence = getattr(subscriber, "min_confidence", None)
             digest_fingerprint = self._digest_fingerprint(
                 response.results,
@@ -719,6 +914,7 @@ class TelegramBotService(
                 summary_notes=getattr(response.summary, "notes", None),
                 digest_mode=mode,
                 min_confidence=min_confidence,
+                news_urls=[item.url or item.title for item in impact_items],
             )
             if getattr(subscriber, "last_digest_fingerprint", None) == digest_fingerprint:
                 logger.info(
@@ -736,6 +932,7 @@ class TelegramBotService(
                 summary_notes=getattr(response.summary, "notes", None),
                 digest_mode=mode,
                 min_confidence=min_confidence,
+                news_items=impact_items,
             )
             logger.info(
                 "telegram_digest_ready",
@@ -1165,6 +1362,12 @@ class TelegramBotService(
             ("audit ", "audit"),
             ("/news ", "news"),
             ("news ", "news"),
+            ("/alert ", "alert_add"),
+            ("alert ", "alert_add"),
+            ("/buy ", "holding_buy"),
+            ("buy ", "holding_buy"),
+            ("/sell ", "holding_sell"),
+            ("sell ", "holding_sell"),
         ):
             if lowered.startswith(prefix):
                 parts = normalized.split(maxsplit=1)
@@ -1190,6 +1393,12 @@ class TelegramBotService(
             return "filings", []
         if lowered in {"/news", "news"}:
             return "news", []
+        if lowered in {"/alerts", "alerts"}:
+            return "alerts_list", []
+        if lowered in {"/holdings", "holdings"}:
+            return "holdings", []
+        if lowered in {"/alert_clear", "alert_clear"}:
+            return "alert_clear", []
 
         if lowered.startswith("/quiet ") or lowered.startswith("quiet "):
             parts = normalized.split(maxsplit=1)
@@ -1339,6 +1548,42 @@ class TelegramBotService(
                 f"{previous.recommendation} -> {latest.recommendation}"
             )
 
+        return self._trim_message("\n".join(lines))
+
+    def _holdings_pnl_text(self, holdings: dict[str, Any]) -> str:
+        """Compute P&L for each holding using live prices and return a formatted report."""
+        from app.services.market_data import get_market_data
+
+        lines = ["💼 Портфель (P&L):"]
+        total_cost = 0.0
+        total_value = 0.0
+        for ticker, pos in holdings.items():
+            shares = float(pos.get("shares", 0))
+            cost_basis = float(pos.get("cost_basis", 0))
+            try:
+                market = get_market_data(ticker)
+                price = float(market.get("price", 0) or 0)
+            except Exception:
+                lines.append(f"  {ticker}: нет данных о цене")
+                continue
+            position_cost = shares * cost_basis
+            position_value = shares * price
+            pnl = position_value - position_cost
+            pnl_pct = (pnl / position_cost * 100) if position_cost else 0
+            sign = "+" if pnl >= 0 else ""
+            arrow = "📈" if pnl >= 0 else "📉"
+            lines.append(
+                f"{arrow} {ticker}: {shares:.0f} акц. × ${price:.2f} = ${position_value:.2f}  "
+                f"({sign}{pnl:.2f}, {sign}{pnl_pct:.1f}%)"
+            )
+            total_cost += position_cost
+            total_value += position_value
+        if total_cost:
+            total_pnl = total_value - total_cost
+            total_pct = total_pnl / total_cost * 100
+            sign = "+" if total_pnl >= 0 else ""
+            lines.append(f"\nИтого: ${total_value:.2f}  ({sign}{total_pnl:.2f}, {sign}{total_pct:.1f}%)")
+        lines.append("\nДобавить: /buy AAPL 10 175.50  |  Продать: /sell AAPL")
         return self._trim_message("\n".join(lines))
 
     def _news_text(self, ticker: str | None) -> str:

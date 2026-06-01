@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.models import TelegramSubscription
+from app.services.alert_rules import format_rule
 from app.services.operation_summaries import format_operation_summary
 from app.services.coverage import format_coverage_text
 from app.services.exchange_calendar import get_market_hours_info
@@ -28,6 +29,8 @@ class FormattingMixin:
             "• backtest accuracy (/backtest AAPL)\n"
             "• source-backed детали: /why, /sources, /events, /filings, /freshness, /calendar, /risk, /audit\n"
             "• новости и настрой: /news AAPL (или /news для рынка и макро)\n"
+            "• алерты: /alert AAPL < 300  |  /alert AAPL move 5  |  /alerts  |  /alert_clear\n"
+            "• портфель P&L: /buy AAPL 10 175.50  |  /sell AAPL  |  /holdings\n"
         )
 
     def _welcome_text(self, is_first_use: bool = False) -> str:
@@ -449,6 +452,7 @@ class FormattingMixin:
         summary_notes: list[str] | None = None,
         digest_mode: str = "market_open",
         min_confidence: float | None = None,
+        news_items: list[Any] | None = None,
     ) -> str:
         limit = 5 if digest_mode == "weekly_review" else 3
         top = self._filter_results_by_confidence(results[:limit], min_confidence)
@@ -479,10 +483,39 @@ class FormattingMixin:
             lines.extend(f"- {self._translate_text(note)}" for note in summary_notes)
         if hidden_count:
             lines.append(f"Скрыто низкоуверенных сигналов: {hidden_count}")
+        news_lines = self._high_impact_news_lines(news_items)
+        if news_lines:
+            lines.extend(["", *news_lines])
         disclaimer = self._scan_disclaimer(top)
         if disclaimer:
             lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
+
+    def _alert_rules_text(self, rules: list[Any]) -> str:
+        if not rules:
+            return (
+                "Алертов нет.\n"
+                "Добавь: /alert AAPL < 300  |  /alert AAPL > 350  |  /alert AAPL move 5  |  /alert AAPL sell"
+            )
+        lines = [f"Твои алерты ({len(rules)}):"]
+        for rule in rules:
+            last = rule.get("last_fired_at")
+            fired_str = f"  (сработал {last[:10]})" if last else ""
+            lines.append(f"• {format_rule(rule)}{fired_str}")
+        lines.append("\nУдалить: /alert_clear AAPL (для тикера) или /alert_clear (все)")
+        return "\n".join(lines)
+
+    def _high_impact_news_lines(self, news_items: list[Any] | None) -> list[str]:
+        if not news_items:
+            return []
+        lines = ["📰 Важные новости:"]
+        for item in news_items[:3]:
+            mark = {"positive": "📈", "negative": "📉"}.get(
+                getattr(item, "sentiment_label", "neutral"), "➖"
+            )
+            source = f" ({item.source})" if getattr(item, "source", None) else ""
+            lines.append(f"{mark} {item.title}{source}")
+        return lines
 
     def _digest_fingerprint(
         self,
@@ -492,6 +525,7 @@ class FormattingMixin:
         summary_notes: list[str] | None = None,
         digest_mode: str = "market_open",
         min_confidence: float | None = None,
+        news_urls: list[str] | None = None,
     ) -> str:
         limit = 5 if digest_mode == "weekly_review" else 3
         top = self._filter_results_by_confidence(results[:limit], min_confidence)
@@ -516,6 +550,7 @@ class FormattingMixin:
                 for item in errors[:3]
             ],
             "summary_notes": [str(note) for note in (summary_notes or [])],
+            "news_urls": sorted(news_urls or []),
         }
         encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()

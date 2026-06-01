@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
+from app.services.news_collector import NewsContext
 from app.services.runtime_budget import reset_runtime_budgets
 from app.services.telegram_bot import TelegramBotService
 
@@ -37,6 +38,10 @@ class TelegramDigestModeTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.service._upsert_subscription(1001, username="alice", active=True, watchlist_symbols=["AAPL"])
+        # Prevent network calls to news APIs in all digest tests.
+        news_patcher = patch("app.services.telegram_bot.build_news_context", return_value=NewsContext())
+        news_patcher.start()
+        self.addCleanup(news_patcher.stop)
 
     def tearDown(self) -> None:
         reset_runtime_budgets()
@@ -163,6 +168,79 @@ class TelegramDigestModeTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("app.services.telegram_bot.scan_tickers", return_value=fake_scan),
+            patch.object(self.service, "_send_message", send_mock),
+            patch.object(self.service, "_scheduled_digest_mode", return_value="close"),
+        ):
+            await self.service._send_digest_to_active_subscribers()
+            await self.service._send_digest_to_active_subscribers()
+
+        self.assertEqual(send_mock.await_count, 1)
+
+    async def test_digest_includes_high_impact_news_block(self) -> None:
+        from app.services.news_collector import NewsItem
+
+        fake_scan = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="AAPL", recommendation="NEUTRAL",
+                    final_score=61.0, price=189.12, short_reason="reason",
+                )
+            ],
+            errors=[],
+            summary=SimpleNamespace(partial_failure=False, message="ok", failed_tickers=[]),
+        )
+        high_impact_item = NewsItem(
+            title="Fed raises rates unexpectedly",
+            url="https://example.com/fed-news",
+            source="Federal Reserve",
+            published_at=None, summary=None,
+            sentiment_score=-0.8, sentiment_label="negative",
+            relevance=None, category="macro",
+        )
+        news_ctx = NewsContext(overall_sentiment_label="negative", items=[high_impact_item])
+        send_mock = AsyncMock()
+
+        with (
+            patch("app.services.telegram_bot.scan_tickers", return_value=fake_scan),
+            patch("app.services.telegram_bot.build_news_context", return_value=news_ctx),
+            patch("app.services.telegram_bot.high_impact_news", return_value=[high_impact_item]),
+            patch.object(self.service, "_send_message", send_mock),
+            patch.object(self.service, "_scheduled_digest_mode", return_value="close"),
+        ):
+            await self.service._send_digest_to_active_subscribers()
+
+        self.assertEqual(send_mock.await_count, 1)
+        digest_text = send_mock.await_args.args[1]
+        self.assertIn("📰 Важные новости:", digest_text)
+        self.assertIn("Fed raises rates unexpectedly", digest_text)
+        self.assertIn("Federal Reserve", digest_text)
+
+    async def test_digest_deduplicates_when_news_unchanged(self) -> None:
+        from app.services.news_collector import NewsItem
+
+        fake_scan = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="AAPL", recommendation="NEUTRAL",
+                    final_score=61.0, price=189.12, short_reason="reason",
+                )
+            ],
+            errors=[],
+            summary=SimpleNamespace(partial_failure=False, message="ok", failed_tickers=[]),
+        )
+        news_item = NewsItem(
+            title="Big news", url="https://example.com/big-news",
+            source="Reuters", published_at=None, summary=None,
+            sentiment_score=-0.6, sentiment_label="negative",
+            relevance=None, category="market",
+        )
+        news_ctx = NewsContext(items=[news_item])
+        send_mock = AsyncMock()
+
+        with (
+            patch("app.services.telegram_bot.scan_tickers", return_value=fake_scan),
+            patch("app.services.telegram_bot.build_news_context", return_value=news_ctx),
+            patch("app.services.telegram_bot.high_impact_news", return_value=[news_item]),
             patch.object(self.service, "_send_message", send_mock),
             patch.object(self.service, "_scheduled_digest_mode", return_value="close"),
         ):

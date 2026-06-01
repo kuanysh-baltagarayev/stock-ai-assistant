@@ -135,6 +135,40 @@ def _upgrade_0009_telegram_alert_deduplication(connection: Connection) -> None:
     )
 
 
+def _upgrade_0010_telegram_alert_rules(connection: Connection) -> None:
+    columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("telegram_subscriptions")
+    }
+    if "alert_rules" in columns:
+        return
+    connection.execute(
+        text(
+            """
+            ALTER TABLE telegram_subscriptions
+            ADD COLUMN alert_rules JSON
+            """
+        )
+    )
+
+
+def _upgrade_0011_telegram_holdings(connection: Connection) -> None:
+    columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("telegram_subscriptions")
+    }
+    if "holdings" in columns:
+        return
+    connection.execute(
+        text(
+            """
+            ALTER TABLE telegram_subscriptions
+            ADD COLUMN holdings JSON
+            """
+        )
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -180,6 +214,16 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0009_telegram_alert_deduplication",
         description="Add per-chat Telegram alert deduplication fingerprint.",
         upgrade=_upgrade_0009_telegram_alert_deduplication,
+    ),
+    Migration(
+        revision="0010_telegram_alert_rules",
+        description="Add per-chat threshold alert rules (price, pct, recommendation).",
+        upgrade=_upgrade_0010_telegram_alert_rules,
+    ),
+    Migration(
+        revision="0011_telegram_holdings",
+        description="Add per-chat portfolio holdings with cost basis.",
+        upgrade=_upgrade_0011_telegram_holdings,
     ),
 )
 
