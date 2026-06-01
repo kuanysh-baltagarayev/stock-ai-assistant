@@ -1362,6 +1362,14 @@ class TelegramBotService(
             return "scan", []
         if lowered in {"/scan", "scan", self._button_scan().lower()}:
             return "scan", []
+        if lowered in {self._button_portfolio().lower()}:
+            return "portfolio", []
+        if lowered in {self._button_alerts().lower()}:
+            return "alerts_list", []
+        if lowered in {self._button_news().lower()}:
+            return "news", []
+        if lowered in {self._button_chart().lower()}:
+            return "chart", []
 
         for prefix, action in (
             ("/why ", "why"),

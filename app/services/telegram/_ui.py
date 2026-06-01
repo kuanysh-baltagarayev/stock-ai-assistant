@@ -46,23 +46,43 @@ class UiMixin:
     def _button_back(self) -> str:
         return "Назад"
 
+    def _button_chart(self) -> str:
+        return "График"
+
+    def _button_portfolio(self) -> str:
+        return "Портфель"
+
+    def _button_alerts(self) -> str:
+        return "Алерты"
+
+    def _button_news(self) -> str:
+        return "Новости"
+
     def _ticker_buttons(self) -> list[str]:
         return [f"Анализ {ticker}" for ticker in self._configured_tickers()]
 
     def _main_keyboard(self) -> dict[str, Any]:
         keyboard: list[list[dict[str, str]]] = [
             [
-                {"text": self._button_subscribe()},
-                {"text": self._button_unsubscribe()},
-                {"text": self._button_status()},
+                {"text": self._button_scan()},
+                {"text": self._button_choose_ticker()},
+                {"text": self._button_chart()},
+            ],
+            [
+                {"text": self._button_portfolio()},
+                {"text": self._button_alerts()},
+                {"text": self._button_news()},
             ],
             [
                 {"text": self._button_watchlist()},
                 {"text": self._button_preferences()},
-                {"text": self._button_choose_ticker()},
-                {"text": self._button_scan()},
+                {"text": self._button_status()},
             ],
-            [{"text": self._button_help()}],
+            [
+                {"text": self._button_subscribe()},
+                {"text": self._button_unsubscribe()},
+                {"text": self._button_help()},
+            ],
         ]
         return {
             "keyboard": keyboard,
