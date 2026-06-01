@@ -19,6 +19,7 @@ from app.schemas import (
 )
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
 from app.services.edgar_collector import fetch_recent_filings
+from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
@@ -346,6 +347,7 @@ def _build_market_session(market: dict) -> dict | None:
     local_reference = reference_time.astimezone(zone)
     market_open_at, market_close_at, status = _session_window(local_reference)
     is_open = status == "open"
+    session_state = get_session_state(local_reference)
 
     freshness_state = "fresh"
     freshness_note = None
@@ -356,8 +358,9 @@ def _build_market_session(market: dict) -> dict | None:
         history_local = history_timestamp.astimezone(zone)
         if not is_open:
             freshness_state = "session_closed"
+            status_detail = _session_status_detail(session_state)
             freshness_note = (
-                f"Market session is {status}; latest bar is from {history_local.date().isoformat()}."
+                f"Market session is {status}{status_detail}; latest bar is from {history_local.date().isoformat()}."
             )
         elif history_local.date() < local_reference.date():
             freshness_state = "stale"
@@ -366,7 +369,8 @@ def _build_market_session(market: dict) -> dict | None:
             )
     elif not is_open:
         freshness_state = "session_closed"
-        freshness_note = f"Market session is {status}; fresh intraday coverage may be delayed."
+        status_detail = _session_status_detail(session_state)
+        freshness_note = f"Market session is {status}{status_detail}; fresh intraday coverage may be delayed."
 
     return MarketSession(
         timezone=timezone_name,
@@ -380,32 +384,53 @@ def _build_market_session(market: dict) -> dict | None:
     ).model_dump(mode="json")
 
 
+def _session_status_detail(session_state: str) -> str:
+    """Return a detail string for the session state to append to status messages."""
+    if session_state == "holiday":
+        return " (NYSE holiday)"
+    elif session_state == "early_close":
+        return " (early close at 13:00 ET)"
+    return ""
+
+
 def _session_window(local_reference: datetime) -> tuple[datetime | None, datetime | None, str]:
+    """Determine market session window and status using NYSE exchange calendar.
+
+    Returns (market_open_at, market_close_at, status_for_display).
+    Status can be: open, pre-market, after-hours, weekend, holiday, closed.
+    """
+    session_state = get_session_state(local_reference)
+    local_date = local_reference.date()
+
     market_open = local_reference.replace(hour=9, minute=30, second=0, microsecond=0)
     market_close = local_reference.replace(hour=16, minute=0, second=0, microsecond=0)
-    weekday = local_reference.weekday()
 
-    if weekday >= 5:
-        next_open = _next_weekday(local_reference, target_weekday=0).replace(
-            hour=9, minute=30, second=0, microsecond=0
+    # For early-close days, market_close is at 13:00
+    if session_state == "early_close":
+        market_close = local_reference.replace(hour=13, minute=0, second=0, microsecond=0)
+
+    # Determine next open time based on session state
+    if session_state in {"holiday", "weekend"}:
+        next_open_date = next_trading_day(local_date)
+        next_open = datetime(
+            next_open_date.year, next_open_date.month, next_open_date.day,
+            9, 30, tzinfo=local_reference.tzinfo
         )
-        return next_open, None, "weekend"
+        return next_open, None, session_state
 
-    if local_reference < market_open:
+    if session_state in {"closed", "pre_market"}:
         return market_open, market_close, "pre-market"
-    if local_reference >= market_close:
-        next_open = _next_weekday(local_reference, target_weekday=(weekday + 1) % 7).replace(
-            hour=9, minute=30, second=0, microsecond=0
+
+    if session_state in {"after_hours", "closed"}:
+        next_open_date = next_trading_day(local_date)
+        next_open = datetime(
+            next_open_date.year, next_open_date.month, next_open_date.day,
+            9, 30, tzinfo=local_reference.tzinfo
         )
         return next_open, market_close, "after-hours"
+
+    # regular_open or early_close
     return market_open, market_close, "open"
-
-
-def _next_weekday(reference: datetime, *, target_weekday: int) -> datetime:
-    days_ahead = (target_weekday - reference.weekday()) % 7
-    if days_ahead == 0:
-        days_ahead = 1
-    return reference + timedelta(days=days_ahead)
 
 
 def _build_scan_summary(
