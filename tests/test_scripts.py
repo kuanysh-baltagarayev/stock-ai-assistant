@@ -143,7 +143,7 @@ class RunApiScriptTests(unittest.TestCase):
         )
 
         with (
-            patch.object(run_api, "parse_args", return_value=Namespace(reload=True)),
+            patch.object(run_api, "parse_args", return_value=Namespace(reload=True, smoke=False, host=None, port=0, timeout=120)),
             patch.object(run_api, "get_settings", return_value=fake_settings),
             patch.object(run_api, "enforce_local_api_policy") as policy_mock,
             patch.object(run_api, "build_startup_diagnostics", return_value=SimpleNamespace(warnings=())),
@@ -170,7 +170,7 @@ class RunApiScriptTests(unittest.TestCase):
         stderr = io.StringIO()
 
         with (
-            patch.object(run_api, "parse_args", return_value=Namespace(reload=False)),
+            patch.object(run_api, "parse_args", return_value=Namespace(reload=False, smoke=False, host=None, port=0, timeout=120)),
             patch.object(run_api, "get_settings", return_value=fake_settings),
             patch.object(run_api, "enforce_local_api_policy", side_effect=RuntimeError("blocked")),
             patch.object(run_api, "build_startup_diagnostics", return_value=SimpleNamespace(warnings=())),
@@ -181,6 +181,56 @@ class RunApiScriptTests(unittest.TestCase):
                 run_api.main()
 
         uvicorn_run.assert_not_called()
+
+    def test_main_runs_smoke_check_without_entering_uvicorn_run(self) -> None:
+        fake_settings = SimpleNamespace(
+            api_host="127.0.0.1",
+            api_port=8000,
+            allow_remote_api=False,
+        )
+        fake_process = SimpleNamespace(poll=MagicMock(return_value=0))
+        stdout = io.StringIO()
+        responses = {
+            "http://127.0.0.1:18080/health": {"status": "ok"},
+            "http://127.0.0.1:18080/ready": {"status": "ready"},
+        }
+
+        def fake_get_json(url: str) -> object:
+            return responses[url]
+
+        with (
+            patch.object(
+                run_api,
+                "parse_args",
+                return_value=Namespace(reload=False, smoke=True, host="127.0.0.1", port=18080, timeout=5),
+            ),
+            patch.object(run_api, "get_settings", return_value=fake_settings),
+            patch.object(run_api, "enforce_local_api_policy") as policy_mock,
+            patch.object(run_api, "build_startup_diagnostics", return_value=SimpleNamespace(warnings=("warn",))),
+            patch.object(run_api, "_launch_server", return_value=fake_process) as launch_mock,
+            patch.object(run_api, "_wait_for_health") as wait_mock,
+            patch.object(run_api, "_get_json", side_effect=fake_get_json) as get_json_mock,
+            patch.object(run_api, "_get_text", return_value="<html>swagger</html>") as get_text_mock,
+            patch.object(run_api, "_stop_process") as stop_mock,
+            patch.object(run_api.uvicorn, "run") as uvicorn_run,
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", io.StringIO()),
+        ):
+            exit_code = run_api.main()
+
+        self.assertEqual(exit_code, 0)
+        policy_mock.assert_called_once_with(fake_settings)
+        # Explicit port avoids the free-port helper.
+        launch_mock.assert_called_once()
+        wait_mock.assert_called_once_with("http://127.0.0.1:18080", timeout_seconds=5)
+        get_json_mock.assert_any_call("http://127.0.0.1:18080/health")
+        get_json_mock.assert_any_call("http://127.0.0.1:18080/ready")
+        get_text_mock.assert_called_once_with("http://127.0.0.1:18080/docs")
+        stop_mock.assert_called_once_with(fake_process)
+        uvicorn_run.assert_not_called()
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["base_url"], "http://127.0.0.1:18080")
 
 
 class RunTelegramBotScriptTests(unittest.TestCase):

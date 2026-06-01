@@ -179,6 +179,7 @@ The default SQLite database path is resolved relative to the project root, so th
 
 ```bash
 python scripts/run_api.py --reload
+python scripts/run_api.py --smoke
 ```
 
 Real HTTP smoke:

@@ -79,6 +79,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-01: `scripts/check.sh` passed after adding `scripts/run_api.py
+  --smoke` local HTTP startup verification, with `ruff`, 91 coverage-wrapped
+  tests, coverage report, and compile check.
 - 2026-06-01: `scripts/check.sh` passed after Telegram data-quality warnings
   were surfaced in analysis, freshness, sources, and risk views, with `ruff`,
   90 coverage-wrapped tests, coverage report, and compile check.
@@ -205,7 +208,6 @@ Implemented:
 
 - OpenAI and Telegram live checks are not fully automated yet.
 - The sandbox previously blocked binding `uvicorn` to `127.0.0.1:8000`; API behavior has been validated with `TestClient`.
-- Real HTTP startup through `scripts/run_api.py` still needs a live socket-bound smoke check in an environment where socket binding is allowed.
 - Dependencies are pinned in `requirements.txt` and `requirements-dev.txt`, but there is still no separate lockfile or constraints file for transitive dependencies.
 - Supported Python version is documented in `README.md`.
 - SQLite schema changes now run through the internal migration runner, but richer
