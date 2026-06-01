@@ -20,6 +20,7 @@ from app.schemas import (
 from app.services.ai_explainer import explain_analysis, rule_based_explanation
 from app.services.edgar_collector import fetch_recent_filings
 from app.services.exchange_calendar import get_session_state, next_trading_day
+from app.services.fred_collector import fetch_macro_indicators
 from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
@@ -46,6 +47,7 @@ def analyze_ticker(
     if db is not None:
         _save_source_snapshot(db, market)
         _save_edgar_filings(db, market["ticker"])
+        _save_macro_indicators(db)
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
     scoring = score_stock(market["price"], technicals, fundamentals)
@@ -568,5 +570,51 @@ def _save_edgar_filings(db: Session, ticker: str) -> None:
             "provider_name": snapshot.provider_name,
             "source_tier": snapshot.source_tier,
             "filing_count": len(collection.filings),
+        },
+    )
+
+
+def _save_macro_indicators(db: Session) -> None:
+    settings = get_settings()
+    try:
+        collection = fetch_macro_indicators(api_key=settings.fred_api_key)
+    except Exception:
+        logger.exception(
+            "fred_indicators_fetch_failed",
+            extra={"component": "fred"},
+        )
+        return
+
+    if collection.error:
+        logger.debug(
+            "fred_indicators_error",
+            extra={"component": "fred", "error": collection.error},
+        )
+        return
+
+    if not collection.observations:
+        logger.debug(
+            "fred_no_observations",
+            extra={"component": "fred"},
+        )
+        return
+
+    try:
+        snapshot_dict = collection.as_source_snapshot_dict()
+        snapshot = upsert_source_snapshot(db, market=snapshot_dict)
+    except Exception:
+        logger.exception(
+            "fred_snapshot_persist_failed",
+            extra={"component": "persistence"},
+        )
+        return
+
+    logger.info(
+        "fred_indicators_saved",
+        extra={
+            "component": "persistence",
+            "provider_name": snapshot.provider_name,
+            "source_tier": snapshot.source_tier,
+            "observation_count": len(collection.observations),
         },
     )
