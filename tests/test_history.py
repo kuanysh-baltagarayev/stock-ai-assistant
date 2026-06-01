@@ -15,6 +15,7 @@ class HistoryRetentionTests(unittest.TestCase):
     def test_cleanup_old_snapshots_keeps_latest_per_ticker(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             engine = create_engine(f"sqlite:///{Path(tmpdir) / 'history.db'}")
+            self.addCleanup(engine.dispose)
             Base.metadata.create_all(bind=engine)
             Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
@@ -79,6 +80,7 @@ class HistoryRetentionTests(unittest.TestCase):
     def test_cleanup_old_snapshots_removes_aged_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             engine = create_engine(f"sqlite:///{Path(tmpdir) / 'history.db'}")
+            self.addCleanup(engine.dispose)
             Base.metadata.create_all(bind=engine)
             Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 

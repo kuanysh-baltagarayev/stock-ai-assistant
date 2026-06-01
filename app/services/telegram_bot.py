@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import json
 from datetime import datetime, timezone
@@ -14,27 +13,31 @@ from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
 from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
 from app.services.edgar_collector import fetch_recent_filings
-from app.services.market_data import InvalidTickerError, normalize_ticker
-from app.services.operation_summaries import format_operation_summary
-from app.services.research_labels import research_label_to_russian
-from app.services.coverage import format_coverage_text
 from app.services.history import build_snapshot_audit_entries, list_recent_snapshots
 from app.services.runtime_budget import (
     RuntimeBudgetExceeded,
     consume_runtime_budget,
     runtime_budget_snapshot,
 )
-from app.services.exchange_calendar import get_market_hours_info, get_session_state
+from app.services.exchange_calendar import get_session_state
 from app.services.scanner import analyze_ticker, scan_tickers
 from app.services.market_hours import should_defer_alert, time_until_market_open
 from app.services.backtesting import backtest_report, calculate_metrics
-from app.services.correlation import calculate_correlation_matrix, correlation_insights
+from app.services.telegram._ui import UiMixin
+from app.services.telegram._parsing import ParsingMixin
+from app.services.telegram._formatting import FormattingMixin
+from app.services.telegram._disclaimers import DisclaimerMixin
 
 
 logger = logging.getLogger(__name__)
 
 
-class TelegramBotService:
+class TelegramBotService(
+    UiMixin,
+    ParsingMixin,
+    FormattingMixin,
+    DisclaimerMixin,
+):
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._running = False
@@ -45,116 +48,21 @@ class TelegramBotService:
     def enabled(self) -> bool:
         return bool(self.settings.telegram_enabled and self.settings.telegram_bot_token)
 
-    def _chat_is_allowed(self, chat_id: int) -> bool:
-        allowed_chat_ids = getattr(self.settings, "telegram_allowed_chat_ids", []) or []
-        return not allowed_chat_ids or chat_id in allowed_chat_ids
 
-    def _access_denied_text(self) -> str:
-        allowed_chat_ids = getattr(self.settings, "telegram_allowed_chat_ids", []) or []
-        if allowed_chat_ids:
-            allowed = ", ".join(str(chat_id) for chat_id in allowed_chat_ids)
-            return (
-                "Доступ к этому боту ограничен.\n"
-                f"Чат не входит в TELEGRAM_ALLOWED_CHAT_IDS: {allowed}.\n"
-                "Если доступ нужен, добавь этот chat_id в allowlist и перезапусти бота."
-            )
-        return "Доступ к этому боту временно ограничен."
 
-    def _button_subscribe(self) -> str:
-        return "Подписаться"
 
-    def _button_unsubscribe(self) -> str:
-        return "Отписаться"
 
-    def _button_status(self) -> str:
-        return "Статус"
 
-    def _button_scan(self) -> str:
-        return "Сканировать рынок"
 
-    def _button_help(self) -> str:
-        return "Помощь"
 
-    def _button_choose_ticker(self) -> str:
-        return "Выбрать тикер"
 
-    def _button_watchlist(self) -> str:
-        return "Мой список"
 
-    def _button_preferences(self) -> str:
-        return "Настройки"
 
-    def _button_back(self) -> str:
-        return "Назад"
 
-    def _ticker_buttons(self) -> list[str]:
-        return [f"Анализ {ticker}" for ticker in self._configured_tickers()]
 
-    def _main_keyboard(self) -> dict[str, Any]:
-        keyboard: list[list[dict[str, str]]] = [
-            [
-                {"text": self._button_subscribe()},
-                {"text": self._button_unsubscribe()},
-                {"text": self._button_status()},
-            ],
-            [
-                {"text": self._button_watchlist()},
-                {"text": self._button_preferences()},
-                {"text": self._button_choose_ticker()},
-                {"text": self._button_scan()},
-            ],
-            [{"text": self._button_help()}],
-        ]
-        return {
-            "keyboard": keyboard,
-            "resize_keyboard": True,
-            "is_persistent": True,
-        }
 
-    def _ticker_keyboard(self) -> dict[str, Any]:
-        ticker_buttons = self._ticker_buttons()
-        keyboard: list[list[dict[str, str]]] = []
-        for index in range(0, len(ticker_buttons), 3):
-            keyboard.append([{"text": button} for button in ticker_buttons[index : index + 3]])
-        keyboard.append([{"text": self._button_back()}])
-        return {
-            "keyboard": keyboard,
-            "resize_keyboard": True,
-            "is_persistent": True,
-        }
 
-    def _analysis_followup_keyboard(self, ticker: str) -> dict[str, Any]:
-        ticker = ticker.upper()
-        return {
-            "inline_keyboard": [
-                [
-                    {"text": "Почему", "callback_data": self._callback_data("why", ticker)},
-                    {"text": "Источники", "callback_data": self._callback_data("sources", ticker)},
-                ],
-                [
-                    {"text": "События", "callback_data": self._callback_data("events", ticker)},
-                    {"text": "Подачи SEC", "callback_data": self._callback_data("filings", ticker)},
-                ],
-                [
-                    {"text": "Свежесть", "callback_data": self._callback_data("freshness", ticker)},
-                    {"text": "Риск", "callback_data": self._callback_data("risk", ticker)},
-                ],
-                [
-                    {"text": "Аудит", "callback_data": self._callback_data("audit", ticker)},
-                    {"text": "Пересканировать", "callback_data": self._callback_data("rescan", ticker)},
-                ],
-                [
-                    {"text": "Добавить в список", "callback_data": self._callback_data("watchlist_add", ticker)},
-                    {"text": "Убрать из списка", "callback_data": self._callback_data("watchlist_remove", ticker)},
-                ],
-                [
-                    {"text": "Заглушить", "callback_data": self._callback_data("mute", ticker)},
-                ],
-            ]
-        }
 
-    def _callback_data(self, action: str, ticker: str) -> str:
-        return f"{action}:{ticker.upper()}"
 
     async def start(self) -> None:
         if not self.enabled:
@@ -909,32 +817,8 @@ class TelegramBotService:
         if not response.get("ok"):
             raise RuntimeError(f"Telegram answerCallbackQuery failed: {response}")
 
-    def _parse_callback_data(self, data: str) -> tuple[str | None, str | None]:
-        if not data or ":" not in data:
-            return None, None
-        action, ticker = data.split(":", 1)
-        action = action.strip()
-        ticker = ticker.strip().upper()
-        if not action or not ticker:
-            return None, None
-        return action, ticker
 
-    def _detail_ticker(self, args: list[str]) -> str | None:
-        if not args:
-            return None
-        ticker = args[0].strip().upper()
-        return ticker or None
 
-    def _format_dt(self, value: Any) -> str:
-        if value is None:
-            return "n/a"
-        if isinstance(value, str):
-            return value
-        if isinstance(value, datetime):
-            if value.tzinfo is None:
-                value = value.replace(tzinfo=timezone.utc)
-            return value.astimezone(timezone.utc).isoformat()
-        return str(value)
 
     def _latest_analysis_snapshot(self, ticker: str) -> AnalysisSnapshot | None:
         db = SessionLocal()
@@ -1109,136 +993,15 @@ class TelegramBotService:
         finally:
             db.close()
 
-    def _current_day_key(self, moment: datetime | None = None) -> str:
-        return (moment or datetime.now(timezone.utc)).date().isoformat()
 
-    def _format_minutes(self, minutes: int | None) -> str:
-        if minutes is None:
-            return "off"
-        hours, remainder = divmod(minutes, 60)
-        return f"{hours:02d}:{remainder:02d}"
 
-    def _format_quiet_hours(self, subscription: TelegramSubscription) -> str:
-        start = getattr(subscription, "quiet_hours_start_minute", None)
-        end = getattr(subscription, "quiet_hours_end_minute", None)
-        if start is None or end is None:
-            return "off"
-        return f"{self._format_minutes(start)}-{self._format_minutes(end)}"
 
-    def _preferences_summary_text(self, subscription: TelegramSubscription) -> str:
-        quiet_hours = self._format_quiet_hours(subscription)
-        max_alerts = getattr(subscription, "max_alerts_per_day", None)
-        daily_cap = "не ограничен" if max_alerts is None else str(max_alerts)
-        min_confidence = getattr(subscription, "min_confidence", None)
-        confidence_text = "off" if min_confidence is None else f"{min_confidence:.2f}"
-        market_hours_only = "да" if getattr(subscription, "market_hours_only", False) else "нет"
-        today_key = self._current_day_key()
-        daily_alert_date = getattr(subscription, "daily_alert_date", None)
-        daily_alert_count = getattr(subscription, "daily_alert_count", 0) or 0
-        current_count = daily_alert_count if daily_alert_date == today_key else 0
-        return (
-            "Настройки уведомлений:\n"
-            f"• Quiet hours: {quiet_hours}\n"
-            f"• Daily cap: {daily_cap}\n"
-            f"• Минимальная уверенность: {confidence_text}\n"
-            f"• Market-hours-only: {market_hours_only}\n"
-            f"• Сегодня отправлено: {current_count}"
-        )
 
-    def _preferences_text(self, chat_id: int, notice: str | None = None) -> str:
-        sub = self._subscription_for_chat(chat_id)
-        if sub is None:
-            return (
-                "Подписка не найдена. Используй /start, чтобы создать её, "
-                "а затем /quiet, /cap и /markethours для настройки уведомлений."
-            )
 
-        lines = [self._preferences_summary_text(sub)]
-        if notice:
-            lines.extend(["", notice])
-        lines.extend(
-            [
-                "",
-                "Команды:",
-                "• /quiet 22:00-07:00 или /quiet off",
-                "• /cap 3 или /cap off",
-                "• /confidence 0.75 или /confidence off",
-                "• /markethours on или /markethours off",
-            ]
-        )
-        return "\n".join(lines)
 
-    def _parse_minutes(self, value: str) -> tuple[int | None, str | None]:
-        raw = value.strip()
-        if not raw:
-            return None, "Укажи время в формате HH:MM или HH."
-        parts = raw.split(":")
-        if len(parts) == 1:
-            try:
-                hour = int(parts[0])
-            except ValueError:
-                return None, "Укажи время в формате HH:MM или HH."
-            minute = 0
-        elif len(parts) == 2:
-            try:
-                hour = int(parts[0])
-                minute = int(parts[1])
-            except ValueError:
-                return None, "Укажи время в формате HH:MM или HH."
-        else:
-            return None, "Укажи время в формате HH:MM или HH."
-        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
-            return None, "Время должно быть в диапазоне 00:00-23:59."
-        return hour * 60 + minute, None
 
-    def _parse_quiet_hours(self, value: str) -> tuple[int | None, int | None, str | None]:
-        raw = value.strip().lower()
-        if not raw or raw in {"off", "none", "clear", "unset"}:
-            return None, None, None
-        if "-" not in raw:
-            return None, None, "Формат quiet hours: /quiet 22:00-07:00 или /quiet off."
-        start_raw, end_raw = raw.split("-", maxsplit=1)
-        start, start_error = self._parse_minutes(start_raw)
-        if start_error:
-            return None, None, start_error
-        end, end_error = self._parse_minutes(end_raw)
-        if end_error:
-            return None, None, end_error
-        if start == end:
-            return None, None, "Quiet hours start and end must be different."
-        return start, end, None
 
-    def _parse_daily_cap(self, value: str) -> tuple[int | None, str | None]:
-        raw = value.strip().lower()
-        if not raw or raw in {"off", "none", "clear", "unset"}:
-            return None, None
-        try:
-            parsed = int(raw)
-        except ValueError:
-            return None, "Daily cap must be a positive integer or /cap off."
-        if parsed < 1:
-            return None, "Daily cap must be a positive integer or /cap off."
-        return parsed, None
 
-    def _parse_confidence_threshold(self, value: str) -> tuple[float | None, str | None]:
-        raw = value.strip().lower()
-        if not raw or raw in {"off", "none", "clear", "unset"}:
-            return None, None
-        try:
-            parsed = float(raw)
-        except ValueError:
-            return None, "Используй /confidence 0.75 или /confidence off."
-        if parsed < 0 or parsed > 1:
-            return None, "Порог уверенности должен быть от 0 до 1, либо /confidence off."
-        return parsed, None
-
-    def _parse_toggle(self, value: str) -> tuple[bool, str | None]:
-        raw = value.strip().lower()
-        if raw in {"on", "1", "true", "yes"}:
-            return True, None
-        if raw in {"off", "0", "false", "no"}:
-            return False, None
-        return False, "Use /markethours on or /markethours off."
 
     def _is_market_session_open(self, moment: datetime | None = None) -> bool:
         reference = moment or datetime.now(timezone.utc)
@@ -1313,17 +1076,6 @@ class TelegramBotService:
         finally:
             db.close()
 
-    def _coverage_text(self) -> str:
-        return self._trim_message(
-            "\n".join(
-                [
-                    "Coverage matrix:",
-                    format_coverage_text(),
-                    "",
-                    "Unsupported areas stay explicit rather than falling back to incomplete coverage.",
-                ]
-            )
-        )
 
     def live_check(self) -> dict[str, Any]:
         if not self.settings.telegram_bot_token:
@@ -1501,432 +1253,17 @@ class TelegramBotService:
 
         return "unknown", []
 
-    def _help_text(self) -> str:
-        return (
-            "Нажимай кнопки под сообщением.\n"
-            "Доступно:\n"
-            "• подписка и отписка\n"
-            "• статус подписки\n"
-            "• coverage matrix по /coverage\n"
-            "• просмотр и редактирование личного списка тикеров\n"
-            "• просмотр и изменение настроек уведомлений\n"
-            "• анализ отдельных тикеров (/analyze AAPL)\n"
-            "• сканирование рынка (/scan mine или /scan AAPL MSFT)\n"
-            "• анализ портфеля (/portfolio)\n"
-            "• backtest accuracy (/backtest AAPL)\n"
-            "• source-backed детали: /why, /sources, /events, /filings, /freshness, /calendar, /risk, /audit\n"
-        )
 
-    def _welcome_text(self, is_first_use: bool = False) -> str:
-        text = (
-            "Привет. Я бот для анализа акций.\n"
-            "Нажимай кнопки под сообщением, чтобы не вводить команды вручную."
-        )
-        if is_first_use:
-            text = f"{text}\n\n{self._first_use_disclaimer()}"
-        return text
 
-    def _analysis_text(self, analysis: Any) -> str:
-        recommendation = self._translate_recommendation(analysis.recommendation)
-        lines = [
-            f"{analysis.ticker}: {recommendation}",
-            f"Цена: {analysis.price:.2f} {analysis.currency or ''}".strip(),
-            f"Итоговая оценка: {analysis.scores.final_score:.2f}",
-            f"Импульс: {analysis.scores.momentum_score:.2f}",
-            f"Оценка стоимости: {analysis.scores.valuation_score:.2f}",
-            f"Риск: {analysis.scores.risk_score:.2f}",
-            f"Кратко: {self._translate_text(analysis.short_reason)}",
-            f"Комментарий: {self._translate_text(analysis.explanation)}",
-        ]
-        operation_notes = getattr(analysis, "operation_notes", None) or []
-        if operation_notes:
-            lines.extend(["", "Операционные заметки:"])
-            lines.extend(f"- {self._translate_text(note)}" for note in operation_notes)
 
-        # Add correlation insight if user has watchlist
-        try:
-            watchlist = self._get_user_watchlist_for_analysis(analysis)
-            if watchlist and len(watchlist) > 1:
-                matrix = calculate_correlation_matrix(watchlist, lookback_days=90)
-                if matrix:
-                    insights = correlation_insights(matrix)
-                    if insights:
-                        lines.extend(["", "Диверсификация портфеля:"])
-                        lines.extend(f"- {self._translate_text(insight)}" for insight in insights[:2])
-        except Exception:
-            # Silently skip correlation on error
-            pass
 
-        quality_lines = self._data_quality_warning_lines(getattr(analysis, "data_quality", None))
-        if quality_lines:
-            lines.extend(["", "Качество данных:"])
-            lines.extend(f"- {line}" for line in quality_lines)
-        event_calendar = getattr(analysis, "event_calendar", None)
-        event_lines = self._event_calendar_lines(event_calendar)
-        if event_lines:
-            lines.extend(["", "События:"])
-            lines.extend(event_lines)
-        filing_lines = self._sec_filing_lines(getattr(analysis, "sec_filings", None))
-        if filing_lines:
-            lines.extend(["", "SEC filings:"])
-            lines.extend(filing_lines)
-        disclaimer = self._analysis_disclaimer(analysis)
-        if disclaimer:
-            lines.extend(["", disclaimer])
-        return self._trim_message("\n".join(lines))
 
-    def _scan_text(
-        self,
-        results: list[Any],
-        errors: list[Any],
-        *,
-        summary_notes: list[str] | None = None,
-        min_confidence: float | None = None,
-    ) -> str:
-        top = self._filter_results_by_confidence(results[:5], min_confidence)
-        hidden_count = len(results[:5]) - len(top)
-        if not top and not errors:
-            if min_confidence is not None and hidden_count:
-                return f"Нет результатов выше порога уверенности {min_confidence:.2f}."
-            return "Ничего не найдено."
 
-        lines = ["Результаты скана:"]
-        for item in top:
-            recommendation = self._translate_recommendation(item.recommendation)
-            lines.append(
-                f"{item.ticker}: {recommendation} | оценка {item.final_score:.2f} | цена {item.price:.2f}"
-            )
-            lines.append(f"  {self._translate_text(item.short_reason)}")
-        if min_confidence is not None:
-            lines.append(f"Порог уверенности: {min_confidence:.2f}")
-        if hidden_count:
-            lines.append(f"Скрыто низкоуверенных сигналов: {hidden_count}")
-        if errors:
-            lines.extend(["", *format_operation_summary(errors, summary_notes)])
-            lines.append("Ошибки:")
-            for item in errors[:5]:
-                lines.append(f"- {item.ticker}: {item.error}")
-        if summary_notes:
-            lines.extend(["", "Операционные заметки:"])
-            lines.extend(f"- {self._translate_text(note)}" for note in summary_notes)
-        disclaimer = self._scan_disclaimer(results)
-        if disclaimer:
-            lines.extend(["", disclaimer])
-        return self._trim_message("\n".join(lines))
 
-    def _why_text(self, ticker: str) -> str:
-        snapshot = self._latest_analysis_snapshot(ticker)
-        if snapshot is None:
-            return (
-                f"По {ticker.upper()} ещё нет сохранённой аналитики.\n"
-                "Сначала запусти /analyze, чтобы появился source-backed контекст."
-            )
 
-        payload = snapshot.payload or {}
-        scores = payload.get("scores") or {}
-        source_provenance = payload.get("source_provenance") or {}
-        lines = [
-            f"{ticker.upper()}: почему это выглядит так",
-            f"Последний анализ: {self._format_dt(snapshot.created_at)}",
-            f"Рекомендация: {self._translate_recommendation(str(payload.get('recommendation') or snapshot.recommendation))}",
-            f"Итоговая оценка: {scores.get('final_score', snapshot.final_score):.2f}",
-        ]
-        short_reason = payload.get("short_reason")
-        if short_reason:
-            lines.append(f"Кратко: {self._translate_text(str(short_reason))}")
-        explanation = payload.get("explanation")
-        if explanation:
-            lines.extend(["", "Объяснение:", self._translate_text(str(explanation))])
-        if source_provenance:
-            lines.extend(
-                [
-                    "",
-                    "Source-backed context:",
-                    f"• provider: {source_provenance.get('provider_name')}",
-                    f"• source tier: {source_provenance.get('source_tier')}",
-                    f"• fetched_at: {source_provenance.get('fetched_at') or payload.get('generated_at')}",
-                ]
-            )
-        return self._trim_message("\n".join(lines))
 
-    def _sources_text(self, ticker: str) -> str:
-        snapshot = self._latest_analysis_snapshot(ticker)
-        source_snapshot = self._latest_source_snapshot(ticker)
-        if snapshot is None and source_snapshot is None:
-            return (
-                f"По {ticker.upper()} нет сохранённых источников.\n"
-                "Сначала запусти /analyze или /scan, чтобы сохранить source provenance."
-            )
 
-        lines = [f"{ticker.upper()}: источники и provenance"]
-        if snapshot is not None:
-            provenance = (snapshot.payload or {}).get("source_provenance") or {}
-            data_quality = (snapshot.payload or {}).get("data_quality") or {}
-            lines.extend(
-                [
-                    f"Последний анализ: {self._format_dt(snapshot.created_at)}",
-                    f"Provider: {provenance.get('provider_name') or 'unknown'}",
-                    f"Tier: {provenance.get('source_tier') or 'unknown'}",
-                    f"URL: {provenance.get('source_url') or 'n/a'}",
-                    f"Confidence: {data_quality.get('confidence', 1.0):.2f}",
-                    f"Data quality: {data_quality.get('summary') or 'ok'}",
-                ]
-            )
-            quality_lines = self._data_quality_warning_lines(data_quality)
-            if quality_lines:
-                lines.extend(["", "Quality warnings:"])
-                lines.extend(f"• {line}" for line in quality_lines)
-        if source_snapshot is not None:
-            lines.extend(
-                [
-                    "",
-                    "Raw source snapshot:",
-                    f"• provider: {source_snapshot.provider_name}",
-                    f"• source tier: {source_snapshot.source_tier or 'unknown'}",
-                    f"• fetched_at: {self._format_dt(source_snapshot.fetched_at)}",
-                    f"• published_at: {self._format_dt(source_snapshot.published_at)}",
-                    f"• observed_at: {self._format_dt(source_snapshot.observed_at)}",
-                    f"• content hash: {source_snapshot.content_hash}",
-                ]
-            )
-        return self._trim_message("\n".join(lines))
 
-    def _events_text(self, ticker: str) -> str:
-        snapshot = self._latest_analysis_snapshot(ticker)
-        if snapshot is None:
-            return (
-                f"По {ticker.upper()} нет сохранённой аналитики для event context.\n"
-                "Запусти /analyze, чтобы появился свежий риск и session context."
-            )
-
-        payload = snapshot.payload or {}
-        market_session = payload.get("market_session") or {}
-        data_quality = payload.get("data_quality") or {}
-        event_calendar = payload.get("event_calendar") or {}
-        lines = [
-            f"{ticker.upper()}: event and session context",
-            f"Session: {market_session.get('status') or 'unknown'}",
-            f"Market open: {self._format_dt(market_session.get('market_open_at'))}",
-            f"Market close: {self._format_dt(market_session.get('market_close_at'))}",
-            f"Freshness: {market_session.get('freshness_state') or 'fresh'}",
-        ]
-        freshness_note = market_session.get("freshness_note")
-        if freshness_note:
-            lines.append(f"Note: {self._translate_text(str(freshness_note))}")
-        if data_quality.get("summary"):
-            lines.append(f"Data quality: {self._translate_text(str(data_quality.get('summary')))}")
-        quality_lines = self._data_quality_warning_lines(data_quality)
-        if quality_lines:
-            lines.extend(["", "Quality warnings:"])
-            lines.extend(f"- {line}" for line in quality_lines)
-        event_lines = self._event_calendar_lines(event_calendar)
-        if event_lines:
-            lines.extend(["", "Upcoming company events:"])
-            lines.extend(event_lines)
-        else:
-            lines.extend(
-                [
-                    "",
-                    "No stored company event calendar is available yet; this view shows the latest stored market session context.",
-                ]
-            )
-        return self._trim_message("\n".join(lines))
-
-    def _freshness_text(self, ticker: str) -> str:
-        snapshot = self._latest_analysis_snapshot(ticker)
-        if snapshot is None:
-            return (
-                f"По {ticker.upper()} нет сохранённой аналитики.\n"
-                "Сначала запусти /analyze, чтобы получить freshness context."
-            )
-
-        payload = snapshot.payload or {}
-        source_provenance = payload.get("source_provenance") or {}
-        market_session = payload.get("market_session") or {}
-        data_quality = payload.get("data_quality") or {}
-        event_calendar = payload.get("event_calendar") or {}
-        lines = [
-            f"{ticker.upper()}: freshness",
-            f"Latest analysis: {self._format_dt(snapshot.created_at)}",
-            f"Source fetched_at: {self._format_dt(source_provenance.get('fetched_at'))}",
-            f"Source published_at: {self._format_dt(source_provenance.get('published_at'))}",
-            f"Market session: {market_session.get('status') or 'unknown'}",
-            f"Freshness state: {market_session.get('freshness_state') or 'fresh'}",
-            f"Signal confidence: {data_quality.get('confidence', 1.0):.2f}",
-        ]
-        if market_session.get("freshness_note"):
-            lines.append(f"Note: {self._translate_text(str(market_session.get('freshness_note')))}")
-        quality_lines = self._data_quality_warning_lines(data_quality)
-        if quality_lines:
-            lines.extend(["", "Quality warnings:"])
-            lines.extend(f"- {line}" for line in quality_lines)
-        event_lines = self._event_calendar_lines(event_calendar)
-        if event_lines:
-            lines.extend(["", "Upcoming company events:"])
-            lines.extend(event_lines)
-        return self._trim_message("\n".join(lines))
-
-    def _risk_text(self, ticker: str) -> str:
-        snapshot = self._latest_analysis_snapshot(ticker)
-        if snapshot is None:
-            return (
-                f"По {ticker.upper()} нет сохранённой аналитики.\n"
-                "Сначала запусти /analyze, чтобы увидеть risk context."
-            )
-
-        payload = snapshot.payload or {}
-        scores = payload.get("scores") or {}
-        market_session = payload.get("market_session") or {}
-        data_quality = payload.get("data_quality") or {}
-        event_calendar = payload.get("event_calendar") or {}
-        sec_filings = payload.get("sec_filings") or {}
-        explanation = payload.get("explanation") or ""
-        lines = [
-            f"{ticker.upper()}: risk context",
-            f"Risk score: {scores.get('risk_score', 0.0):.2f}",
-            f"Final score: {scores.get('final_score', snapshot.final_score):.2f}",
-            f"Recommendation: {self._translate_recommendation(str(payload.get('recommendation') or snapshot.recommendation))}",
-            f"Data confidence: {data_quality.get('confidence', 1.0):.2f}",
-            f"Session state: {market_session.get('status') or 'unknown'}",
-        ]
-        if payload.get("short_reason"):
-            lines.append(f"Short reason: {self._translate_text(str(payload.get('short_reason')))}")
-        quality_lines = self._data_quality_warning_lines(data_quality)
-        if quality_lines:
-            lines.extend(["", "Quality warnings:"])
-            lines.extend(f"- {line}" for line in quality_lines)
-        event_lines = self._event_calendar_lines(event_calendar)
-        if event_lines:
-            lines.extend(["", "Upcoming company events:"])
-            lines.extend(event_lines)
-        filing_lines = self._sec_filing_lines(sec_filings)
-        if filing_lines:
-            lines.extend(["", "Recent SEC filings:"])
-            lines.extend(filing_lines)
-        if explanation:
-            lines.extend(["", self._translate_text(str(explanation))])
-        return self._trim_message("\n".join(lines))
-
-    def _calendar_text(self, ticker: str | None) -> str:
-        if ticker:
-            snapshot = self._latest_analysis_snapshot(ticker)
-            if snapshot is None:
-                return (
-                    f"По {ticker.upper()} нет сохранённой аналитики.\n"
-                    "Запусти /analyze, чтобы получить market session context."
-                )
-            payload = snapshot.payload or {}
-            market_session = payload.get("market_session") or {}
-            event_calendar = payload.get("event_calendar") or {}
-            event_lines = self._event_calendar_lines(event_calendar)
-            return self._trim_message(
-                "\n".join(
-                    [
-                        f"{ticker.upper()}: calendar context",
-                        f"Session: {market_session.get('status') or 'unknown'}",
-                        f"Timezone: {market_session.get('timezone') or 'n/a'}",
-                        f"Open: {self._format_dt(market_session.get('market_open_at'))}",
-                        f"Close: {self._format_dt(market_session.get('market_close_at'))}",
-                        *([""] + ["Upcoming company events:"] + event_lines if event_lines else []),
-                        "",
-                        "This view uses the latest stored market session snapshot and stored company event calendar, not a live exchange calendar feed.",
-                    ]
-                )
-            )
-
-        now = datetime.now(timezone.utc)
-        hours_info = get_market_hours_info(now)
-        lines = [
-            "Today: U.S. equity session baseline",
-            f"Reference time: {hours_info['reference_time_et']}",
-            f"Session: {hours_info['state']}",
-            f"Next open: {hours_info['next_open']}",
-            f"Market close: {hours_info['market_close'] or 'n/a'}",
-            "",
-            "Use /calendar AAPL to see the latest stored market session for a ticker.",
-        ]
-        return self._trim_message("\n".join(lines))
-
-    def _event_calendar_lines(self, event_calendar: Any) -> list[str]:
-        if not event_calendar:
-            return []
-
-        events = getattr(event_calendar, "upcoming_events", None)
-        if events is None and isinstance(event_calendar, dict):
-            events = event_calendar.get("upcoming_events")
-        if not events:
-            return []
-
-        lines: list[str] = []
-        summary = getattr(event_calendar, "summary", None)
-        if summary is None and isinstance(event_calendar, dict):
-            summary = event_calendar.get("summary")
-        if summary:
-            lines.append(self._translate_text(str(summary)))
-
-        for event in events[:4]:
-            if isinstance(event, dict):
-                name = event.get("name") or "event"
-                scheduled_at = event.get("scheduled_at")
-                window_start_at = event.get("window_start_at")
-                window_end_at = event.get("window_end_at")
-                note = event.get("note")
-            else:
-                name = getattr(event, "name", "event")
-                scheduled_at = getattr(event, "scheduled_at", None)
-                window_start_at = getattr(event, "window_start_at", None)
-                window_end_at = getattr(event, "window_end_at", None)
-                note = getattr(event, "note", None)
-
-            parts = [f"• {name}"]
-            if scheduled_at is not None:
-                parts.append(f"at {self._format_dt(scheduled_at)}")
-            if window_start_at is not None or window_end_at is not None:
-                parts.append(
-                    "window "
-                    f"{self._format_dt(window_start_at)} -> {self._format_dt(window_end_at)}"
-                )
-            if note:
-                parts.append(self._translate_text(str(note)))
-            lines.append(" | ".join(parts))
-
-        return lines
-
-    def _sec_filing_lines(self, sec_filings: Any) -> list[str]:
-        if not sec_filings:
-            return []
-
-        filings = getattr(sec_filings, "recent_filings", None)
-        if filings is None and isinstance(sec_filings, dict):
-            filings = sec_filings.get("recent_filings")
-        if not filings:
-            return []
-
-        lines: list[str] = []
-        summary = getattr(sec_filings, "summary", None)
-        if summary is None and isinstance(sec_filings, dict):
-            summary = sec_filings.get("summary")
-        if summary:
-            lines.append(self._translate_text(str(summary)))
-
-        for filing in filings[:3]:
-            if isinstance(filing, dict):
-                form_type = filing.get("form_type") or "filing"
-                filing_date = filing.get("filing_date")
-                description = filing.get("description")
-            else:
-                form_type = getattr(filing, "form_type", "filing")
-                filing_date = getattr(filing, "filing_date", None)
-                description = getattr(filing, "description", None)
-
-            parts = [f"• {form_type}"]
-            if filing_date:
-                parts.append(str(filing_date))
-            if description:
-                parts.append(self._translate_text(str(description)))
-            lines.append(" | ".join(parts))
-
-        return lines
 
     def _audit_text(self, ticker: str | None) -> str:
         if not ticker:
@@ -2030,122 +1367,10 @@ class TelegramBotService:
         lines.append("\nИсточник: SEC EDGAR (публичные данные SEC, Tier 1)")
         return self._trim_message("\n".join(lines))
 
-    def _digest_text(
-        self,
-        results: list[Any],
-        errors: list[Any],
-        *,
-        summary_notes: list[str] | None = None,
-        digest_mode: str = "market_open",
-        min_confidence: float | None = None,
-    ) -> str:
-        limit = 5 if digest_mode == "weekly_review" else 3
-        top = self._filter_results_by_confidence(results[:limit], min_confidence)
-        hidden_count = len(results[:limit]) - len(top)
-        if not top and not errors:
-            if min_confidence is not None and hidden_count:
-                return f"Нет результатов выше порога уверенности {min_confidence:.2f}."
-            return "Дайджест пуст: данных для отчёта нет."
 
-        lines = [self._digest_heading(digest_mode)]
-        digest_note = self._digest_mode_note(digest_mode)
-        if digest_note:
-            lines.extend(["", digest_note])
-        if min_confidence is not None:
-            lines.extend(["", f"Порог уверенности: {min_confidence:.2f}"])
-        for item in top:
-            recommendation = self._translate_recommendation(item.recommendation)
-            lines.append(
-                f"{item.ticker}: {recommendation}, оценка {item.final_score:.2f}, {self._translate_text(item.short_reason)}"
-            )
-        if errors:
-            lines.extend(["", *format_operation_summary(errors, summary_notes)])
-            lines.append("Ошибки скана:")
-            for item in errors[:3]:
-                lines.append(f"- {item.ticker}: {item.error}")
-        if summary_notes:
-            lines.extend(["", "Операционные заметки:"])
-            lines.extend(f"- {self._translate_text(note)}" for note in summary_notes)
-        if hidden_count:
-            lines.append(f"Скрыто низкоуверенных сигналов: {hidden_count}")
-        disclaimer = self._scan_disclaimer(top)
-        if disclaimer:
-            lines.extend(["", disclaimer])
-        return self._trim_message("\n".join(lines))
 
-    def _digest_fingerprint(
-        self,
-        results: list[Any],
-        errors: list[Any],
-        *,
-        summary_notes: list[str] | None = None,
-        digest_mode: str = "market_open",
-        min_confidence: float | None = None,
-    ) -> str:
-        limit = 5 if digest_mode == "weekly_review" else 3
-        top = self._filter_results_by_confidence(results[:limit], min_confidence)
-        payload = {
-            "mode": digest_mode,
-            "min_confidence": min_confidence,
-            "results": [
-                {
-                    "ticker": item.ticker,
-                    "recommendation": item.recommendation,
-                    "final_score": round(float(item.final_score), 4),
-                    "price": round(float(item.price), 4),
-                    "short_reason": str(item.short_reason),
-                }
-                for item in top
-            ],
-            "errors": [
-                {
-                    "ticker": item.ticker,
-                    "error": str(item.error),
-                }
-                for item in errors[:3]
-            ],
-            "summary_notes": [str(note) for note in (summary_notes or [])],
-        }
-        encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
 
-    def _digest_heading(self, digest_mode: str) -> str:
-        headings = {
-            "pre_market": "Утренний pre-market дайджест:",
-            "market_open": "Market-open дайджест:",
-            "midday": "Midday check дайджест:",
-            "close": "Close summary дайджест:",
-            "after_hours": "After-hours news дайджест:",
-            "weekly_review": "Weekly watchlist review:",
-        }
-        return headings.get(digest_mode, "Телеграм-дайджест рынка:")
 
-    def _digest_mode_note(self, digest_mode: str) -> str | None:
-        notes = {
-            "pre_market": "До открытия рынка показываю свежий pre-market контекст и то, что может измениться к open.",
-            "market_open": "На открытии фокус на первых реакциях и gap risk.",
-            "midday": "Полуденный check помогает увидеть, что поменялось после открытия.",
-            "close": "Close summary подводит итог регулярной сессии.",
-            "after_hours": "After-hours дайджест выделяет то, что появилось после закрытия и может повлиять на завтрашний open.",
-            "weekly_review": "Weekly review собирает контекст по сохранённым watchlist-тикерам и недельной динамике.",
-        }
-        return notes.get(digest_mode)
-
-    def _filter_results_by_confidence(self, results: list[Any], min_confidence: float | None) -> list[Any]:
-        if min_confidence is None:
-            return results
-        filtered: list[Any] = []
-        for item in results:
-            confidence = getattr(item, "confidence", None)
-            if not isinstance(confidence, (int, float)):
-                quality = getattr(item, "data_quality", None)
-                if isinstance(quality, dict):
-                    confidence = quality.get("confidence")
-                elif quality is not None:
-                    confidence = getattr(quality, "confidence", None)
-            if isinstance(confidence, (int, float)) and confidence >= min_confidence:
-                filtered.append(item)
-        return filtered
 
     def _scheduled_digest_mode(self, reference_time: datetime | None = None) -> str:
         reference = reference_time or datetime.now(timezone.utc)
@@ -2172,189 +1397,13 @@ class TelegramBotService:
             return "close"
         return "after_hours"
 
-    def _first_use_disclaimer(self) -> str:
-        return (
-            "Важно: это исследовательский инструмент, а не финансовый совет. "
-            "Сигналы могут быть неполными, задержанными или устаревшими."
-        )
 
-    def _analysis_disclaimer(self, analysis: Any) -> str:
-        notes: list[str] = []
-        recommendation = str(getattr(analysis, "recommendation", ""))
-        scores = getattr(analysis, "scores", None)
-        final_score = getattr(scores, "final_score", None)
-        risk_score = getattr(scores, "risk_score", None)
 
-        if recommendation == "HIGH_INTEREST" or (isinstance(final_score, (int, float)) and final_score >= 80):
-            notes.append(
-                "Крупный сигнал: перед любыми действиями проверь источники, свежесть данных и контекст события."
-            )
 
-        if recommendation in {"CAUTION", "HIGH_RISK"} or (
-            isinstance(risk_score, (int, float)) and risk_score >= 70
-        ):
-            notes.append(
-                "Высокий риск: не полагайся на оценку без ручной проверки данных и новостей."
-            )
 
-        return "\n".join(notes)
 
-    def _data_quality_warning_lines(self, data_quality: Any) -> list[str]:
-        if not data_quality:
-            return []
 
-        def _get(name: str, default: Any = None) -> Any:
-            if isinstance(data_quality, dict):
-                return data_quality.get(name, default)
-            return getattr(data_quality, name, default)
 
-        lines: list[str] = []
-        summary = _get("summary")
-        if summary:
-            lines.append(self._translate_text(str(summary)))
-
-        confidence = _get("confidence", 1.0)
-        if isinstance(confidence, (int, float)) and confidence < 0.8:
-            lines.append(f"Низкая уверенность данных: {confidence:.2f}")
-
-        if _get("source_disagreed"):
-            lines.append("Источники не совпадают между собой.")
-        if _get("stale"):
-            lines.append("Данные выглядят устаревшими.")
-        if _get("delayed"):
-            lines.append("Поток данных может запаздывать.")
-        if _get("missing"):
-            lines.append("Есть пропуски в исходных данных.")
-        if _get("estimated"):
-            lines.append("Часть значений оценочная, а не подтверждённая.")
-        return lines
-
-    def _scan_disclaimer(self, results: list[Any]) -> str:
-        if not results:
-            return ""
-
-        major_alerts = 0
-        high_risk_alerts = 0
-        for item in results:
-            recommendation = str(getattr(item, "recommendation", ""))
-            score = getattr(item, "final_score", None)
-            risk = getattr(item, "risk_score", None)
-            if recommendation == "HIGH_INTEREST" or (isinstance(score, (int, float)) and score >= 80):
-                major_alerts += 1
-            if recommendation in {"CAUTION", "HIGH_RISK"} or (
-                isinstance(risk, (int, float)) and risk >= 70
-            ):
-                high_risk_alerts += 1
-
-        notes: list[str] = []
-        if major_alerts:
-            notes.append(
-                f"Крупные сигналы ({major_alerts}) требуют ручной проверки источников и свежести данных."
-            )
-        if high_risk_alerts:
-            notes.append(
-                f"Рискованные сигналы ({high_risk_alerts}) лучше перепроверить по источникам и новостям."
-            )
-        return "\n".join(notes)
-
-    def _translate_recommendation(self, recommendation: str) -> str:
-        return research_label_to_russian(recommendation)
-
-    def _translate_text(self, text: str) -> str:
-        replacements = {
-            "analytical signal": "аналитический сигнал",
-            "research signal": "исследовательский сигнал",
-            "final score": "итоговая оценка",
-            "price is above MA50": "цена выше 50-дневной скользящей средней",
-            "price is below MA50": "цена ниже 50-дневной скользящей средней",
-            "price is above MA200": "цена выше 200-дневной скользящей средней",
-            "price is below MA200": "цена ниже 200-дневной скользящей средней",
-            "1-month momentum is positive": "1-месячный импульс положительный",
-            "1-month momentum is weak": "1-месячный импульс слабый",
-            "6-month trend is strong": "6-месячный тренд сильный",
-            "6-month trend is weak": "6-месячный тренд слабый",
-            "RSI shows strong overheating": "индекс относительной силы показывает сильный перегрев",
-            "RSI is overbought": "индекс относительной силы перекуплен",
-            "RSI is deeply oversold": "индекс относительной силы сильно перепродан",
-            "RSI may indicate oversold conditions": "индекс относительной силы может указывать на перепроданность",
-            "trailing P/E is not meaningful": "трейлинг P/E неинформативен",
-            "valuation looks inexpensive by trailing P/E": "оценка выглядит дешёвой по trailing P/E",
-            "valuation looks reasonable by trailing P/E": "оценка выглядит разумной по trailing P/E",
-            "trailing P/E is very high": "trailing P/E очень высокий",
-            "trailing P/E is elevated": "trailing P/E повышенный",
-            "forward P/E is high": "forward P/E высокий",
-            "forward P/E is lower than trailing P/E": "forward P/E ниже trailing P/E",
-            "revenue growth is strong": "рост выручки сильный",
-            "revenue growth is positive": "рост выручки положительный",
-            "revenue growth is negative": "рост выручки отрицательный",
-            "profit margins are strong": "маржа высокая",
-            "profit margins are healthy": "маржа здоровая",
-            "profit margins are negative": "маржа отрицательная",
-            "debt/equity is high": "debt/equity высокий",
-            "debt/equity is elevated": "debt/equity повышенный",
-            "debt/equity is conservative": "debt/equity консервативный",
-            "volatility is low": "волатильность низкая",
-            "volatility is very high": "волатильность очень высокая",
-            "volatility is elevated": "волатильность повышенная",
-            "max drawdown is limited": "максимальная просадка ограниченная",
-            "max drawdown is severe": "максимальная просадка серьёзная",
-            "max drawdown is large": "максимальная просадка большая",
-            "overbought RSI adds short-term risk": "перекупленный RSI повышает краткосрочный риск",
-            "daily move is unusually large": "дневное движение необычно большое",
-            "not enough strong quantitative signals": "недостаточно сильных количественных сигналов",
-            "This is a research signal, not financial advice.": "Это исследовательский сигнал, а не финансовый совет.",
-            "This is a research signal, not financial advice": "Это исследовательский сигнал, а не финансовый совет",
-            "This is a research signal": "Это исследовательский сигнал",
-            "not financial advice": "не финансовый совет",
-            "LLM explanation is unavailable, so rule-based explanation was used.": "Объяснение от LLM недоступно, поэтому использован rule-based вариант.",
-            "LLM explanation is unavailable": "Объяснение от LLM недоступно",
-            "rule-based explanation": "объяснение по правилам",
-            "OpenAI explanation is disabled, so a rule-based explanation was used.": "Объяснение OpenAI отключено, поэтому использован rule-based вариант.",
-            "OpenAI call budget was exhausted, so a rule-based explanation was used.": "Лимит вызовов OpenAI исчерпан, поэтому использован rule-based вариант.",
-            "OpenAI response was unavailable, so a rule-based explanation was used.": "Ответ OpenAI недоступен, поэтому использован rule-based вариант.",
-            "Data quality:": "Качество данных:",
-            "Partial failure: review the per-ticker error lines for market-data issues or ticker-specific problems.": "Частичный сбой: проверь строки ошибок по тикерам для проблем с market-data или конкретным тикером.",
-            "Market session is open, but the latest bar is from a prior trading day.": "Рыночная сессия открыта, но последняя свеча относится к предыдущему торговому дню.",
-            "Market session is": "Рыночная сессия",
-            "after-hours": "после закрытия",
-            "pre-market": "до открытия",
-            "weekend": "выходные",
-            "fresh intraday coverage may be delayed.": "свежие внутридневные данные могут запаздывать.",
-            "momentum": "импульс",
-            "valuation": "оценка стоимости",
-            "risk": "риск",
-            "score": "оценка",
-        }
-
-        translated = text
-        for source, target in replacements.items():
-            translated = translated.replace(source, target)
-        return translated
-
-    def _parse_tickers(self, args: list[str]) -> list[str]:
-        tickers: list[str] = []
-        for item in args:
-            if not item.startswith("/"):
-                tickers.append(item.strip().upper())
-        return tickers
-
-    def _normalize_watchlist_symbols(self, tickers: list[str]) -> tuple[list[str], list[str]]:
-        normalized: list[str] = []
-        invalid: list[str] = []
-        seen: set[str] = set()
-        for item in tickers:
-            raw = item.strip().rstrip(",")
-            if not raw:
-                continue
-            try:
-                symbol = normalize_ticker(raw)
-            except InvalidTickerError:
-                invalid.append(item)
-                continue
-            if symbol not in seen:
-                normalized.append(symbol)
-                seen.add(symbol)
-        return normalized, invalid
 
     def _update_watchlist(
         self,
@@ -2388,53 +1437,7 @@ class TelegramBotService:
             changed = [symbol for symbol in current if symbol not in updated]
         return changed, invalid
 
-    def _watchlist_text(self, chat_id: int) -> str:
-        sub = self._subscription_for_chat(chat_id)
-        if sub is None:
-            return (
-                "Подписка не найдена. Используй /start, затем /add AAPL MSFT NVDA, "
-                "чтобы завести личный список."
-            )
 
-        watchlist = self._watchlist_tickers_for_subscription(sub)
-        if watchlist:
-            return (
-                "Твой список тикеров:\n"
-                f"{', '.join(watchlist)}\n\n"
-                "Команды: /add AAPL, /remove AAPL, /scan mine"
-            )
-
-        default_list = ", ".join(self._configured_tickers()) or "пусто"
-        return (
-            "Личный список пока пуст.\n"
-            f"По умолчанию для дайджестов используется: {default_list}\n\n"
-            "Команды: /add AAPL, /watchlist, /scan mine"
-        )
-
-    def _watchlist_update_text(
-        self,
-        *,
-        chat_id: int,
-        mode: str,
-        changed_tickers: list[str],
-        invalid_tickers: list[str],
-    ) -> str:
-        current = self._watchlist_tickers(chat_id)
-        if mode == "add":
-            prefix = "Добавил в твой список"
-        else:
-            prefix = "Удалил из твоего списка"
-
-        if changed_tickers:
-            result = f"{prefix}: {', '.join(changed_tickers)}."
-        else:
-            result = "Ничего не изменилось."
-
-        if invalid_tickers:
-            result = f"{result}\nНекорректные тикеры пропущены: {', '.join(invalid_tickers)}."
-
-        result = f"{result}\nТекущий список: {', '.join(current) if current else 'пусто'}."
-        return result
 
     def _get_user_watchlist(self, chat_id: int) -> list[str]:
         """Get user's watchlist from preferences."""
@@ -2507,35 +1510,6 @@ class TelegramBotService:
         finally:
             db.close()
 
-    def _portfolio_analysis(self, tickers: list[str]) -> str:
-        """Analyze portfolio correlation and concentration."""
-        # Calculate correlation matrix
-        matrix = calculate_correlation_matrix(tickers, lookback_days=90)
-
-        if not matrix:
-            return (
-                f"❌ Не удалось получить корреляционные данные.\n"
-                f"Проверь наличие цен для: {', '.join(tickers)}"
-            )
-
-        insights = correlation_insights(matrix)
-
-        result = [
-            f"📊 Анализ портфеля ({len(matrix.tickers)} акций)",
-            "",
-        ]
-
-        result.extend(insights)
-
-        # Show some pair correlations
-        high_pairs = matrix.high_correlation_pairs(threshold=0.7)
-        if high_pairs:
-            result.append("")
-            result.append("🔗 Высокие корреляции:")
-            for pair in high_pairs[:5]:
-                result.append(f"  {pair.ticker1}/{pair.ticker2}: {pair.correlation:.2f}")
-
-        return "\n".join(result)
 
     def _trim_message(self, text: str, limit: int = 3900) -> str:
         if len(text) <= limit:

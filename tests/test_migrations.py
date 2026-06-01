@@ -13,6 +13,7 @@ class MigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "migrations.db"
             engine = create_engine(f"sqlite:///{db_path}")
+            self.addCleanup(engine.dispose)
 
             apply_migrations(engine)
 
@@ -54,6 +55,7 @@ class MigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "migrations.db"
             engine = create_engine(f"sqlite:///{db_path}")
+            self.addCleanup(engine.dispose)
 
             apply_migrations(engine)
             apply_migrations(engine)
@@ -69,6 +71,7 @@ class MigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "init.db"
             engine = create_engine(f"sqlite:///{db_path}")
+            self.addCleanup(engine.dispose)
 
             from app import database as database_module
 

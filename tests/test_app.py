@@ -271,6 +271,7 @@ class AppSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "budgets.db"
             engine = create_engine(f"sqlite:///{db_path}")
+            self.addCleanup(engine.dispose)
             apply_migrations(engine)
 
             with patch("app.database.engine", engine):
@@ -614,6 +615,7 @@ class AppSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "snapshot.db"
             engine = create_engine(f"sqlite:///{db_path}")
+            self.addCleanup(engine.dispose)
             Base.metadata.create_all(bind=engine)
             Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
