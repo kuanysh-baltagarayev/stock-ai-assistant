@@ -302,7 +302,9 @@ def _download_history_alpha_vantage(
         {
             "function": "TIME_SERIES_DAILY",
             "symbol": symbol,
-            "outputsize": "full",  # full history so MA200 has enough data points
+            # compact = last 100 daily points (free tier; full is premium-only).
+            # Enough for price/MA50/RSI; MA200 degrades gracefully to None.
+            "outputsize": "compact",
             "datatype": "csv",
             "apikey": api_key,
         }
