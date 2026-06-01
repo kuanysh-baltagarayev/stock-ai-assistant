@@ -685,7 +685,6 @@ class ConfigurationTests(unittest.TestCase):
                 "MARKET_DATA_CACHE_TTL_SECONDS": "900",
                 "PROVIDER_CALL_BUDGET": "321",
                 "OPENAI_CALL_BUDGET": "12",
-                "PLAYWRIGHT_PAGE_BUDGET": "7",
                 "TELEGRAM_SEND_BUDGET": "44",
             },
             clear=False,
@@ -696,7 +695,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.market_data_cache_ttl_seconds, 900)
         self.assertEqual(settings.provider_call_budget, 321)
         self.assertEqual(settings.openai_call_budget, 12)
-        self.assertEqual(settings.playwright_page_budget, 7)
         self.assertEqual(settings.telegram_send_budget, 44)
 
     def test_get_settings_parses_telegram_allowlist(self) -> None:
@@ -1043,7 +1041,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertIn("U.S. listed equities on major exchanges", body["supported_markets"])
-        self.assertIn("No live news ingestion through Playwright MCP yet", body["known_gaps"])
+        self.assertIn("No live news ingestion yet", body["known_gaps"])
 
     def test_ready_endpoint_reports_database_ok(self) -> None:
         with (

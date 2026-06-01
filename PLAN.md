@@ -21,7 +21,7 @@ and user value.
 - The app must work without `OPENAI_API_KEY`; OpenAI is optional explanation only.
 - Offline tests are necessary but not a substitute for live external smoke checks.
 - When asked to continue implementation, make concrete progress, verify it, and commit.
-- Market data should come from all practical open sources, not just API feeds: include news sites and browser-based collection where useful, with Playwright MCP as the browser tooling path.
+- Market data should come from practical open sources, not just API feeds: prefer official APIs, RSS feeds, downloadable files, and static HTML parsers before considering heavier browser automation.
 - The app should account for exchange trading sessions, market open/close regimes, and publication timestamps for economic and political news when judging freshness and relevance.
 - The product surface is Telegram-first and should not depend on a web UI. Every important workflow must be usable through Telegram commands, buttons, scheduled digests, and concise source-backed messages.
 - Market and source expansion must be tiered and explicit. The project should prefer high-signal, legally accessible, testable sources over broad but unreliable scraping.
@@ -236,7 +236,7 @@ Implemented:
 - Secrets hygiene is implicit through `.gitignore`, but there is no explicit security checklist yet.
 - Local runtime notes for Telegram bot operation are not defined yet.
 - No user-facing UI exists yet; API, CLI, and Telegram flows are the current product surface.
-- Source coverage is still narrow: the app currently depends on `yfinance` for market data and does not yet ingest news or other open web sources through Playwright MCP.
+- Source coverage is still narrow: the app currently depends on `yfinance` for market data and does not yet ingest live news or other open web sources.
 - Session awareness is now present for U.S. equities in the core analysis path, but broader exchange calendars and news freshness windows for economy and politics are still not modeled.
 - Telegram UX is still basic: it still lacks live news ingestion and configurable digest calendars.
 - Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, and it still does not show source coverage gaps in every Telegram answer.
@@ -247,8 +247,7 @@ Implemented:
 - Scheduler behavior is still basic and not yet idempotent or timezone-aware, even though per-chat quiet hours and daily caps are now enforced.
 - The current recommendation labels include buy/sell-like language and should be replaced with neutral research labels before wider practical use.
 - FX normalization metadata is stored, but no live FX conversion provider is wired in yet.
-- `PLAYWRIGHT_PAGE_BUDGET` is parsed and shown in diagnostics, but there are no
-  Playwright collectors yet, so there is nothing to enforce against.
+- Browser automation collectors are not part of the current MVP configuration.
 
 ## Scope And Coverage Boundaries
 
@@ -288,7 +287,7 @@ Source tiers:
 
 1. Tier 1: official and primary sources, such as exchange calendars, SEC EDGAR, Federal Reserve/FRED, BLS, BEA, Treasury, FOMC, issuer investor-relations pages, and official exchange notices.
 2. Tier 2: reputable open market, data, and news sources that expose stable APIs, feeds, RSS, downloadable files, or predictable pages.
-3. Tier 3: Playwright MCP-backed collection for open web pages that lack clean APIs or RSS. Use only when allowed, rate-limited, cached, and covered by extraction tests.
+3. Tier 3: open web collection for pages that lack clean APIs or RSS. Prefer static HTML parsing; use browser automation only when explicitly justified, allowed, rate-limited, cached, and covered by extraction tests.
 4. Blocked: paywalled, login-only, legally restricted, or technically blocked pages where access would require bypass behavior.
 
 Provider records must include:
@@ -296,7 +295,7 @@ Provider records must include:
 1. Provider name and source URL.
 2. Source tier and data category.
 3. Observed timestamp, published timestamp, fetched timestamp, and parser version.
-4. Extraction method: API, RSS, file download, HTML parser, or Playwright.
+4. Extraction method: API, RSS, file download, HTML parser, or explicitly approved browser automation.
 5. Confidence level, known delay, and coverage limits.
 6. Content hash for deduplication and audit.
 7. Failure mode: unavailable, stale, blocked, rate-limited, parse-failed, or disagreement.
@@ -457,13 +456,13 @@ Suggested order for low-waste progress:
 
 ## Operations, Budgets, And Runtime Boundaries
 
-The MVP should stay runnable on a local machine. Heavy provider calls, Playwright
-collection, and LLM usage need explicit limits.
+The MVP should stay runnable on a local machine. Heavy provider calls, Telegram
+sends, and LLM usage need explicit limits.
 
 Operational requirements:
 
 1. Define API exposure: local-only by default; if exposed beyond localhost, add authentication, rate limits, CORS policy, and security headers.
-2. Add cost and runtime budgets for OpenAI calls, provider requests, Playwright pages, and Telegram sends.
+2. Add cost and runtime budgets for OpenAI calls, provider requests, and Telegram sends. Add collector-specific budgets only when those collectors exist.
 3. Add provider health reporting and last-success timestamps.
 4. Add backup/restore notes for SQLite and a migration path before schema changes.
 5. Add log redaction for tokens, chat IDs where appropriate, URLs with secrets, and provider credentials.
@@ -479,7 +478,7 @@ These are required product and market-structure improvements before treating the
 1. Build a provider registry so `yfinance` is only one market-data provider, not the core assumption of the app.
 2. Add source provenance to every fact: provider name, source URL when available, observed timestamp, published timestamp, fetched timestamp, and confidence level.
 3. Use official and open sources first for high-impact facts: exchange calendars, SEC EDGAR filings, Federal Reserve/FRED data, BLS releases, BEA releases, issuer investor-relations pages, and reputable market/news sites.
-4. Use Playwright MCP for pages that do not expose clean APIs or RSS, while keeping scraper rules explicit, rate-limited, cached, and respectful of robots/terms.
+4. Prefer official APIs, RSS, downloadable files, and static HTML parsers for pages that expose stable open data; consider browser automation only as a later, justified exception with explicit rules, rate limits, caching, and respect for robots/terms.
 5. Add source disagreement handling: when price, market cap, earnings date, or news timestamp differs across sources, Telegram must show that the signal is degraded instead of silently choosing one value.
 
 ### Exchange Sessions And Freshness
@@ -560,7 +559,7 @@ Status: in progress.
 6. Done: add a secrets and security checklist covering `.env`, API keys, Telegram token, logs, and git status.
 7. Done: add local runtime notes for Telegram bot operation, logs, restart, env setup, and database location.
 8. Done: add clear live-smoke environment flags so offline tests never depend on network access.
-9. Done: add provider-call, OpenAI-call, Playwright-page, and Telegram-send runtime budgets; provider, OpenAI, and Telegram-send budgets are enforced per process.
+9. Done: add provider-call, OpenAI-call, and Telegram-send runtime budgets; provider, OpenAI, and Telegram-send budgets are enforced per process.
 10. Done: add backup/restore notes for the local SQLite database.
 
 ## Phase 3: Improve Data and Persistence
@@ -602,7 +601,7 @@ Status: in progress.
 3. Add market-session modeling by symbol and exchange, including regular, pre-market, after-hours, holiday, early-close, closed, and unknown states.
 4. Add source freshness, source disagreement, and confidence scoring to every analysis.
 5. Add data-quality handling for adjusted prices, splits, dividends, missing candles, partial sessions, and delayed quotes.
-6. Add Playwright MCP-backed collectors for open web pages and news sites that lack stable APIs, with caching, rate limits, provenance, and extraction tests.
+6. Add open web collectors for news sites that lack stable APIs only when the source is legally accessible and useful, with caching, rate limits, provenance, and extraction tests.
 7. Add LLM source-grounding and prompt-injection protections before summarizing web/news content.
 8. Add event-aware scoring for earnings, filings, macro releases, central-bank events, political/regulatory news, sanctions, tariffs, and sector-specific catalysts.
 9. Add market-regime context: broad index trend, volatility regime, rate/yield backdrop, sector rotation, and risk-on/risk-off state.
@@ -641,7 +640,7 @@ Before calling the MVP complete, verify all of the following:
 13. Local runtime notes exist for Telegram bot operation, logs, restart, env setup, and database location.
 14. Telegram supports per-chat watchlists, alert preferences, timezone, preferred market, source-backed explanations, event calendar, and freshness checks.
 15. Every Telegram analysis includes source provenance, latest data timestamp, market session state, news freshness, and confidence.
-16. Market intelligence uses more than `yfinance`, including official open sources and Playwright MCP-backed open web/news collection where appropriate.
+16. Market intelligence uses more than `yfinance`, including official open sources, stable feeds, downloadable files, and tested open web collection where appropriate.
 17. Scoring separates technical, fundamental, event/news risk, confidence, and market-regime context.
 18. Supported markets and unsupported markets are documented clearly; the app does not imply exhaustive global coverage.
 19. Instrument registry distinguishes symbol, exchange, currency, timezone, asset type, and provider aliases.

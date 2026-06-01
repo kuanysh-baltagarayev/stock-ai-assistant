@@ -31,7 +31,6 @@ class Settings(BaseModel):
     market_data_cache_ttl_seconds: int = Field(default=3600)
     provider_call_budget: int = Field(default=1000)
     openai_call_budget: int = Field(default=50)
-    playwright_page_budget: int = Field(default=20)
     telegram_send_budget: int = Field(default=200)
     telegram_bot_token: str | None = Field(default=None)
     telegram_default_tickers: str = Field(
@@ -199,12 +198,6 @@ def get_settings() -> Settings:
             os.getenv("OPENAI_CALL_BUDGET"),
             env_name="OPENAI_CALL_BUDGET",
             default=50,
-            minimum=0,
-        ),
-        playwright_page_budget=_parse_int(
-            os.getenv("PLAYWRIGHT_PAGE_BUDGET"),
-            env_name="PLAYWRIGHT_PAGE_BUDGET",
-            default=20,
             minimum=0,
         ),
         telegram_send_budget=_parse_int(
