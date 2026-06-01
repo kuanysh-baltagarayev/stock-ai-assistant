@@ -48,6 +48,7 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service._resolve_action("/scan AAPL msft"), ("scan", ["AAPL", "MSFT"]))
         self.assertEqual(self.service._resolve_action("/add AAPL MSFT"), ("add", ["AAPL", "MSFT"]))
         self.assertEqual(self.service._resolve_action("/remove AAPL"), ("remove", ["AAPL"]))
+        self.assertEqual(self.service._resolve_action("/confidence 0.75"), ("confidence", ["0.75"]))
 
     async def test_add_and_show_watchlist(self) -> None:
         send_mock = AsyncMock()
@@ -102,7 +103,34 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_scan_with_explicit_tickers_uses_command_arguments(self) -> None:
         send_mock = AsyncMock()
-        scan_response = SimpleNamespace(results=[], errors=[], summary=SimpleNamespace())
+        scan_response = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="AAPL",
+                    recommendation="NEUTRAL",
+                    final_score=77.1,
+                    price=189.12,
+                    short_reason="sample reason",
+                    confidence=0.92,
+                ),
+                SimpleNamespace(
+                    ticker="MSFT",
+                    recommendation="NEUTRAL",
+                    final_score=71.3,
+                    price=101.25,
+                    short_reason="sample reason",
+                    confidence=0.41,
+                ),
+            ],
+            errors=[],
+            summary=SimpleNamespace(),
+        )
+        self.service._upsert_subscription(
+            203,
+            username="bob",
+            active=True,
+            preferences={"min_confidence": 0.8},
+        )
 
         with (
             patch.object(self.service, "_send_message", send_mock),
@@ -115,11 +143,15 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
                         "from": {"username": "bob"},
                         "text": "/scan AAPL msft",
                     }
-                }
-            )
+            }
+        )
 
         scan_mock.assert_called_once_with(["AAPL", "MSFT"], None)
         self.assertIn("Запускаю сканирование: AAPL, MSFT...", send_mock.await_args_list[0].args[1])
+        self.assertIn("Порог уверенности: 0.80", send_mock.await_args_list[1].args[1])
+        self.assertIn("Скрыто низкоуверенных сигналов: 1", send_mock.await_args_list[1].args[1])
+        self.assertIn("AAPL", send_mock.await_args_list[1].args[1])
+        self.assertNotIn("MSFT:", send_mock.await_args_list[1].args[1])
 
     async def test_digest_uses_personal_watchlists(self) -> None:
         self.service._upsert_subscription(301, username="carol", active=True, watchlist_symbols=["AAPL"])

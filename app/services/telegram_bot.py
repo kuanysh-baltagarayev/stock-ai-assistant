@@ -411,6 +411,35 @@ class TelegramBotService:
             )
             return
 
+        if action == "confidence":
+            confidence_value, confidence_error = self._parse_confidence_threshold(args[0] if args else "")
+            if confidence_error:
+                await self._send_message(
+                    int(chat_id),
+                    confidence_error,
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            self._upsert_subscription(
+                int(chat_id),
+                username=username,
+                active=True,
+                preferences={"min_confidence": confidence_value},
+            )
+            await self._send_message(
+                int(chat_id),
+                self._preferences_text(
+                    int(chat_id),
+                    notice=(
+                        "Minimum confidence updated."
+                        if confidence_value is not None
+                        else "Minimum confidence cleared."
+                    ),
+                ),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
         if action == "market_hours":
             market_hours_only, market_error = self._parse_toggle(args[0] if args else "")
             if market_error:
@@ -456,12 +485,15 @@ class TelegramBotService:
             )
             try:
                 response = await asyncio.to_thread(scan_tickers, watchlist, None)
+                subscription = self._subscription_for_chat(int(chat_id))
+                min_confidence = getattr(subscription, "min_confidence", None) if subscription else None
                 await self._send_message(
                     int(chat_id),
                     self._scan_text(
                         response.results,
                         response.errors,
                         summary_notes=getattr(response.summary, "notes", None),
+                        min_confidence=min_confidence,
                     ),
                     reply_markup=self._main_keyboard(),
                 )
@@ -534,12 +566,15 @@ class TelegramBotService:
             )
             try:
                 response = await asyncio.to_thread(scan_tickers, tickers, None)
+                subscription = self._subscription_for_chat(int(chat_id))
+                min_confidence = getattr(subscription, "min_confidence", None) if subscription else None
                 await self._send_message(
                     int(chat_id),
                     self._scan_text(
                         response.results,
                         response.errors,
                         summary_notes=getattr(response.summary, "notes", None),
+                        min_confidence=min_confidence,
                     ),
                     reply_markup=self._main_keyboard(),
                 )
@@ -706,11 +741,13 @@ class TelegramBotService:
                 continue
 
             response = await asyncio.to_thread(scan_tickers, tickers, None)
+            min_confidence = getattr(subscriber, "min_confidence", None)
             digest = self._digest_text(
                 response.results,
                 response.errors,
                 summary_notes=getattr(response.summary, "notes", None),
                 digest_mode=mode,
+                min_confidence=min_confidence,
             )
             logger.info(
                 "telegram_digest_ready",
@@ -998,6 +1035,8 @@ class TelegramBotService:
         quiet_hours = self._format_quiet_hours(subscription)
         max_alerts = getattr(subscription, "max_alerts_per_day", None)
         daily_cap = "не ограничен" if max_alerts is None else str(max_alerts)
+        min_confidence = getattr(subscription, "min_confidence", None)
+        confidence_text = "off" if min_confidence is None else f"{min_confidence:.2f}"
         market_hours_only = "да" if getattr(subscription, "market_hours_only", False) else "нет"
         today_key = self._current_day_key()
         daily_alert_date = getattr(subscription, "daily_alert_date", None)
@@ -1007,6 +1046,7 @@ class TelegramBotService:
             "Настройки уведомлений:\n"
             f"• Quiet hours: {quiet_hours}\n"
             f"• Daily cap: {daily_cap}\n"
+            f"• Минимальная уверенность: {confidence_text}\n"
             f"• Market-hours-only: {market_hours_only}\n"
             f"• Сегодня отправлено: {current_count}"
         )
@@ -1028,6 +1068,7 @@ class TelegramBotService:
                 "Команды:",
                 "• /quiet 22:00-07:00 или /quiet off",
                 "• /cap 3 или /cap off",
+                "• /confidence 0.75 или /confidence off",
                 "• /markethours on или /markethours off",
             ]
         )
@@ -1083,6 +1124,18 @@ class TelegramBotService:
             return None, "Daily cap must be a positive integer or /cap off."
         if parsed < 1:
             return None, "Daily cap must be a positive integer or /cap off."
+        return parsed, None
+
+    def _parse_confidence_threshold(self, value: str) -> tuple[float | None, str | None]:
+        raw = value.strip().lower()
+        if not raw or raw in {"off", "none", "clear", "unset"}:
+            return None, None
+        try:
+            parsed = float(raw)
+        except ValueError:
+            return None, "Используй /confidence 0.75 или /confidence off."
+        if parsed < 0 or parsed > 1:
+            return None, "Порог уверенности должен быть от 0 до 1, либо /confidence off."
         return parsed, None
 
     def _parse_toggle(self, value: str) -> tuple[bool, str | None]:
@@ -1146,6 +1199,8 @@ class TelegramBotService:
             watchlist_text = ", ".join(watchlist) if watchlist else "пусто"
             configured = self._configured_tickers()
             configured_tickers = ", ".join(configured) if configured else "пусто"
+            min_confidence = getattr(sub, "min_confidence", None)
+            min_confidence_text = "off" if min_confidence is None else f"{min_confidence:.2f}"
             send_budget = runtime_budget_snapshot(
                 "telegram_sends",
                 getattr(self.settings, "telegram_send_budget", None),
@@ -1161,6 +1216,7 @@ class TelegramBotService:
                 f"Telegram send budget: {budget_text}\n"
                 f"Твой список: {watchlist_text}\n"
                 f"Список для /scan: {configured_tickers}\n"
+                f"Порог уверенности: {min_confidence_text}\n"
                 f"{self._preferences_summary_text(sub)}"
             )
         finally:
@@ -1294,6 +1350,14 @@ class TelegramBotService:
         if lowered in {"/cap", "cap"}:
             return "preferences", []
 
+        if lowered.startswith("/confidence ") or lowered.startswith("confidence "):
+            parts = normalized.split(maxsplit=1)
+            if len(parts) == 2:
+                return "confidence", [parts[1].strip()]
+            return "confidence", []
+        if lowered in {"/confidence", "confidence"}:
+            return "preferences", []
+
         if lowered.startswith("/markethours ") or lowered.startswith("/market-hours ") or lowered.startswith("markethours "):
             parts = normalized.split(maxsplit=1)
             if len(parts) == 2:
@@ -1391,17 +1455,26 @@ class TelegramBotService:
         errors: list[Any],
         *,
         summary_notes: list[str] | None = None,
+        min_confidence: float | None = None,
     ) -> str:
-        if not results and not errors:
+        top = self._filter_results_by_confidence(results[:5], min_confidence)
+        hidden_count = len(results[:5]) - len(top)
+        if not top and not errors:
+            if min_confidence is not None and hidden_count:
+                return f"Нет результатов выше порога уверенности {min_confidence:.2f}."
             return "Ничего не найдено."
 
         lines = ["Результаты скана:"]
-        for item in results[:5]:
+        for item in top:
             recommendation = self._translate_recommendation(item.recommendation)
             lines.append(
                 f"{item.ticker}: {recommendation} | оценка {item.final_score:.2f} | цена {item.price:.2f}"
             )
             lines.append(f"  {self._translate_text(item.short_reason)}")
+        if min_confidence is not None:
+            lines.append(f"Порог уверенности: {min_confidence:.2f}")
+        if hidden_count:
+            lines.append(f"Скрыто низкоуверенных сигналов: {hidden_count}")
         if errors:
             lines.extend(["", *format_operation_summary(errors, summary_notes)])
             lines.append("Ошибки:")
@@ -1764,16 +1837,22 @@ class TelegramBotService:
         *,
         summary_notes: list[str] | None = None,
         digest_mode: str = "market_open",
+        min_confidence: float | None = None,
     ) -> str:
         limit = 5 if digest_mode == "weekly_review" else 3
-        top = results[:limit]
+        top = self._filter_results_by_confidence(results[:limit], min_confidence)
+        hidden_count = len(results[:limit]) - len(top)
         if not top and not errors:
+            if min_confidence is not None and hidden_count:
+                return f"Нет результатов выше порога уверенности {min_confidence:.2f}."
             return "Дайджест пуст: данных для отчёта нет."
 
         lines = [self._digest_heading(digest_mode)]
         digest_note = self._digest_mode_note(digest_mode)
         if digest_note:
             lines.extend(["", digest_note])
+        if min_confidence is not None:
+            lines.extend(["", f"Порог уверенности: {min_confidence:.2f}"])
         for item in top:
             recommendation = self._translate_recommendation(item.recommendation)
             lines.append(
@@ -1787,6 +1866,8 @@ class TelegramBotService:
         if summary_notes:
             lines.extend(["", "Операционные заметки:"])
             lines.extend(f"- {self._translate_text(note)}" for note in summary_notes)
+        if hidden_count:
+            lines.append(f"Скрыто низкоуверенных сигналов: {hidden_count}")
         disclaimer = self._scan_disclaimer(top)
         if disclaimer:
             lines.extend(["", disclaimer])
@@ -1813,6 +1894,22 @@ class TelegramBotService:
             "weekly_review": "Weekly review собирает контекст по сохранённым watchlist-тикерам и недельной динамике.",
         }
         return notes.get(digest_mode)
+
+    def _filter_results_by_confidence(self, results: list[Any], min_confidence: float | None) -> list[Any]:
+        if min_confidence is None:
+            return results
+        filtered: list[Any] = []
+        for item in results:
+            confidence = getattr(item, "confidence", None)
+            if not isinstance(confidence, (int, float)):
+                quality = getattr(item, "data_quality", None)
+                if isinstance(quality, dict):
+                    confidence = quality.get("confidence")
+                elif quality is not None:
+                    confidence = getattr(quality, "confidence", None)
+            if isinstance(confidence, (int, float)) and confidence >= min_confidence:
+                filtered.append(item)
+        return filtered
 
     def _scheduled_digest_mode(self, reference_time: datetime | None = None) -> str:
         reference = reference_time or datetime.now(timezone.utc)

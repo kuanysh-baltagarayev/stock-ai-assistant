@@ -79,7 +79,25 @@ class TelegramPreferenceTests(unittest.IsolatedAsyncioTestCase):
                     "message": {
                         "chat": {"id": 101},
                         "from": {"username": "alice"},
+                        "text": "/confidence 0.75",
+                    }
+                }
+            )
+            await self.service._handle_update(
+                {
+                    "message": {
+                        "chat": {"id": 101},
+                        "from": {"username": "alice"},
                         "text": "/prefs",
+                    }
+                }
+            )
+            await self.service._handle_update(
+                {
+                    "message": {
+                        "chat": {"id": 101},
+                        "from": {"username": "alice"},
+                        "text": "/status",
                     }
                 }
             )
@@ -90,9 +108,11 @@ class TelegramPreferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(subscription.quiet_hours_end_minute, 7 * 60)
         self.assertEqual(subscription.max_alerts_per_day, 2)
         self.assertTrue(subscription.market_hours_only)
-        self.assertEqual(send_mock.await_count, 4)
-        self.assertIn("Настройки уведомлений", send_mock.await_args_list[-1].args[1])
-        self.assertIn("Market-hours-only", send_mock.await_args_list[-1].args[1])
+        self.assertEqual(subscription.min_confidence, 0.75)
+        self.assertEqual(send_mock.await_count, 6)
+        self.assertIn("Настройки уведомлений", send_mock.await_args_list[-2].args[1])
+        self.assertIn("Минимальная уверенность: 0.75", send_mock.await_args_list[-2].args[1])
+        self.assertIn("Порог уверенности: 0.75", send_mock.await_args_list[-1].args[1])
 
     async def test_unsubscribe_clears_personal_data(self) -> None:
         self.service._upsert_subscription(

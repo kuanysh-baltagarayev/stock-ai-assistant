@@ -139,6 +139,7 @@ class TelegramSubscription(Base):
     quiet_hours_start_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
     quiet_hours_end_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_alerts_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    min_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     market_hours_only: Mapped[bool] = mapped_column(Boolean, default=False)
     daily_alert_count: Mapped[int] = mapped_column(Integer, default=0)
     daily_alert_date: Mapped[str | None] = mapped_column(String(10), nullable=True)

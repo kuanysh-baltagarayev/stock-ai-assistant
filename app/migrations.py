@@ -101,6 +101,23 @@ def _upgrade_0007_runtime_budget_counters(connection: Connection) -> None:
     Base.metadata.create_all(bind=connection, tables=[app.models.RuntimeBudgetCounter.__table__])
 
 
+def _upgrade_0008_telegram_min_confidence(connection: Connection) -> None:
+    columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("telegram_subscriptions")
+    }
+    if "min_confidence" in columns:
+        return
+    connection.execute(
+        text(
+            """
+            ALTER TABLE telegram_subscriptions
+            ADD COLUMN min_confidence FLOAT
+            """
+        )
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -136,6 +153,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0007_runtime_budget_counters",
         description="Persist runtime budget counters in SQLite.",
         upgrade=_upgrade_0007_runtime_budget_counters,
+    ),
+    Migration(
+        revision="0008_telegram_min_confidence",
+        description="Add per-chat Telegram minimum confidence threshold.",
+        upgrade=_upgrade_0008_telegram_min_confidence,
     ),
 )
 

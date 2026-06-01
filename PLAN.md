@@ -575,6 +575,7 @@ Status: in progress.
 8. Done: add Telegram chat allowlist via `TELEGRAM_ALLOWED_CHAT_IDS`.
 9. Done: add per-chat data deletion or cleanup behavior.
 10. Add alert deduplication and confidence thresholds.
+   Minimum confidence thresholds are now enforced in Telegram scan and digest flows; alert deduplication is still pending.
 11. Done: replace buy/sell-like labels with neutral research labels in API, CLI, Telegram, docs, and tests.
 12. Done: add contextual disclaimer behavior for first use, high-risk events, and major alerts.
 13. Do not add a web UI unless the user explicitly changes direction; Telegram is the primary user interface.

@@ -136,6 +136,9 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
                 momentum_score=analysis.scores.momentum_score,
                 valuation_score=analysis.scores.valuation_score,
                 risk_score=analysis.scores.risk_score,
+                confidence=getattr(getattr(analysis, "data_quality", None), "confidence", None)
+                if getattr(analysis, "data_quality", None) is not None
+                else None,
                 recommendation=analysis.recommendation,
                 short_reason=analysis.short_reason,
             )

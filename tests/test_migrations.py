@@ -27,6 +27,7 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("quiet_hours_start_minute", telegram_columns)
             self.assertIn("max_alerts_per_day", telegram_columns)
             self.assertIn("market_hours_only", telegram_columns)
+            self.assertIn("min_confidence", telegram_columns)
 
             with engine.connect() as connection:
                 revisions = connection.execute(
@@ -43,6 +44,7 @@ class MigrationTests(unittest.TestCase):
                     "0005_telegram_watchlists",
                     "0006_telegram_preferences",
                     "0007_runtime_budget_counters",
+                    "0008_telegram_min_confidence",
                 ],
             )
 
@@ -59,7 +61,7 @@ class MigrationTests(unittest.TestCase):
                     text("SELECT COUNT(*) FROM schema_migrations")
                 ).scalar_one()
 
-            self.assertEqual(revision_count, 7)
+            self.assertEqual(revision_count, 8)
 
     def test_init_db_uses_migrations(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

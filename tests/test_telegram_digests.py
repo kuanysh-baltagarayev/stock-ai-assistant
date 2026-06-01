@@ -89,3 +89,49 @@ class TelegramDigestModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(send_mock.await_count, 1)
         self.assertIn("Close summary дайджест", send_mock.await_args.args[1])
         self.assertIn("event calendar", send_mock.await_args.args[1].lower())
+
+    async def test_scheduled_digest_filters_low_confidence_results(self) -> None:
+        self.service._upsert_subscription(
+            1001,
+            username="alice",
+            active=True,
+            watchlist_symbols=["AAPL"],
+            preferences={"min_confidence": 0.8},
+        )
+        fake_scan = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="AAPL",
+                    recommendation="NEUTRAL",
+                    final_score=61.0,
+                    price=189.12,
+                    short_reason="high confidence signal",
+                    confidence=0.93,
+                ),
+                SimpleNamespace(
+                    ticker="MSFT",
+                    recommendation="NEUTRAL",
+                    final_score=54.0,
+                    price=101.25,
+                    short_reason="low confidence signal",
+                    confidence=0.41,
+                ),
+            ],
+            errors=[],
+            summary=SimpleNamespace(partial_failure=False, message="ok", failed_tickers=[]),
+        )
+        send_mock = AsyncMock()
+
+        with (
+            patch("app.services.telegram_bot.scan_tickers", return_value=fake_scan),
+            patch.object(self.service, "_send_message", send_mock),
+            patch.object(self.service, "_scheduled_digest_mode", return_value="close"),
+        ):
+            await self.service._send_digest_to_active_subscribers()
+
+        self.assertEqual(send_mock.await_count, 1)
+        payload = send_mock.await_args.args[1]
+        self.assertIn("Порог уверенности: 0.80", payload)
+        self.assertIn("Скрыто низкоуверенных сигналов: 1", payload)
+        self.assertIn("AAPL", payload)
+        self.assertNotIn("MSFT", payload)

@@ -96,6 +96,7 @@ class ScanResult(BaseModel):
     momentum_score: float
     valuation_score: float
     risk_score: float
+    confidence: float | None = None
     recommendation: Recommendation
     short_reason: str
 

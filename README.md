@@ -17,6 +17,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - `GET /providers` and `GET /providers/{name}` expose provider registry entries and health.
 - CLI scanner for a default watchlist, custom tickers, JSON output, and recent-analysis reports.
 - Telegram bot with `/analyze`, `/scan`, watchlists, preferences, source-backed detail commands, and session-aware scheduled digests.
+- Telegram alert preferences include quiet hours, daily caps, minimum confidence, and market-hours-only mode via `/quiet`, `/cap`, `/confidence`, and `/markethours`.
 - Telegram `/coverage` command and API `/coverage` endpoint for supported markets, asset classes, source tiers, calendars, currencies, and known gaps.
 - Telegram analysis responses include inline follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
 - Telegram analysis and detail responses surface data-quality warnings for stale, delayed, low-confidence, or source-disagreeing data.
