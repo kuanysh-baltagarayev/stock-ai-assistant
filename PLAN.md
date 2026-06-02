@@ -565,9 +565,23 @@ Suggested order for low-waste progress:
      output through `news_relevant_for_sectors()` before building each digest.
    - 11 new tests (7 in `test_news_collector`, 2 in `test_telegram_digests`).
 
-10. Next: enrich event-aware scoring and alerts with broader political/regulatory
-    catalysts and route those breaking-event alerts by subscribed ticker, sector,
-    or macro watchlist instead of only generic high-impact pushes.
+10. Done: enrich event-aware scoring with political/regulatory catalysts derived
+    from breaking news so tariff, sanction, antitrust, and regulatory headlines
+    materially raise the risk score for affected sectors.
+    - `app/services/news_collector.py`: `_POLITICAL_KEYWORDS` set,
+      `political_risk_level_from_news()` detects "elevated" or "high" risk
+      from macro news items filtered by source reliability and sentiment strength.
+    - `app/services/macro_context.py`: `political_risk_level` field on
+      `MacroContext`; `build_macro_context()` now accepts optional `news_context`
+      and surfaces political risk in `macro_context_summary()` notes.
+    - `app/services/scoring.py`: `_political_regulatory_catalyst()` maps risk
+      level to an `EventCatalyst` with sector-specific amplification
+      (Industrials/Materials for tariffs, Technology for antitrust/export,
+      Financials for banking regulation, Energy for sanctions).
+    - `app/services/scanner.py`: news is now collected before `build_macro_context`
+      so political risk feeds into scoring; `_build_news` refactored into
+      `_collect_news_context` + `_build_news_payload`.
+    - 13 new tests across `test_macro_aware_scoring` and `test_news_collector`.
 
 ## Operations, Budgets, And Runtime Boundaries
 

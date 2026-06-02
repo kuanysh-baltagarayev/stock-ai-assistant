@@ -342,5 +342,125 @@ class MacroAwareScoringTests(unittest.TestCase):
         self.assertTrue(any("earnings reactions tend to be sharper" in reason for reason in tech.reasons))
 
 
+class PoliticalRegulatoryRiskTests(unittest.TestCase):
+    def _make_macro(self, political_risk_level: str | None, sector: str = "Technology") -> MacroContext:
+        return MacroContext(
+            reference_date=datetime.now(timezone.utc),
+            upcoming_high_impact_events=[],
+            recent_macro_data={},
+            volatility_level="low",
+            rate_direction="stable",
+            inflation_level="moderate",
+            political_risk_level=political_risk_level,
+        )
+
+    def _base_inputs(self, sector: str = "Technology"):
+        technicals = TechnicalIndicators(
+            moving_average_50=145.0,
+            moving_average_200=140.0,
+            change_1d_pct=0.5,
+            change_1m_pct=2.0,
+            rsi=50.0,
+        )
+        fundamentals = Fundamentals(
+            company_name="Test Inc.",
+            sector=sector,
+            pe_ratio=20.0,
+        )
+        return technicals, fundamentals
+
+    def test_no_political_risk_baseline(self) -> None:
+        technicals, fundamentals = self._base_inputs()
+        macro = self._make_macro(None)
+        result = score_stock(150.0, technicals, fundamentals, macro_context=macro)
+        self.assertNotIn("political", " ".join(result.reasons).lower())
+
+    def test_elevated_political_risk_raises_risk_score(self) -> None:
+        technicals, fundamentals = self._base_inputs()
+        macro_no_risk = self._make_macro(None)
+        macro_elevated = self._make_macro("elevated")
+        result_baseline = score_stock(150.0, technicals, fundamentals, macro_context=macro_no_risk)
+        result_elevated = score_stock(150.0, technicals, fundamentals, macro_context=macro_elevated)
+        self.assertGreater(result_elevated.scores.risk_score, result_baseline.scores.risk_score)
+
+    def test_high_political_risk_raises_risk_score_more_than_elevated(self) -> None:
+        technicals, fundamentals = self._base_inputs()
+        macro_elevated = self._make_macro("elevated")
+        macro_high = self._make_macro("high")
+        result_elevated = score_stock(150.0, technicals, fundamentals, macro_context=macro_elevated)
+        result_high = score_stock(150.0, technicals, fundamentals, macro_context=macro_high)
+        self.assertGreater(result_high.scores.risk_score, result_elevated.scores.risk_score)
+
+    def test_tech_sector_amplified_by_regulatory_risk(self) -> None:
+        """Technology sector gets amplified risk due to antitrust/export keyword match."""
+        tech_technicals, tech_fundamentals = self._base_inputs("Technology")
+        utilities_technicals, utilities_fundamentals = self._base_inputs("Utilities")
+        macro = self._make_macro("elevated")
+        tech_result = score_stock(150.0, tech_technicals, tech_fundamentals, macro_context=macro)
+        utilities_result = score_stock(150.0, utilities_technicals, utilities_fundamentals, macro_context=macro)
+        self.assertGreater(tech_result.scores.risk_score, utilities_result.scores.risk_score)
+
+    def test_industrials_sector_amplified_by_tariff_risk(self) -> None:
+        """Industrials sector gets amplified risk (tariff/trade war exposure)."""
+        ind_technicals, ind_fundamentals = self._base_inputs("Industrials")
+        staples_technicals, staples_fundamentals = self._base_inputs("Consumer Staples")
+        macro = self._make_macro("elevated")
+        ind_result = score_stock(150.0, ind_technicals, ind_fundamentals, macro_context=macro)
+        staples_result = score_stock(150.0, staples_technicals, staples_fundamentals, macro_context=macro)
+        self.assertGreater(ind_result.scores.risk_score, staples_result.scores.risk_score)
+
+    def test_political_risk_reason_in_output(self) -> None:
+        technicals, fundamentals = self._base_inputs()
+        macro = self._make_macro("high")
+        result = score_stock(150.0, technicals, fundamentals, macro_context=macro)
+        self.assertTrue(any("political" in r.lower() or "regulatory" in r.lower() for r in result.reasons))
+
+
+class PoliticalRiskFromNewsTests(unittest.TestCase):
+    def _make_news_item(self, title: str, score: float = -0.5, source: str = "Reuters") -> object:
+        from app.services.news_collector import NewsItem
+        return NewsItem(
+            title=title, url=None, source=source, published_at=None, summary=None,
+            sentiment_score=score, sentiment_label="negative",
+            relevance=None, category="macro",
+        )
+
+    def test_no_political_news_returns_none(self) -> None:
+        from app.services.news_collector import NewsContext, political_risk_level_from_news
+        ctx = NewsContext(items=[self._make_news_item("Markets rally on earnings")])
+        self.assertIsNone(political_risk_level_from_news(ctx))
+
+    def test_one_tariff_headline_returns_elevated(self) -> None:
+        from app.services.news_collector import NewsContext, political_risk_level_from_news
+        ctx = NewsContext(items=[self._make_news_item("New tariffs on Chinese goods announced")])
+        self.assertEqual(political_risk_level_from_news(ctx), "elevated")
+
+    def test_two_political_headlines_return_high(self) -> None:
+        from app.services.news_collector import NewsContext, political_risk_level_from_news
+        ctx = NewsContext(items=[
+            self._make_news_item("New tariffs on Chinese goods announced"),
+            self._make_news_item("FTC opens antitrust probe into Big Tech"),
+        ])
+        self.assertEqual(political_risk_level_from_news(ctx), "high")
+
+    def test_low_weight_source_ignored(self) -> None:
+        from app.services.news_collector import NewsContext, political_risk_level_from_news
+        ctx = NewsContext(items=[self._make_news_item("Tariff news", source=None)])
+        self.assertIsNone(political_risk_level_from_news(ctx))
+
+    def test_build_macro_context_with_news_sets_political_risk(self) -> None:
+        from app.services.news_collector import NewsContext
+        from app.services.macro_context import build_macro_context
+        news_item = self._make_news_item("New tariffs imposed on EU steel imports")
+        ctx = NewsContext(items=[news_item])
+        macro = build_macro_context(datetime.now(timezone.utc), news_context=ctx)
+        self.assertEqual(macro.political_risk_level, "elevated")
+
+    def test_build_macro_context_without_news_has_no_political_risk(self) -> None:
+        from app.services.macro_context import build_macro_context
+        macro = build_macro_context(datetime.now(timezone.utc), news_context=None)
+        self.assertIsNone(macro.political_risk_level)
+
+
 if __name__ == "__main__":
     unittest.main()

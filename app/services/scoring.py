@@ -285,6 +285,7 @@ def _event_catalyst_risk_adjustment(
         _macro_event_catalyst(macro_context, sector=sector)
         + _company_event_catalyst(event_calendar, sector=sector, now=now)
         + _sec_filing_catalyst(sec_filings, now=now)
+        + _political_regulatory_catalyst(macro_context, sector=sector)
     )
     if not catalysts:
         return 0.0, []
@@ -496,6 +497,48 @@ def _sec_filing_catalyst(
             strongest = catalyst
 
     return [strongest] if strongest is not None else []
+
+
+# Sectors with heightened sensitivity to specific political/regulatory catalysts.
+_POLITICAL_SECTOR_AMPLIFIERS: dict[str, list[str]] = {
+    "Industrials": ["tariff", "trade war", "import", "export restriction"],
+    "Materials": ["tariff", "steel", "aluminum", "sanctions"],
+    "Technology": ["antitrust", "regulation", "tiktok", "huawei", "export restriction", "ftc"],
+    "Financials": ["regulation", "banking regulation", "doj", "sec fine"],
+    "Energy": ["sanctions", "iran", "geopolit", "national security"],
+    "Consumer Discretionary": ["tariff", "trade war"],
+}
+
+
+def _political_regulatory_catalyst(
+    macro_context: "MacroContext | None",
+    *,
+    sector: str | None = None,
+) -> list[EventCatalyst]:
+    """Return a catalyst when political/regulatory risk is detected in breaking news."""
+    if macro_context is None:
+        return []
+    risk_level = getattr(macro_context, "political_risk_level", None)
+    if not risk_level:
+        return []
+
+    base_severity = 8.0 if risk_level == "high" else 5.0
+    reason_suffix = ""
+
+    if sector:
+        amplifiers = _POLITICAL_SECTOR_AMPLIFIERS.get(sector)
+        if amplifiers:
+            base_severity = round(min(base_severity * 1.3, 12.0), 2)
+            reason_suffix = f"; {sector} is directly exposed to regulatory/trade risk"
+
+    level_label = "multiple political/regulatory catalysts are active" if risk_level == "high" else "a political/regulatory catalyst is active"
+    return [
+        EventCatalyst(
+            category="political_regulatory",
+            severity=round(base_severity, 2),
+            reason=level_label + reason_suffix,
+        )
+    ]
 
 
 def _parse_filing_date(value: object) -> datetime | None:

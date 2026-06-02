@@ -23,11 +23,13 @@ class MacroContext:
     volatility_level: str  # "low", "medium", "high"
     rate_direction: str | None  # "rising", "falling", "stable", None
     inflation_level: str | None  # "low", "moderate", "elevated", None
+    political_risk_level: str | None = None  # None, "elevated", "high"
 
 
 def build_macro_context(
     reference_date: datetime,
     fred_latest: dict[str, Any] | None = None,
+    news_context: Any | None = None,
 ) -> MacroContext:
     """Build macroeconomic context from available data.
 
@@ -64,6 +66,11 @@ def build_macro_context(
     # Inflation level from CPI (simplified)
     inflation_level = _infer_inflation_level(inflation)
 
+    political_risk_level: str | None = None
+    if news_context is not None:
+        from app.services.news_collector import political_risk_level_from_news
+        political_risk_level = political_risk_level_from_news(news_context)
+
     return MacroContext(
         reference_date=reference_date,
         upcoming_high_impact_events=event_names,
@@ -75,6 +82,7 @@ def build_macro_context(
         volatility_level=volatility_level,
         rate_direction=rate_direction,
         inflation_level=inflation_level,
+        political_risk_level=political_risk_level,
     )
 
 
@@ -111,6 +119,18 @@ def macro_context_summary(macro: MacroContext) -> list[str]:
     if macro.rate_direction == "rising":
         notes.append(
             "Федеральная ставка растёт. Это давит на оценку высокорастущих компаний."
+        )
+
+    # Political/regulatory risk from breaking news
+    if macro.political_risk_level == "high":
+        notes.append(
+            "Высокий политический/регуляторный риск: несколько острых новостей о тарифах, "
+            "санкциях или регулировании. Возможна повышенная волатильность."
+        )
+    elif macro.political_risk_level == "elevated":
+        notes.append(
+            "Политический/регуляторный риск повышен: значимые новости о тарифах, "
+            "санкциях или регулировании."
         )
 
     return notes

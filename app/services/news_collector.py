@@ -149,6 +149,42 @@ def news_relevant_for_sectors(
     ]
 
 
+# Keywords that indicate political or regulatory risk rather than pure economics.
+_POLITICAL_KEYWORDS = {
+    "tariff", "tariffs", "trade war", "sanction", "sanctions", "antitrust",
+    "regulation", "regulatory", "ban", "banned", "export restriction", "import ban",
+    "geopolit", "election", "debt ceiling", "government shutdown", "executive order",
+    "congress", "senate", "legislation", "sec fine", "doj", "ftc probe", "ftc",
+    "national security", "espionage", "tiktok ban", "huawei", "iran", "china ban",
+}
+
+
+def political_risk_level_from_news(
+    context: "NewsContext",
+    *,
+    min_abs_score: float = 0.2,
+    min_weight: float = 0.6,
+) -> str | None:
+    """Derive a political/regulatory risk level from macro news items.
+
+    Returns ``"high"``, ``"elevated"``, or ``None``.
+    Only macro/market-category items with political keywords are considered.
+    """
+    political_items = [
+        item for item in context.items
+        if item.category in {"macro", "market"}
+        and item.sentiment_score is not None
+        and abs(item.sentiment_score) >= min_abs_score
+        and item.source_weight >= min_weight
+        and any(kw in item.title.lower() for kw in _POLITICAL_KEYWORDS)
+    ]
+    if len(political_items) >= 2:
+        return "high"
+    if len(political_items) == 1:
+        return "elevated"
+    return None
+
+
 @dataclass(frozen=True)
 class NewsItem:
     title: str

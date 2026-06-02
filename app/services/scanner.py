@@ -24,7 +24,7 @@ from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.fred_collector import fetch_macro_indicators
 from app.services.macro_context import build_macro_context, macro_context_summary
-from app.services.news_collector import build_news_context, high_impact_news
+from app.services.news_collector import NewsContext, build_news_context, high_impact_news
 from app.services.risk_overlay import calculate_risk_overlay, risk_overlay_notes
 from app.services.sector_sensitivity import macro_impact_notes, get_sector_sensitivity
 from app.services.instruments import upsert_instrument
@@ -61,9 +61,12 @@ def analyze_ticker(
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
 
-    # Build macro context for adaptive scoring
+    # Build macro context for adaptive scoring; collect news first so political
+    # risk from breaking headlines can feed into the catalyst risk layer.
     generated_at = datetime.now(timezone.utc)
-    macro = build_macro_context(generated_at)
+    settings = get_settings()
+    news_context = _collect_news_context(market["ticker"], settings, include_news)
+    macro = build_macro_context(generated_at, news_context=news_context)
     sec_filings_payload = _build_sec_filings_payload(edgar_collection)
     scoring = score_stock(
         market["price"],
@@ -77,9 +80,8 @@ def analyze_ticker(
 
     if db is not None:
         _save_instrument(db, market["ticker"], market["info"], market["currency"])
-    settings = get_settings()
     market_session = _build_market_session(market)
-    news_payload, news_notes = _build_news(market["ticker"], settings, include_news)
+    news_payload, news_notes = _build_news_payload(news_context)
 
     payload = {
         "ticker": market["ticker"],
@@ -139,23 +141,28 @@ def analyze_ticker(
     return response
 
 
-def _build_news(
+def _collect_news_context(
     symbol: str, settings: Any, include_news: bool
-) -> tuple[dict[str, Any] | None, list[str]]:
-    """Build the news payload and operation notes; never raises."""
+) -> NewsContext | None:
+    """Fetch NewsContext for a ticker; returns None when disabled or on error."""
     if not include_news:
-        return None, []
+        return None
     try:
-        context = build_news_context(symbol, settings)
+        return build_news_context(symbol, settings)
     except Exception:
         logger.warning(
             "news_context_failed",
             extra={"component": "news", "ticker": symbol},
             exc_info=True,
         )
-        return None, []
+        return None
 
-    if not context.items:
+
+def _build_news_payload(
+    context: NewsContext | None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Build the news payload dict and operation notes from a NewsContext."""
+    if context is None or not context.items:
         return None, []
 
     payload = {
@@ -185,6 +192,14 @@ def _build_news(
         direction = "negative" if (item.sentiment_score or 0) < 0 else "positive"
         notes.append(f"High-impact news ({direction}, {item.source}): {item.title}")
     return payload, notes
+
+
+def _build_news(
+    symbol: str, settings: Any, include_news: bool
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Legacy wrapper kept for callers outside analyze_ticker."""
+    ctx = _collect_news_context(symbol, settings, include_news)
+    return _build_news_payload(ctx)
 
 
 def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
