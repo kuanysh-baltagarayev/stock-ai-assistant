@@ -665,6 +665,65 @@ class AppSmokeTests(unittest.TestCase):
             or any("ex-dividend" in note.lower() for note in response.operation_notes)
         )
 
+    def test_analyze_ticker_adds_sector_adjusted_event_risk_notes(self) -> None:
+        market = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "info": {
+                "sector": "Technology",
+            },
+            "event_calendar": {
+                "summary": "Next earnings around 2026-06-03",
+                "upcoming_events": [
+                    {
+                        "name": "earnings",
+                        "scheduled_at": datetime(2026, 6, 3, 20, 0, tzinfo=timezone.utc),
+                    }
+                ],
+            },
+            "data_quality": {"summary": "ok"},
+        }
+        fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
+        technicals = TechnicalIndicators(change_1d_pct=1.0)
+        scoring = SimpleNamespace(
+            scores=Scores(
+                momentum_score=60.0,
+                valuation_score=55.0,
+                risk_score=42.0,
+                final_score=60.5,
+            ),
+            recommendation="WATCH",
+            short_reason="Watch: sample reason.",
+            reasons=["earnings are imminent and can sharply raise event risk; Technology earnings reactions tend to be sharper"],
+        )
+
+        with (
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_market_data", return_value=market),
+            patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
+            patch("app.services.scanner.calculate_indicators", return_value=technicals),
+            patch("app.services.scanner.score_stock", return_value=scoring),
+            patch("app.services.scanner.explain_analysis", return_value="Mock explanation"),
+            patch(
+                "app.services.scanner.build_macro_context",
+                return_value=SimpleNamespace(
+                    upcoming_high_impact_events=["FOMC", "CPI"],
+                    rate_direction="rising",
+                    inflation_level="elevated",
+                    volatility_level="high",
+                    recent_macro_data={},
+                ),
+            ),
+        ):
+            response = analyze_ticker("aapl", db=None, use_ai_explanation=True)
+
+        self.assertTrue(
+            any("Sector-adjusted event risk:" in note for note in response.operation_notes),
+            response.operation_notes,
+        )
+
     def test_market_data_builds_event_calendar_from_profile_fields(self) -> None:
         history = pd.DataFrame(
             {"Close": [100.0, 101.0, 102.0]},

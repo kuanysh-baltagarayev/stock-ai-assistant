@@ -582,6 +582,7 @@ def _build_operation_notes(
     notes.extend(_sec_filing_notes(str(market.get("ticker") or "UNKNOWN"), sec_filings))
     notes.extend(_economic_events_notes(generated_at))
     notes.extend(_macro_context_notes(generated_at))
+    notes.extend(_sector_catalyst_notes(market.get("info", {}).get("sector"), event_calendar, generated_at))
     notes.extend(_sector_sensitivity_notes(market.get("info", {}).get("sector"), generated_at))
     notes.extend(
         _risk_overlay_notes(
@@ -783,6 +784,58 @@ def _sector_sensitivity_notes(sector: str | None, generated_at: Any) -> list[str
         return []
 
 
+def _sector_catalyst_notes(
+    sector: str | None,
+    event_calendar: Any,
+    generated_at: Any,
+) -> list[str]:
+    """Explain when sector sensitivity is materially shaping catalyst risk."""
+    if not sector or not isinstance(generated_at, datetime):
+        return []
+
+    sensitivity = get_sector_sensitivity(sector)
+    if sensitivity is None:
+        return []
+
+    notes: list[str] = []
+
+    try:
+        macro = build_macro_context(generated_at)
+        if macro.upcoming_high_impact_events:
+            if macro.rate_direction == "rising" and sensitivity.fed_rate_sensitivity <= -0.5:
+                notes.append(
+                    f"Sector-adjusted event risk: {sector} may react more sharply to upcoming macro events because rising rates tend to pressure this sector."
+                )
+            elif macro.rate_direction == "rising" and sensitivity.fed_rate_sensitivity >= 0.4:
+                notes.append(
+                    f"Sector-adjusted event risk: {sector} is relatively more resilient to rising-rate macro events than most sectors."
+                )
+            elif macro.inflation_level == "elevated" and sensitivity.inflation_sensitivity <= -0.2:
+                notes.append(
+                    f"Sector-adjusted event risk: elevated inflation can amplify near-term catalyst risk for {sector}."
+                )
+
+        nearest_earnings_days = _nearest_earnings_days(event_calendar, generated_at)
+        if nearest_earnings_days is not None and nearest_earnings_days <= 14:
+            if sensitivity.growth_sensitivity >= 0.65:
+                notes.append(
+                    f"Sector-adjusted event risk: upcoming earnings may move {sector} names more sharply than defensive sectors."
+                )
+            elif sensitivity.growth_sensitivity <= 0.25:
+                notes.append(
+                    f"Sector-adjusted event risk: upcoming earnings are usually less disruptive for {sector} than for high-growth sectors."
+                )
+    except Exception:
+        logger.debug(
+            "sector_catalyst_notes_failed",
+            extra={"component": "sector_sensitivity", "sector": sector},
+            exc_info=True,
+        )
+        return []
+
+    return notes
+
+
 def _risk_overlay_notes(
     risk_score: float,
     sector: str | None,
@@ -841,6 +894,48 @@ def _economic_events_notes(generated_at: Any) -> list[str]:
         notes.append(f"Upcoming high-impact economic events: {event_names}.")
 
     return notes
+
+
+def _nearest_earnings_days(event_calendar: Any, now: datetime) -> int | None:
+    events = getattr(event_calendar, "upcoming_events", None)
+    if events is None and isinstance(event_calendar, dict):
+        events = event_calendar.get("upcoming_events")
+    if not events:
+        return None
+
+    nearest: int | None = None
+    for event in events:
+        if isinstance(event, dict):
+            name = str(event.get("name") or "").lower()
+            scheduled_at = event.get("scheduled_at") or event.get("window_start_at")
+        else:
+            name = str(getattr(event, "name", "")).lower()
+            scheduled_at = getattr(event, "scheduled_at", None) or getattr(event, "window_start_at", None)
+        if name != "earnings":
+            continue
+        scheduled_dt = _parse_datetime_like(scheduled_at)
+        if scheduled_dt is None:
+            continue
+        days_until = (scheduled_dt.date() - now.date()).days
+        if days_until < 0:
+            continue
+        if nearest is None or days_until < nearest:
+            nearest = days_until
+    return nearest
+
+
+def _parse_datetime_like(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _save_macro_indicators(db: Session) -> None:

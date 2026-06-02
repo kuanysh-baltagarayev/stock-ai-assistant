@@ -213,7 +213,10 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
             },
             "event_calendar": event_calendar,
             "sec_filings": sec_filings,
-            "operation_notes": [],
+            "operation_notes": [
+                "Sector-adjusted event risk: Technology may react more sharply to upcoming macro events because rising rates tend to pressure this sector.",
+                "Sector-adjusted event risk: upcoming earnings may move Technology names more sharply than defensive sectors.",
+            ],
         }
 
     async def test_detail_commands_use_saved_snapshots(self) -> None:
@@ -282,6 +285,8 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("risk context", send_mock.await_args_list[3].args[1].lower())
         self.assertIn("recent sec filings", send_mock.await_args_list[3].args[1].lower())
         self.assertIn("10-q", send_mock.await_args_list[3].args[1].lower())
+        self.assertIn("risk drivers", send_mock.await_args_list[3].args[1].lower())
+        self.assertIn("sector-adjusted event", send_mock.await_args_list[3].args[1].lower())
         self.assertIn("event and session context", send_mock.await_args_list[4].args[1])
         self.assertIn("upcoming company events", send_mock.await_args_list[4].args[1].lower())
         self.assertIn("changes vs older snapshot", send_mock.await_args_list[5].args[1].lower())

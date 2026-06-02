@@ -236,6 +236,10 @@ class FormattingMixin:
         if quality_lines:
             lines.extend(["", "Quality warnings:"])
             lines.extend(f"- {line}" for line in quality_lines)
+        risk_notes = self._risk_driver_lines(payload.get("operation_notes") or [])
+        if risk_notes:
+            lines.extend(["", "Risk drivers:"])
+            lines.extend(f"- {line}" for line in risk_notes)
         event_lines = self._event_calendar_lines(event_calendar)
         if event_lines:
             lines.extend(["", "Upcoming company events:"])
@@ -248,6 +252,21 @@ class FormattingMixin:
                 ]
             )
         return self._trim_message("\n".join(lines))
+
+    def _risk_driver_lines(self, operation_notes: list[Any]) -> list[str]:
+        risk_markers = (
+            "Sector-adjusted event risk:",
+            "Upcoming high-impact economic events:",
+            "Risk overlay:",
+            "SEC filing",
+            "Recent SEC filings:",
+        )
+        lines: list[str] = []
+        for note in operation_notes:
+            text = str(note)
+            if any(marker in text for marker in risk_markers):
+                lines.append(self._translate_text(text))
+        return lines[:5]
 
     def _freshness_text(self, ticker: str) -> str:
         snapshot = self._latest_analysis_snapshot(ticker)
@@ -277,6 +296,10 @@ class FormattingMixin:
         if quality_lines:
             lines.extend(["", "Quality warnings:"])
             lines.extend(f"- {line}" for line in quality_lines)
+        risk_notes = self._risk_driver_lines(payload.get("operation_notes") or [])
+        if risk_notes:
+            lines.extend(["", "Risk drivers:"])
+            lines.extend(f"- {line}" for line in risk_notes)
         event_lines = self._event_calendar_lines(event_calendar)
         if event_lines:
             lines.extend(["", "Upcoming company events:"])
@@ -312,6 +335,10 @@ class FormattingMixin:
         if quality_lines:
             lines.extend(["", "Quality warnings:"])
             lines.extend(f"- {line}" for line in quality_lines)
+        risk_notes = self._risk_driver_lines(payload.get("operation_notes") or [])
+        if risk_notes:
+            lines.extend(["", "Risk drivers:"])
+            lines.extend(f"- {line}" for line in risk_notes)
         event_lines = self._event_calendar_lines(event_calendar)
         if event_lines:
             lines.extend(["", "Upcoming company events:"])

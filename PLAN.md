@@ -35,7 +35,7 @@ Implemented:
 - FastAPI app with `/`, `/health`, `/analyze/{ticker}`, `/scan`, and `/analyses/recent`.
 - FastAPI coverage matrix endpoint at `/coverage`.
 - Deterministic technical indicators and scoring.
-- Market data retrieval through `yfinance`.
+- Market data retrieval through `yfinance`, with Finnhub real-time quote preference for the latest current price when `FINNHUB_API_KEY` is configured.
 - Optional OpenAI explanation with rule-based fallback.
 - SQLite snapshot persistence.
 - SQLite raw source snapshot persistence with provenance metadata and content hashes.
@@ -50,10 +50,15 @@ Implemented:
 - Per-chat Telegram watchlists with `/watchlist`, `/add`, `/remove`, and `/scan mine`.
 - Telegram access control via `TELEGRAM_ALLOWED_CHAT_IDS` allowlist.
 - Telegram alert preferences with quiet hours, daily caps, and market-hours-only digests.
+- Telegram threshold/move/signal alerts with deduplication, confidence gating, and push delivery for high-impact updates.
+- Telegram portfolio holdings and P&L tracking through `/buy`, `/sell`, and `/holdings`.
+- Telegram `/chart` image generation for quick price and moving-average context.
+- Ticker, market, macro, and political news collection with lightweight sentiment scoring and Telegram `/news` views.
 - Telegram source-backed detail commands for saved analysis and source snapshots, including audit comparisons across saved snapshots.
 - Telegram analysis follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
 - Telegram `/coverage` command that exposes the supported coverage matrix and known gaps.
 - Telegram company event calendar summaries derived from yfinance profile fields, including earnings and dividend hints.
+- Telegram main keyboard grouped into clearer analysis, news, alert, and portfolio sections.
 - `analyze_ticker` now threads recent SEC EDGAR filing summaries into the main
   analysis payload, operation notes, and Telegram risk/detail views.
 - Recent SEC filing types and recency now feed into scoring as explicit
@@ -88,6 +93,14 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-02: `scripts/check.sh` passed after propagating sector-aware catalyst
+  context into API/Telegram risk text and rule-based explanations, with targeted
+  app/Telegram/scoring coverage plus the full repo verification script.
+- 2026-06-02: `scripts/check.sh` passed after making macro and earnings
+  event-risk sector-sensitive, with targeted scoring coverage plus the full repo
+  verification script.
+- 2026-06-02: `scripts/test_fast.sh` passed on the current branch while syncing
+  `PLAN.md` with the latest Finnhub/news/alert/chart/portfolio feature set.
 - 2026-06-01: `scripts/check.sh` passed after making event-risk scoring
   cluster-aware across earnings dates, recent SEC filings, and high-impact macro
   events, with `ruff`, 274 coverage-wrapped tests, coverage report, and compile
@@ -260,9 +273,15 @@ Implemented:
 - Secrets hygiene is implicit through `.gitignore`, but there is no explicit security checklist yet.
 - Local runtime notes for Telegram bot operation are not defined yet.
 - No user-facing UI exists yet; API, CLI, and Telegram flows are the current product surface.
-- Source coverage is still narrow: the app currently depends on `yfinance` for market data and does not yet ingest live news or other open web sources.
-- Session awareness is now present for U.S. equities in the core analysis path, but broader exchange calendars and news freshness windows for economy and politics are still not modeled.
-- Telegram UX is still basic: it still lacks live news ingestion and configurable digest calendars.
+- Source coverage is still narrow: the app now combines `yfinance`, Finnhub, SEC
+  EDGAR, Alpha Vantage, and GDELT in a U.S.-centric setup, but it still lacks
+  broader official macro feeds, deeper multi-market coverage, and richer
+  cross-provider reconciliation.
+- Session awareness is present for U.S. equities in the core analysis path, but
+  broader exchange calendars and timezone-complete freshness windows for global
+  markets are still not modeled.
+- Telegram UX is materially broader now, but digest scheduling and preference
+  control are still basic compared with the target job model.
 - Risk controls are incomplete: the app does not yet separate short-term trading context from long-term research, and it still does not show source coverage gaps in every Telegram answer.
 - Instrument identity exists for the U.S.-centric MVP, but cross-listing mapping, provider aliases, and global identifier coverage remain incomplete.
 - Corporate actions are currently represented as a raw-close policy with no auto-adjustment, and broader adjusted-price handling is still limited.
@@ -514,9 +533,30 @@ Suggested order for low-waste progress:
    - Focused tests now cover routine filing risk, distant earnings, and
      multi-signal catalyst clusters.
 
-7. Next: feed sector sensitivity into the same event-risk layer so macro and
+7. Done: feed sector sensitivity into the same event-risk layer so macro and
    earnings catalysts hit sectors asymmetrically instead of treating all
    tickers as equally exposed to the same calendar.
+   - `app/services/scoring.py` now uses sector sensitivity profiles to amplify
+     or dampen macro-event and earnings catalyst severity based on sector rate,
+     inflation, and growth exposure.
+   - `tests/test_macro_aware_scoring.py` now proves that rising-rate macro risk
+     hits Technology harder than Financials, and that earnings risk hits
+     growth-sensitive sectors harder than defensive ones.
+
+8. Done: propagate sector-aware catalyst context into user-facing explanation
+   layers so Telegram/API risk text distinguishes generic event risk from
+   sector-specific macro and earnings exposure.
+   - `app/services/scanner.py` now emits explicit sector-adjusted catalyst notes
+     into `operation_notes` when macro or earnings catalysts should hit a sector
+     harder or softer than average.
+   - `app/services/telegram/_formatting.py` now surfaces those notes in the
+     stored `/risk` view under a dedicated risk-drivers block.
+   - `app/services/ai_explainer.py` now translates the newer macro/earnings
+     catalyst reasons so rule-based explanations remain readable in Russian.
+
+9. Next: enrich event-aware scoring and alerts with broader political/regulatory
+   catalysts and route those breaking-event alerts by subscribed ticker, sector,
+   or macro watchlist instead of only generic high-impact pushes.
 
 ## Operations, Budgets, And Runtime Boundaries
 
@@ -656,21 +696,26 @@ Status: in progress.
    Telegram scan and digest flows now enforce minimum confidence thresholds, and scheduled digests skip duplicate payloads until content changes.
 11. Done: replace buy/sell-like labels with neutral research labels in API, CLI, Telegram, docs, and tests.
 12. Done: add contextual disclaimer behavior for first use, high-risk events, and major alerts.
-13. Do not add a web UI unless the user explicitly changes direction; Telegram is the primary user interface.
+13. Done: add Telegram `/news` views for ticker-specific and market/macro context with concise sentiment summaries.
+14. Done: add Telegram threshold/move/signal alerts plus push delivery for high-impact news and price moves.
+15. Done: add Telegram portfolio holdings and P&L tracking with `/buy`, `/sell`, and `/holdings`.
+16. Done: add Telegram `/chart` image generation for quick visual price review.
+17. Done: reorganize the Telegram main keyboard into clearer workflow sections.
+18. Do not add a web UI unless the user explicitly changes direction; Telegram is the primary user interface.
 
 ## Phase 5: Market Intelligence Layer
 
-1. Build normalized source models for prices, fundamentals, SEC filings, macro data, news, and exchange calendars.
-2. Integrate official open sources for filings and macro releases: SEC EDGAR, Federal Reserve/FRED, BLS, BEA, Treasury, FOMC calendar, and exchange calendars.
+1. Partly done: normalized source models exist for prices, SEC filings, exchange calendars, and news context; broader fundamentals and macro-release normalization remain incomplete.
+2. Partly done: official open sources are integrated for SEC EDGAR and exchange calendars; Federal Reserve/FRED, BLS, BEA, Treasury, and FOMC calendar feeds remain pending.
 3. Add market-session modeling by symbol and exchange, including regular, pre-market, after-hours, holiday, early-close, closed, and unknown states.
 4. Add source freshness, source disagreement, and confidence scoring to every analysis.
 5. Add data-quality handling for adjusted prices, splits, dividends, missing candles, partial sessions, and delayed quotes.
 6. Add open web collectors for news sites that lack stable APIs only when the source is legally accessible and useful, with caching, rate limits, provenance, and extraction tests.
 7. Add LLM source-grounding and prompt-injection protections before summarizing web/news content.
-8. Add event-aware scoring for earnings, filings, macro releases, central-bank events, political/regulatory news, sanctions, tariffs, and sector-specific catalysts.
+8. Partly done: event-aware scoring already uses earnings, SEC filings, and macro events; sector-specific catalysts and richer political/regulatory modeling remain pending.
 9. Add market-regime context: broad index trend, volatility regime, rate/yield backdrop, sector rotation, and risk-on/risk-off state.
 10. Add historical replay/backtest tooling for score calibration and quality review.
-11. Add Telegram alerts for source-confirmed breaking events only when they affect subscribed tickers, sectors, or macro watchlists.
+11. Partly done: Telegram alerts now cover confidence thresholds, duplicate suppression, threshold rules, and high-impact news push, but sector- and macro-watchlist-specific breaking-event routing remains pending.
 
 ## Phase 6: Controlled Market Expansion
 

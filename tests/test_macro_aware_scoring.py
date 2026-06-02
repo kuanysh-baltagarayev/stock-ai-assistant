@@ -281,6 +281,66 @@ class MacroAwareScoringTests(unittest.TestCase):
         self.assertEqual(distant_earnings.scores.risk_score, baseline.scores.risk_score)
         self.assertEqual(distant_earnings.scores.final_score, baseline.scores.final_score)
 
+    def test_rising_rate_macro_risk_hits_technology_more_than_financials(self) -> None:
+        reference_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+        macro = MacroContext(
+            reference_date=reference_time,
+            upcoming_high_impact_events=["FOMC", "CPI"],
+            recent_macro_data={},
+            volatility_level="high",
+            rate_direction="rising",
+            inflation_level="elevated",
+        )
+        tech = score_stock(
+            self.price,
+            self.technicals,
+            Fundamentals(company_name="Tech Co", sector="Technology"),
+            macro_context=macro,
+            reference_time=reference_time,
+        )
+        financials = score_stock(
+            self.price,
+            self.technicals,
+            Fundamentals(company_name="Bank Co", sector="Financials"),
+            macro_context=macro,
+            reference_time=reference_time,
+        )
+
+        self.assertGreater(tech.scores.risk_score, financials.scores.risk_score)
+        self.assertLess(tech.scores.final_score, financials.scores.final_score)
+        self.assertTrue(any("Technology is rate-sensitive" in reason for reason in tech.reasons))
+
+    def test_earnings_risk_hits_growth_sensitive_sector_more_than_defensive_sector(self) -> None:
+        reference_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+        event_calendar = {
+            "upcoming_events": [
+                {
+                    "name": "earnings",
+                    "scheduled_at": "2026-06-03T20:00:00+00:00",
+                }
+            ]
+        }
+        tech = score_stock(
+            self.price,
+            self.technicals,
+            Fundamentals(company_name="Tech Co", sector="Technology"),
+            macro_context=None,
+            event_calendar=event_calendar,
+            reference_time=reference_time,
+        )
+        utilities = score_stock(
+            self.price,
+            self.technicals,
+            Fundamentals(company_name="Utility Co", sector="Utilities"),
+            macro_context=None,
+            event_calendar=event_calendar,
+            reference_time=reference_time,
+        )
+
+        self.assertGreater(tech.scores.risk_score, utilities.scores.risk_score)
+        self.assertLess(tech.scores.final_score, utilities.scores.final_score)
+        self.assertTrue(any("earnings reactions tend to be sharper" in reason for reason in tech.reasons))
+
 
 if __name__ == "__main__":
     unittest.main()

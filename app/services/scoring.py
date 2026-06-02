@@ -8,6 +8,7 @@ from app.services.research_labels import (
     research_label_for_score,
     research_label_to_title,
 )
+from app.services.sector_sensitivity import get_sector_sensitivity
 
 if TYPE_CHECKING:
     from app.services.macro_context import MacroContext
@@ -55,6 +56,7 @@ def score_stock(
     valuation_score, valuation_reasons = _valuation_score(fundamentals)
     risk_score, risk_reasons = _risk_score(
         technicals,
+        sector=fundamentals.sector,
         macro_context=macro_context,
         event_calendar=event_calendar,
         sec_filings=sec_filings,
@@ -214,6 +216,7 @@ def _valuation_score(fundamentals: Fundamentals) -> tuple[float, list[str]]:
 def _risk_score(
     technicals: TechnicalIndicators,
     *,
+    sector: str | None = None,
     macro_context: MacroContext | None = None,
     event_calendar: object | None = None,
     sec_filings: object | None = None,
@@ -254,6 +257,7 @@ def _risk_score(
         reasons.append("daily move is unusually large")
 
     catalyst_adjustment, catalyst_reasons = _event_catalyst_risk_adjustment(
+        sector=sector,
         macro_context=macro_context,
         event_calendar=event_calendar,
         sec_filings=sec_filings,
@@ -267,6 +271,7 @@ def _risk_score(
 
 def _event_catalyst_risk_adjustment(
     *,
+    sector: str | None = None,
     macro_context: MacroContext | None = None,
     event_calendar: object | None = None,
     sec_filings: object | None = None,
@@ -277,8 +282,8 @@ def _event_catalyst_risk_adjustment(
         now = now.replace(tzinfo=timezone.utc)
 
     catalysts = (
-        _macro_event_catalyst(macro_context)
-        + _company_event_catalyst(event_calendar, now=now)
+        _macro_event_catalyst(macro_context, sector=sector)
+        + _company_event_catalyst(event_calendar, sector=sector, now=now)
         + _sec_filing_catalyst(sec_filings, now=now)
     )
     if not catalysts:
@@ -306,32 +311,46 @@ def _event_catalyst_risk_adjustment(
     return min(round(adjustment, 2), 20.0), reasons
 
 
-def _macro_event_catalyst(macro_context: MacroContext | None) -> list[EventCatalyst]:
+def _macro_event_catalyst(
+    macro_context: MacroContext | None,
+    *,
+    sector: str | None = None,
+) -> list[EventCatalyst]:
     if macro_context is None or not macro_context.upcoming_high_impact_events:
         return []
 
     event_count = len(macro_context.upcoming_high_impact_events)
+    multiplier, sector_reason = _macro_sector_multiplier(macro_context, sector)
     if event_count >= 3:
         return [
             EventCatalyst(
                 category="macro",
-                severity=9.0,
-                reason="multiple high-impact macro events are imminent",
+                severity=round(9.0 * multiplier, 2),
+                reason=_combine_catalyst_reason(
+                    "multiple high-impact macro events are imminent",
+                    sector_reason,
+                ),
             )
         ]
     if event_count == 2:
         return [
             EventCatalyst(
                 category="macro",
-                severity=7.0,
-                reason="two high-impact macro events are imminent",
+                severity=round(7.0 * multiplier, 2),
+                reason=_combine_catalyst_reason(
+                    "two high-impact macro events are imminent",
+                    sector_reason,
+                ),
             )
         ]
     return [
         EventCatalyst(
             category="macro",
-            severity=4.0,
-            reason="a high-impact macro event is imminent",
+            severity=round(4.0 * multiplier, 2),
+            reason=_combine_catalyst_reason(
+                "a high-impact macro event is imminent",
+                sector_reason,
+            ),
         )
     ]
 
@@ -339,6 +358,7 @@ def _macro_event_catalyst(macro_context: MacroContext | None) -> list[EventCatal
 def _company_event_catalyst(
     event_calendar: object | None,
     *,
+    sector: str | None = None,
     now: datetime,
 ) -> list[EventCatalyst]:
     if not event_calendar:
@@ -375,28 +395,38 @@ def _company_event_catalyst(
 
     if nearest_earnings_days is None:
         return []
+    multiplier, sector_reason = _earnings_sector_multiplier(sector)
     if nearest_earnings_days <= 3:
         return [
             EventCatalyst(
                 category="company_event",
-                severity=9.0,
-                reason="earnings are imminent and can sharply raise event risk",
+                severity=round(9.0 * multiplier, 2),
+                reason=_combine_catalyst_reason(
+                    "earnings are imminent and can sharply raise event risk",
+                    sector_reason,
+                ),
             )
         ]
     if nearest_earnings_days <= 7:
         return [
             EventCatalyst(
                 category="company_event",
-                severity=6.0,
-                reason="upcoming earnings keep event risk elevated",
+                severity=round(6.0 * multiplier, 2),
+                reason=_combine_catalyst_reason(
+                    "upcoming earnings keep event risk elevated",
+                    sector_reason,
+                ),
             )
         ]
     if nearest_earnings_days <= 14:
         return [
             EventCatalyst(
                 category="company_event",
-                severity=3.0,
-                reason="earnings are approaching",
+                severity=round(3.0 * multiplier, 2),
+                reason=_combine_catalyst_reason(
+                    "earnings are approaching",
+                    sector_reason,
+                ),
             )
         ]
     return []
@@ -497,6 +527,62 @@ def _parse_datetime_like(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _macro_sector_multiplier(
+    macro_context: MacroContext | None,
+    sector: str | None,
+) -> tuple[float, str | None]:
+    sensitivity = get_sector_sensitivity(sector)
+    if sensitivity is None or macro_context is None:
+        return 1.0, None
+
+    multiplier = 1.0
+    reasons: list[str] = []
+
+    if macro_context.rate_direction == "rising":
+        if sensitivity.fed_rate_sensitivity <= -0.5:
+            multiplier += abs(sensitivity.fed_rate_sensitivity) * 0.2
+            reasons.append(f"{sensitivity.sector} is rate-sensitive")
+        elif sensitivity.fed_rate_sensitivity >= 0.4:
+            multiplier -= sensitivity.fed_rate_sensitivity * 0.1
+            reasons.append(f"{sensitivity.sector} is more resilient to rising rates")
+
+    if macro_context.inflation_level == "elevated":
+        if sensitivity.inflation_sensitivity <= -0.2:
+            multiplier += abs(sensitivity.inflation_sensitivity) * 0.15
+            reasons.append(f"{sensitivity.sector} is exposed to inflation pressure")
+        elif sensitivity.inflation_sensitivity >= 0.4:
+            multiplier -= sensitivity.inflation_sensitivity * 0.08
+            reasons.append(f"{sensitivity.sector} can absorb inflation better")
+
+    if macro_context.upcoming_high_impact_events and sensitivity.growth_sensitivity >= 0.65:
+        multiplier += 0.08
+        reasons.append(f"{sensitivity.sector} is economically sensitive")
+
+    multiplier = _clamp(multiplier, 0.8, 1.35)
+    if not reasons or abs(multiplier - 1.0) < 0.05:
+        return round(multiplier, 2), None
+    return round(multiplier, 2), reasons[0]
+
+
+def _earnings_sector_multiplier(sector: str | None) -> tuple[float, str | None]:
+    sensitivity = get_sector_sensitivity(sector)
+    if sensitivity is None:
+        return 1.0, None
+
+    multiplier = _clamp(0.9 + sensitivity.growth_sensitivity * 0.3, 0.9, 1.2)
+    if multiplier >= 1.08:
+        return round(multiplier, 2), f"{sensitivity.sector} earnings reactions tend to be sharper"
+    if multiplier <= 0.94:
+        return round(multiplier, 2), f"{sensitivity.sector} earnings swings are often milder"
+    return round(multiplier, 2), None
+
+
+def _combine_catalyst_reason(base_reason: str, sector_reason: str | None) -> str:
+    if not sector_reason:
+        return base_reason
+    return f"{base_reason}; {sector_reason}"
 
 
 def _recommendation(final_score: float, risk_score: float) -> str:
