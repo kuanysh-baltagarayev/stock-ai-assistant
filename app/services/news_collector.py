@@ -66,6 +66,89 @@ _NEGATIVE_TERMS = {
 }
 
 
+# Keyword → sector mapping for news tagging. An item matches a sector when any
+# of its keywords appear in the lowercased title or summary.
+_SECTOR_KEYWORDS: dict[str, list[str]] = {
+    "Technology": [
+        "ai ", "artificial intelligence", "chip", "semiconductor", "software", "cloud", "cybersecurity",
+        "tech", "algorithm", "silicon valley", "antitrust tech", "big tech", "data center",
+        "nvidia", "apple", "microsoft", "alphabet", "google", "meta", "amazon aws",
+    ],
+    "Financials": [
+        "bank", "federal reserve", "fomc", "interest rate", "yield curve", "mortgage",
+        "credit", "jpmorgan", "goldman sachs", "wells fargo", "citigroup", "blackrock",
+        "treasury yield", "rate hike", "rate cut", "bond yield", "lending",
+    ],
+    "Energy": [
+        "oil", "crude", "gas", "energy", "pipeline", "opec", "petroleum", "drilling",
+        "lng", "exxon", "chevron", "bp", "shell", "refinery", "fossil fuel", "renewable energy",
+    ],
+    "Healthcare": [
+        "fda", "drug", "pharma", "biotech", "vaccine", "clinical trial", "medicare",
+        "medicaid", "hospital", "healthcare", "pfizer", "johnson & johnson", "merck",
+        "abbvie", "eli lilly", "health insurance",
+    ],
+    "Consumer Discretionary": [
+        "retail", "consumer spending", "amazon", "tesla", "auto", "automobile",
+        "disney", "netflix", "starbucks", "mcdonald", "housing starts", "home depot",
+    ],
+    "Consumer Staples": [
+        "food", "grocery", "walmart", "procter & gamble", "coca-cola", "pepsi",
+        "staple", "agricultural commodity", "crop", "wheat", "corn",
+    ],
+    "Industrials": [
+        "tariff", "trade war", "manufacturing", "import duty", "export restriction",
+        "boeing", "defense", "aerospace", "supply chain", "infrastructure", "railroad",
+        "caterpillar", "3m", "union pacific",
+    ],
+    "Materials": [
+        "steel", "aluminum", "copper", "mining", "chemicals", "iron ore", "lithium",
+        "raw material", "commodity price", "metals", "alcoa", "freeport",
+    ],
+    "Communication Services": [
+        "telecom", "5g", "streaming", "social media", "content moderation",
+        "at&t", "verizon", "comcast", "disney streaming", "youtube", "twitter", "tiktok",
+    ],
+    "Real Estate": [
+        "reit", "commercial real estate", "housing market", "mortgage rate",
+        "property", "rental", "home price", "zillow", "realty",
+    ],
+    "Utilities": [
+        "utility", "power grid", "electricity", "natural gas utility", "duke energy",
+        "southern company", "dominion energy", "nuclear power",
+    ],
+}
+
+
+def _tag_sectors(title: str, summary: str | None = None) -> tuple[str, ...]:
+    """Return sectors affected by a news item based on keyword matching."""
+    text = (title + " " + (summary or "")).lower()
+    matched = []
+    for sector, keywords in _SECTOR_KEYWORDS.items():
+        if any(kw in text for kw in keywords):
+            matched.append(sector)
+    return tuple(matched)
+
+
+def news_relevant_for_sectors(
+    items: list["NewsItem"],
+    sectors: list[str],
+) -> list["NewsItem"]:
+    """Filter news items to those relevant for the given sectors.
+
+    Items with no sector tags are considered market-wide and always included.
+    Items with sector tags are included only if they overlap with ``sectors``.
+    If ``sectors`` is empty, all items are returned (subscriber has no sector info).
+    """
+    if not sectors:
+        return items
+    sector_set = set(sectors)
+    return [
+        item for item in items
+        if not item.affected_sectors or sector_set.intersection(item.affected_sectors)
+    ]
+
+
 @dataclass(frozen=True)
 class NewsItem:
     title: str
@@ -77,6 +160,7 @@ class NewsItem:
     sentiment_label: str  # "positive" | "neutral" | "negative"
     relevance: float | None  # 0..1, ticker relevance when known
     category: str  # "ticker" | "market" | "macro"
+    affected_sectors: tuple[str, ...] = field(default_factory=tuple)  # empty = all sectors
 
     @property
     def source_weight(self) -> float:
@@ -170,17 +254,20 @@ def _fetch_alpha_vantage_news(symbol: str, settings: Any, timeout: float, limit:
         if not isinstance(entry, dict):
             continue
         score, relevance = _alpha_vantage_ticker_sentiment(entry, symbol)
+        title = str(entry.get("title") or "").strip()
+        summary = entry.get("summary")
         items.append(
             NewsItem(
-                title=str(entry.get("title") or "").strip(),
+                title=title,
                 url=entry.get("url"),
                 source=entry.get("source"),
                 published_at=_parse_av_time(entry.get("time_published")),
-                summary=entry.get("summary"),
+                summary=summary,
                 sentiment_score=score,
                 sentiment_label=_score_to_label(score),
                 relevance=relevance,
                 category="ticker",
+                affected_sectors=_tag_sectors(title, summary),
             )
         )
     return [item for item in items if item.title]
@@ -275,6 +362,7 @@ def _fetch_gdelt_news(timeout: float, limit: int) -> list[NewsItem]:
                 sentiment_label=_score_to_label(score),
                 relevance=None,
                 category="macro",
+                affected_sectors=_tag_sectors(title),
             )
         )
     return items
@@ -294,6 +382,7 @@ def _fetch_fed_rss(timeout: float, limit: int) -> list[NewsItem]:
         title = (item.findtext("title") or "").strip()
         if not title:
             continue
+        summary_text = item.findtext("description") or None
         score = _lexicon_sentiment(title)
         items.append(
             NewsItem(
@@ -301,11 +390,12 @@ def _fetch_fed_rss(timeout: float, limit: int) -> list[NewsItem]:
                 url=(item.findtext("link") or None),
                 source="Federal Reserve",
                 published_at=_parse_rss_time(item.findtext("pubDate")),
-                summary=(item.findtext("description") or None),
+                summary=summary_text,
                 sentiment_score=score,
                 sentiment_label=_score_to_label(score),
                 relevance=None,
                 category="macro",
+                affected_sectors=_tag_sectors(title, summary_text),
             )
         )
         if len(items) >= limit:
@@ -321,7 +411,8 @@ def _finnhub_items(payload: list[Any], *, category: str, limit: int) -> list[New
         title = str(entry.get("headline") or "").strip()
         if not title:
             continue
-        score = _lexicon_sentiment(f"{title} {entry.get('summary') or ''}")
+        entry_summary = entry.get("summary")
+        score = _lexicon_sentiment(f"{title} {entry_summary or ''}")
         published = entry.get("datetime")
         published_at = (
             datetime.fromtimestamp(int(published), tz=timezone.utc)
@@ -334,11 +425,12 @@ def _finnhub_items(payload: list[Any], *, category: str, limit: int) -> list[New
                 url=entry.get("url"),
                 source=entry.get("source"),
                 published_at=published_at,
-                summary=entry.get("summary"),
+                summary=entry_summary,
                 sentiment_score=score,
                 sentiment_label=_score_to_label(score),
                 relevance=None,
                 category=category,
+                affected_sectors=_tag_sectors(title, entry_summary),
             )
         )
     return items

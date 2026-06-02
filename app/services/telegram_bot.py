@@ -20,7 +20,7 @@ from app.services.alert_rules import (
     parse_rule,
 )
 from app.services.edgar_collector import fetch_recent_filings
-from app.services.news_collector import build_news_context, high_impact_news
+from app.services.news_collector import build_news_context, high_impact_news, news_relevant_for_sectors
 from app.services.history import build_snapshot_audit_entries, list_recent_snapshots
 from app.services.runtime_budget import (
     RuntimeBudgetExceeded,
@@ -926,7 +926,9 @@ class TelegramBotService(
                 continue
 
             response = await asyncio.to_thread(scan_tickers, tickers, None)
-            impact_items = high_impact_news(news_context)
+            all_impact_items = high_impact_news(news_context)
+            sub_sectors = self._watchlist_sectors(subscriber)
+            impact_items = news_relevant_for_sectors(all_impact_items, sub_sectors)
             min_confidence = getattr(subscriber, "min_confidence", None)
             digest_fingerprint = self._digest_fingerprint(
                 response.results,
@@ -1186,6 +1188,25 @@ class TelegramBotService(
         if sub is None:
             return []
         return self._watchlist_tickers_for_subscription(sub)
+
+    def _watchlist_sectors(self, subscription: TelegramSubscription) -> list[str]:
+        """Return distinct sectors for a subscriber's watchlist via instrument registry."""
+        from app.models import InstrumentRegistry
+
+        tickers = self._watchlist_tickers_for_subscription(subscription)
+        if not tickers:
+            return []
+        db = SessionLocal()
+        try:
+            records = (
+                db.query(InstrumentRegistry)
+                .filter(InstrumentRegistry.symbol.in_(tickers))
+                .all()
+            )
+            sectors = [r.sector for r in records if r.sector]
+            return list(dict.fromkeys(sectors))
+        finally:
+            db.close()
 
     def _mark_last_alert(self, subscription_id: int, *, digest_fingerprint: str | None = None) -> None:
         db = SessionLocal()

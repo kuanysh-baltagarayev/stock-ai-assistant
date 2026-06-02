@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.services.news_collector import NewsContext
+from app.services.news_collector import NewsContext, NewsItem
 from app.services.runtime_budget import reset_runtime_budgets
 from app.services.telegram_bot import TelegramBotService
 
@@ -248,3 +248,76 @@ class TelegramDigestModeTests(unittest.IsolatedAsyncioTestCase):
             await self.service._send_digest_to_active_subscribers()
 
         self.assertEqual(send_mock.await_count, 1)
+
+    async def test_digest_routes_sector_news_to_relevant_subscribers_only(self) -> None:
+        """Energy news is excluded from digest for a Technology-sector subscriber."""
+        fake_scan = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="AAPL", recommendation="NEUTRAL",
+                    final_score=61.0, price=189.12, short_reason="reason",
+                )
+            ],
+            errors=[],
+            summary=SimpleNamespace(partial_failure=False, message="ok", failed_tickers=[]),
+        )
+        energy_item = NewsItem(
+            title="OPEC cuts crude output",
+            url="https://example.com/opec",
+            source="Reuters", published_at=None, summary=None,
+            sentiment_score=-0.7, sentiment_label="negative",
+            relevance=None, category="macro",
+            affected_sectors=("Energy",),
+        )
+        news_ctx = NewsContext(items=[energy_item])
+        send_mock = AsyncMock()
+
+        with (
+            patch("app.services.telegram_bot.scan_tickers", return_value=fake_scan),
+            patch("app.services.telegram_bot.build_news_context", return_value=news_ctx),
+            patch("app.services.telegram_bot.high_impact_news", return_value=[energy_item]),
+            patch.object(self.service, "_watchlist_sectors", return_value=["Technology"]),
+            patch.object(self.service, "_send_message", send_mock),
+            patch.object(self.service, "_scheduled_digest_mode", return_value="close"),
+        ):
+            await self.service._send_digest_to_active_subscribers()
+
+        self.assertEqual(send_mock.await_count, 1)
+        digest_text = send_mock.await_args.args[1]
+        self.assertNotIn("OPEC cuts crude output", digest_text)
+
+    async def test_digest_includes_untagged_news_for_all_subscribers(self) -> None:
+        """Market-wide (untagged) news reaches any subscriber regardless of sectors."""
+        fake_scan = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    ticker="AAPL", recommendation="NEUTRAL",
+                    final_score=61.0, price=189.12, short_reason="reason",
+                )
+            ],
+            errors=[],
+            summary=SimpleNamespace(partial_failure=False, message="ok", failed_tickers=[]),
+        )
+        generic_item = NewsItem(
+            title="Markets drop on uncertainty",
+            url="https://example.com/markets",
+            source="Reuters", published_at=None, summary=None,
+            sentiment_score=-0.6, sentiment_label="negative",
+            relevance=None, category="market",
+            affected_sectors=(),
+        )
+        news_ctx = NewsContext(items=[generic_item])
+        send_mock = AsyncMock()
+
+        with (
+            patch("app.services.telegram_bot.scan_tickers", return_value=fake_scan),
+            patch("app.services.telegram_bot.build_news_context", return_value=news_ctx),
+            patch("app.services.telegram_bot.high_impact_news", return_value=[generic_item]),
+            patch.object(self.service, "_watchlist_sectors", return_value=["Financials"]),
+            patch.object(self.service, "_send_message", send_mock),
+            patch.object(self.service, "_scheduled_digest_mode", return_value="close"),
+        ):
+            await self.service._send_digest_to_active_subscribers()
+
+        digest_text = send_mock.await_args.args[1]
+        self.assertIn("Markets drop on uncertainty", digest_text)

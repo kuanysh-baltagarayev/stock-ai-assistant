@@ -554,9 +554,20 @@ Suggested order for low-waste progress:
    - `app/services/ai_explainer.py` now translates the newer macro/earnings
      catalyst reasons so rule-based explanations remain readable in Russian.
 
-9. Next: enrich event-aware scoring and alerts with broader political/regulatory
-   catalysts and route those breaking-event alerts by subscribed ticker, sector,
-   or macro watchlist instead of only generic high-impact pushes.
+9. Done: sector-tagged news and sector-aware digest routing so breaking-event
+   alerts reach subscribers based on their watchlist sectors instead of being
+   generic pushes for all subscribers.
+   - `app/services/news_collector.py`: `_SECTOR_KEYWORDS` map, `_tag_sectors()`
+     keyword-tagger, `news_relevant_for_sectors()` filter function, and
+     `affected_sectors` field on every `NewsItem`.
+   - `app/services/telegram_bot.py`: `_watchlist_sectors()` derives subscriber
+     sectors from the instrument registry; digest routing filters `high_impact_news`
+     output through `news_relevant_for_sectors()` before building each digest.
+   - 11 new tests (7 in `test_news_collector`, 2 in `test_telegram_digests`).
+
+10. Next: enrich event-aware scoring and alerts with broader political/regulatory
+    catalysts and route those breaking-event alerts by subscribed ticker, sector,
+    or macro watchlist instead of only generic high-impact pushes.
 
 ## Operations, Budgets, And Runtime Boundaries
 

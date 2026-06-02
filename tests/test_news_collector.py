@@ -208,5 +208,82 @@ class ScannerNewsIntegrationTests(unittest.TestCase):
         self.assertTrue(any("High-impact news (negative" in note for note in notes))
 
 
+class SectorTaggingTests(unittest.TestCase):
+    def test_tech_keywords_tag_technology(self) -> None:
+        sectors = nc._tag_sectors("Nvidia chip shortage slows AI data center builds")
+        self.assertIn("Technology", sectors)
+
+    def test_energy_keywords_tag_energy(self) -> None:
+        sectors = nc._tag_sectors("OPEC cuts crude oil output amid global demand concerns")
+        self.assertIn("Energy", sectors)
+
+    def test_fed_news_tags_financials(self) -> None:
+        sectors = nc._tag_sectors("Federal Reserve signals rate hike in September")
+        self.assertIn("Financials", sectors)
+
+    def test_tariff_news_tags_industrials(self) -> None:
+        sectors = nc._tag_sectors("New tariff on steel imports announced by Commerce Dept")
+        self.assertIn("Industrials", sectors)
+        self.assertIn("Materials", sectors)
+
+    def test_generic_news_returns_empty(self) -> None:
+        sectors = nc._tag_sectors("Markets open higher on Tuesday")
+        self.assertEqual(sectors, ())
+
+    def test_summary_also_searched(self) -> None:
+        sectors = nc._tag_sectors("Breaking news", "FDA approves new drug for cancer treatment")
+        self.assertIn("Healthcare", sectors)
+
+
+class NewsRoutingTests(unittest.TestCase):
+    def _make_item(self, title: str, sectors: tuple[str, ...] = ()) -> nc.NewsItem:
+        return nc.NewsItem(
+            title=title, url=None, source=None, published_at=None, summary=None,
+            sentiment_score=0.5, sentiment_label="positive", relevance=None,
+            category="macro", affected_sectors=sectors,
+        )
+
+    def test_no_subscriber_sectors_returns_all(self) -> None:
+        items = [
+            self._make_item("Tech surge", ("Technology",)),
+            self._make_item("Oil plunges", ("Energy",)),
+            self._make_item("Generic market news"),
+        ]
+        result = nc.news_relevant_for_sectors(items, [])
+        self.assertEqual(len(result), 3)
+
+    def test_untagged_items_always_included(self) -> None:
+        items = [
+            self._make_item("Generic news"),  # no sectors
+            self._make_item("Tech rally", ("Technology",)),
+        ]
+        result = nc.news_relevant_for_sectors(items, ["Financials"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].title, "Generic news")
+
+    def test_matching_sector_included(self) -> None:
+        items = [
+            self._make_item("Bank earnings beat", ("Financials",)),
+            self._make_item("Oil rises", ("Energy",)),
+        ]
+        result = nc.news_relevant_for_sectors(items, ["Financials"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].title, "Bank earnings beat")
+
+    def test_overlapping_sector_included(self) -> None:
+        items = [
+            self._make_item("Tariffs hit steel", ("Industrials", "Materials")),
+        ]
+        result = nc.news_relevant_for_sectors(items, ["Materials", "Energy"])
+        self.assertEqual(len(result), 1)
+
+    def test_no_match_excluded(self) -> None:
+        items = [
+            self._make_item("Tech antitrust probe", ("Technology",)),
+        ]
+        result = nc.news_relevant_for_sectors(items, ["Energy"])
+        self.assertEqual(len(result), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
