@@ -630,17 +630,25 @@ Current state:
 
 Implementation plan:
 
-1. Add `app/services/market_regime.py`.
-2. Start with a narrow, testable U.S. regime model:
-   SPY trend, QQQ trend, VIX proxy if available through yfinance, 10Y yield
-   proxy where available, and sector ETF relative strength for a small fixed
-   set.
-3. Represent regime as deterministic fields:
-   `index_trend`, `volatility_regime`, `rates_backdrop`, `sector_rotation`,
-   `risk_appetite`, `confidence`, and `source_provenance`.
-4. Feed regime into scoring as context, not as a dominant signal.
-5. Surface one short Telegram line: "Market regime: risk-on/risk-off/mixed,
-   confidence X, source Y".
+1. Done: added `app/services/market_regime.py`.
+2. Done: narrow, testable U.S. regime model: SPY/QQQ trend, `^VIX` proxy, `^TNX`
+   10Y yield proxy, and cyclical-vs-defensive sector ETF relative strength
+   (XLK/XLY/XLF vs XLP/XLU/XLV). `build_market_regime()` is pure and works from
+   offline fixtures; `collect_market_regime()` is the yfinance-backed wrapper.
+3. Done: regime is represented as deterministic fields `index_trend`,
+   `volatility_regime`, `rates_backdrop`, `sector_rotation`, `risk_appetite`,
+   `confidence`, and `source_provenance`. Missing inputs lower `confidence`
+   instead of failing; empty inputs yield an "unknown", zero-confidence regime.
+4. Done: regime feeds scoring as bounded context — `_regime_risk_adjustment()`
+   caps the risk premium at +/-5 points scaled by confidence, and
+   `_adaptive_weights()` applies only a small regime weight nudge.
+5. Done: `market_regime_summary()` surfaces one short line — "Market regime:
+   risk-on/risk-off/mixed, confidence X (index ..., volatility ..., rates ...;
+   source yfinance)" — threaded through scanner operation notes (and thus the
+   Telegram analysis) and the scan-level notes.
+6. Done: collection is gated by a new `MARKET_REGIME_ENABLED` setting (default
+   off), collected once per scan like FRED, and a no-op without network when
+   disabled. Priority 4 is complete.
 
 Suggested files:
 
@@ -653,10 +661,15 @@ Suggested files:
 
 Acceptance criteria:
 
-1. Regime builder works from offline price fixtures.
-2. Missing VIX/yield data degrades confidence instead of failing analysis.
-3. Telegram analysis includes a short regime line when available.
-4. Scoring tests prove regime affects risk/weights within capped bounds.
+1. Done: `build_market_regime()` works from offline price fixtures (see
+   `tests/test_market_regime.py`).
+2. Done: missing VIX/yield data degrades confidence instead of failing; tests
+   cover degraded and unknown regimes.
+3. Done: the regime line is added to analysis operation notes, which the
+   Telegram analysis renders, and only when a usable regime is available.
+4. Done: `tests/test_macro_aware_scoring.py` proves risk-off raises risk,
+   risk-on lowers it, the adjustment is capped, low confidence shrinks the
+   effect, unknown regimes are a no-op, and weight nudges stay bounded.
 
 ### Priority 5: Score Decomposition In User Output
 
