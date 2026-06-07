@@ -149,10 +149,23 @@ def analyze_ticker(
     )
     operation_notes.extend(news_notes)
 
+    # Deterministic score decomposition for API / Telegram / CLI
+    from app.services.score_decomposition import (
+        decompose_scores,
+        decomposition_as_payload,
+    )
+
+    decomp = decompose_scores(
+        scoring.scores,
+        scoring.reasons,
+        data_quality=_build_data_quality(market),
+        final_label=scoring.recommendation,
+    )
     response = AnalyzeResponse(
         **payload,
         explanation=explanation,
         operation_notes=operation_notes,
+        score_decomposition=decomposition_as_payload(decomp),
     )
     if db is not None:
         _save_snapshot(db, response)

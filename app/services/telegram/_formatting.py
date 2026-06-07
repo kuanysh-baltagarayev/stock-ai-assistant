@@ -50,13 +50,37 @@ class FormattingMixin:
             f"{analysis.ticker}: {recommendation}",
             f"Цена: {analysis.price:.2f} {analysis.currency or ''}".strip(),
             self._source_freshness_line(analysis),
-            f"Итоговая оценка: {analysis.scores.final_score:.2f}",
-            f"Импульс: {analysis.scores.momentum_score:.2f}",
-            f"Оценка стоимости: {analysis.scores.valuation_score:.2f}",
-            f"Риск: {analysis.scores.risk_score:.2f}",
-            f"Кратко: {self._translate_text(analysis.short_reason)}",
-            f"Комментарий: {self._translate_text(analysis.explanation)}",
         ]
+
+        # Use score decomposition when available (deterministic, no LLM).
+        decomp_payload = self._subject_value(analysis, "score_decomposition")
+        if decomp_payload:
+            from app.services.score_decomposition import (
+                ScoreDecomposition,
+                ComponentAssessment,
+                format_decomposition_lines,
+            )
+
+            # Rehydrate from dict
+            decomp = ScoreDecomposition(
+                technical=ComponentAssessment(**decomp_payload["technical"]),
+                valuation=ComponentAssessment(**decomp_payload["valuation"]),
+                event_risk=ComponentAssessment(**decomp_payload["event_risk"]),
+                data_confidence=ComponentAssessment(**decomp_payload["data_confidence"]),
+                final_score=decomp_payload["final_score"],
+                final_label=decomp_payload.get("final_label", ""),
+            )
+            lines.append("")
+            lines.extend(format_decomposition_lines(decomp))
+        else:
+            # Fallback: raw numeric scores
+            lines.append(f"Итоговая оценка: {analysis.scores.final_score:.2f}")
+            lines.append(f"Импульс: {analysis.scores.momentum_score:.2f}")
+            lines.append(f"Оценка стоимости: {analysis.scores.valuation_score:.2f}")
+            lines.append(f"Риск: {analysis.scores.risk_score:.2f}")
+
+        lines.append(f"Кратко: {self._translate_text(analysis.short_reason)}")
+        lines.append(f"Комментарий: {self._translate_text(analysis.explanation)}")
         operation_notes = getattr(analysis, "operation_notes", None) or []
         if operation_notes:
             lines.extend(["", "Операционные заметки:"])

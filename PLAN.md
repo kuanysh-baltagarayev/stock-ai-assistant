@@ -688,31 +688,39 @@ Current state:
 
 Implementation plan:
 
-1. Add a score-explanation helper that maps score ranges and reasons into
-   stable labels:
-   technical setup, valuation setup, event/news risk, data confidence.
-2. Avoid buy/sell phrasing. Use `HIGH_INTEREST`, `WATCH`, `NEUTRAL`,
-   `CAUTION`, `HIGH_RISK` and Russian translations.
-3. Add missing-data reasons so a high final score with poor source coverage is
-   visibly low-confidence.
-4. Use the same helper in API payload, Telegram analysis, digest, and CLI
-   recent report.
+1. Done: `app/services/score_decomposition.py` — module with `ScoreDecomposition`,
+   `ComponentAssessment` dataclasses and `decompose_scores()` function. Maps numeric
+   scores and bucketed reasons into stable Russian labels:
+   - technical: благоприятный / смешанный / слабый
+   - valuation: привлекательная / адекватная / дороговато
+   - event/risk: низкий / умеренный / повышенный
+   - data confidence: высокая / средняя / низкая
+2. Done: no buy/sell phrasing — all labels use the neutral vocabulary from the plan.
+3. Done: missing-data reasons flagged in data_confidence component; high final score
+   with poor source coverage shows low confidence visibly.
+4. Done: decomposition payload added to `AnalyzeResponse.score_decomposition` schema
+   and computed in `scanner.analyze_ticker()`.
+5. Done: Telegram `_analysis_text` uses `format_decomposition_lines()` when
+   decomposition is available, falls back to raw numeric scores.
+6. Done: CLI `scan_market.py --recent` prints compact decomposition per snapshot.
+7. Done: 41 tests covering helpers, bucketing, normalization, integration, no-buy/sell
+   wording, serialization, and Telegram fallback.
 
 Suggested files:
 
-1. `app/services/scoring_explain.py` or existing `ai_explainer.py` rule-based
-   section if kept cleanly separated from OpenAI.
-2. `app/services/telegram/_formatting.py`
-3. `scripts/scan_market.py`
-4. `tests/test_research_labels.py`
-5. `tests/test_telegram_disclaimers.py`
+1. `app/services/score_decomposition.py`
+2. `app/schemas.py`
+3. `app/services/scanner.py`
+4. `app/services/telegram/_formatting.py`
+5. `scripts/scan_market.py`
+6. `tests/test_score_decomposition.py`
 
 Acceptance criteria:
 
-1. Telegram shows the top deterministic reasons grouped by technical,
+1. Done: Telegram shows the top deterministic reasons grouped by technical,
    valuation, risk, and data quality.
-2. The same payload works without OpenAI.
-3. Tests prove no buy/sell-like wording returns in user-facing text.
+2. Done: the same payload works without OpenAI.
+3. Done: tests prove no buy/sell-like wording returns in user-facing text.
 
 ### Priority 6: Historical Replay And Backtest Quality Review
 

@@ -191,6 +191,28 @@ def print_recent_report(rows) -> None:
         )
         print(f"  source={report['source_provider']} confidence={report['confidence']}")
         print(f"  reason={report['short_reason']}")
+        decomp = report.get("score_decomposition")
+        if decomp:
+            # Show a compact one-liner per component
+            t = decomp.get("technical", {})
+            v = decomp.get("valuation", {})
+            e = decomp.get("event_risk", {})
+            d = decomp.get("data_confidence", {})
+            print(
+                "  decomp: "
+                f"tech={t.get('label','?')}({t.get('score','?')}) "
+                f"val={v.get('label','?')}({v.get('score','?')}) "
+                f"risk={e.get('label','?')}({e.get('score','?')}) "
+                f"data={d.get('label','?')}({d.get('score','?')})"
+            )
+            if t.get("key_reasons"):
+                print(f"  tech: {'; '.join(t['key_reasons'])}")
+            if v.get("key_reasons"):
+                print(f"  val: {'; '.join(v['key_reasons'])}")
+            if e.get("key_reasons"):
+                print(f"  risk: {'; '.join(e['key_reasons'])}")
+            if d.get("key_reasons"):
+                print(f"  data: {'; '.join(d['key_reasons'])}")
         if report["operation_notes"]:
             print(f"  notes={' | '.join(report['operation_notes'])}")
 
@@ -236,6 +258,7 @@ def _recent_snapshot_report(snapshot) -> dict[str, str | list[str] | float | int
         "source_provider": _first_present(provenance.get("provider_name"), "n/a"),
         "confidence": _first_present(data_quality.get("confidence"), provenance.get("confidence"), "n/a"),
         "short_reason": _first_present(payload.get("short_reason"), "n/a"),
+        "score_decomposition": payload.get("score_decomposition"),
         "operation_notes": operation_notes,
     }
 

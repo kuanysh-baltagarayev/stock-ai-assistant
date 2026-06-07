@@ -104,6 +104,7 @@ class AnalyzeResponse(BaseModel):
     sec_filings: "SecFilingsContext | None" = None
     news: "NewsContext | None" = None
     operation_notes: list[str] = Field(default_factory=list)
+    score_decomposition: dict[str, Any] | None = None
 
 
 class ScanRequest(BaseModel):
