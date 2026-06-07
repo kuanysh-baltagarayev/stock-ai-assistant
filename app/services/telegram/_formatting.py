@@ -7,6 +7,7 @@ from typing import Any
 
 from app.models import TelegramSubscription
 from app.services.alert_rules import format_rule
+from app.services.briefing import BriefingItem, BriefingSummary, build_scan_briefing
 from app.services.operation_summaries import format_operation_summary
 from app.services.coverage import format_coverage_text
 from app.services.exchange_calendar import get_market_hours_info
@@ -100,24 +101,17 @@ class FormattingMixin:
         summary_notes: list[str] | None = None,
         min_confidence: float | None = None,
     ) -> str:
-        top = self._filter_results_by_confidence(results[:5], min_confidence)
-        hidden_count = len(results[:5]) - len(top)
-        if not top and not errors:
-            if min_confidence is not None and hidden_count:
+        briefing = build_scan_briefing(results, errors, min_confidence=min_confidence, limit=5)
+        if not briefing.items and not errors:
+            if min_confidence is not None and briefing.hidden_low_confidence_count:
                 return f"Нет результатов выше порога уверенности {min_confidence:.2f}."
             return "Ничего не найдено."
 
-        lines = ["Результаты скана:"]
-        for item in top:
-            recommendation = self._translate_recommendation(item.recommendation)
-            lines.append(
-                f"{item.ticker}: {recommendation} | оценка {item.final_score:.2f} | цена {item.price:.2f}"
-            )
-            lines.append(f"  {self._translate_text(item.short_reason)}")
+        lines = ["Результаты скана:", *self._briefing_lines(briefing)]
         if min_confidence is not None:
             lines.append(f"Порог уверенности: {min_confidence:.2f}")
-        if hidden_count:
-            lines.append(f"Скрыто низкоуверенных сигналов: {hidden_count}")
+        if briefing.hidden_low_confidence_count:
+            lines.append(f"Скрыто низкоуверенных сигналов: {briefing.hidden_low_confidence_count}")
         if errors:
             lines.extend(["", *format_operation_summary(errors, summary_notes)])
             lines.append("Ошибки:")
@@ -483,10 +477,9 @@ class FormattingMixin:
         news_items: list[Any] | None = None,
     ) -> str:
         limit = 5 if digest_mode == "weekly_review" else 3
-        top = self._filter_results_by_confidence(results[:limit], min_confidence)
-        hidden_count = len(results[:limit]) - len(top)
-        if not top and not errors:
-            if min_confidence is not None and hidden_count:
+        briefing = build_scan_briefing(results, errors, min_confidence=min_confidence, limit=limit)
+        if not briefing.items and not errors:
+            if min_confidence is not None and briefing.hidden_low_confidence_count:
                 return f"Нет результатов выше порога уверенности {min_confidence:.2f}."
             return "Дайджест пуст: данных для отчёта нет."
 
@@ -496,11 +489,7 @@ class FormattingMixin:
             lines.extend(["", digest_note])
         if min_confidence is not None:
             lines.extend(["", f"Порог уверенности: {min_confidence:.2f}"])
-        for item in top:
-            recommendation = self._translate_recommendation(item.recommendation)
-            lines.append(
-                f"{item.ticker}: {recommendation}, оценка {item.final_score:.2f}, {self._translate_text(item.short_reason)}"
-            )
+        lines.extend(["", *self._briefing_lines(briefing)])
         if errors:
             lines.extend(["", *format_operation_summary(errors, summary_notes)])
             lines.append("Ошибки скана:")
@@ -509,15 +498,59 @@ class FormattingMixin:
         if summary_notes:
             lines.extend(["", "Операционные заметки:"])
             lines.extend(f"- {self._translate_text(note)}" for note in summary_notes)
-        if hidden_count:
-            lines.append(f"Скрыто низкоуверенных сигналов: {hidden_count}")
+        if briefing.hidden_low_confidence_count:
+            lines.append(f"Скрыто низкоуверенных сигналов: {briefing.hidden_low_confidence_count}")
         news_lines = self._high_impact_news_lines(news_items)
         if news_lines:
             lines.extend(["", *news_lines])
-        disclaimer = self._scan_disclaimer(top)
+        disclaimer = self._scan_disclaimer(results)
         if disclaimer:
             lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
+
+    def _briefing_lines(self, briefing: BriefingSummary) -> list[str]:
+        lines: list[str] = []
+        sections = (
+            ("Ключевые сигналы:", briefing.key_items),
+            ("Наблюдать:", briefing.watch_items),
+            ("Риск/качество данных:", briefing.risk_items),
+        )
+        for heading, items in sections:
+            if not items:
+                continue
+            lines.append(heading)
+            lines.extend(self._briefing_item_line(item) for item in items)
+        if briefing.degraded_count:
+            lines.append(f"Сигналы с деградацией данных/риска: {briefing.degraded_count}")
+        return lines
+
+    def _briefing_item_line(self, item: BriefingItem) -> str:
+        label = self._translate_recommendation(item.label)
+        price = f" | цена {item.price:.2f}" if item.price is not None else ""
+        confidence = f" | уверенность {item.confidence:.2f}" if item.confidence is not None else " | уверенность n/a"
+        flags = ""
+        if item.flags:
+            flags = " | " + ", ".join(self._briefing_flag_text(flag) for flag in item.flags[:3])
+        reason = self._translate_text(item.short_reason)
+        return f"- {item.ticker}: {label} | оценка {item.final_score:.2f}{price}{confidence}{flags}; {reason}"
+
+    def _briefing_flag_text(self, flag: str) -> str:
+        mapping = {
+            "confidence n/a": "нет confidence",
+            "stale data": "устаревшие данные",
+            "delayed data": "задержка данных",
+            "missing data": "неполные данные",
+            "source disagreement": "источники расходятся",
+            "stale signal": "устаревший сигнал",
+            "delayed signal": "задержанный сигнал",
+        }
+        if flag.startswith("low confidence "):
+            return f"низкая уверенность {flag.removeprefix('low confidence ')}"
+        if flag.startswith("medium confidence "):
+            return f"средняя уверенность {flag.removeprefix('medium confidence ')}"
+        if flag.startswith("high risk "):
+            return f"высокий риск {flag.removeprefix('high risk ')}"
+        return mapping.get(flag, self._translate_text(flag))
 
     def _alert_rules_text(self, rules: list[Any]) -> str:
         if not rules:
@@ -567,6 +600,8 @@ class FormattingMixin:
                     "final_score": round(float(item.final_score), 4),
                     "price": round(float(item.price), 4),
                     "short_reason": str(item.short_reason),
+                    "confidence": getattr(item, "confidence", None),
+                    "risk_score": getattr(item, "risk_score", None),
                 }
                 for item in top
             ],

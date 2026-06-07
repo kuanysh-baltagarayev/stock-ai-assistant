@@ -59,6 +59,9 @@ Implemented:
 - Telegram `/coverage` command that exposes the supported coverage matrix and known gaps.
 - Telegram company event calendar summaries derived from yfinance profile fields, including earnings and dividend hints.
 - Telegram main keyboard grouped into clearer analysis, news, alert, and portfolio sections.
+- Deterministic scan/digest briefing builder for Telegram that groups results
+  into key signals, watch items, and risk/data-quality items with confidence
+  and degradation flags, without OpenAI.
 - `analyze_ticker` now threads recent SEC EDGAR filing summaries into the main
   analysis payload, operation notes, and Telegram risk/detail views.
 - Recent SEC filing types and recency now feed into scoring as explicit
@@ -93,6 +96,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-08: `scripts/test_fast.sh` passed after adding deterministic
+  Telegram scan/digest briefing groups and focused briefing tests, with 97
+  tests passing.
 - 2026-06-02: `scripts/check.sh` passed after propagating sector-aware catalyst
   context into API/Telegram risk text and rule-based explanations, with targeted
   app/Telegram/scoring coverage plus the full repo verification script.
@@ -392,6 +398,543 @@ Rules:
 5. Keep source citations separate from generated prose.
 6. Fall back to rule-based explanations when the LLM fails, times out, violates constraints, or has no API key.
 7. Track OpenAI model, prompt version, and whether the explanation was rule-based or LLM-generated.
+
+## Deployment And Validation Posture
+
+Current product-validation stance:
+
+1. Do not prioritize production deployment yet; the app is still too early for a broader launch.
+2. When deployment becomes useful, prefer the existing Hetzner server that already hosts `avtoqyzmet.kz` instead of paying for a second idle server.
+3. The first deployment target should be Telegram-first validation for U.S. market research, not a public HTTP API.
+4. Keep the API bound to localhost unless there is a concrete reason to expose it publicly.
+5. Use Telegram access controls during the early validation phase so product-quality testing is not confused by public abuse, random traffic, or premature growth experiments.
+6. Treat public onboarding, open discovery, and broader demand testing as later phases after the bot is stable and personally useful.
+
+OpenAI stance for deployment and product validation:
+
+1. OpenAI is worth adding only as an optional explanation and summarization layer on top of deterministic facts.
+2. The core score, market facts, and risk signals must stay usable without OpenAI.
+3. Do not let the LLM become the primary market-analysis engine or the authority for prices, events, or recommendations.
+4. The first value from OpenAI should be better Telegram briefings, clearer summaries, and cleaner "what changed" explanations rather than more complex autonomous reasoning.
+
+## No-OpenAI Utility Roadmap
+
+This section is the detailed implementation queue for making the app useful
+before adding OpenAI. The goal is to reduce future planning cost: each slice
+names the intended product behavior, likely files, tests, acceptance criteria,
+and known constraints.
+
+Guiding principles:
+
+1. OpenAI must remain optional. Every workflow below must work with
+   `OPENAI_API_KEY` unset.
+2. Prioritize Telegram usefulness over public API expansion. The primary
+   user-facing loop is watchlist -> briefing -> detail -> audit -> refinement.
+3. Prefer source-backed deterministic summaries over generated prose.
+4. Keep each implementation slice small enough to verify with
+   `scripts/test_fast.sh`; run `scripts/check.sh` before committing.
+5. Use offline fixtures for provider and scoring tests. Live network checks stay
+   explicit through `ALLOW_LIVE_NETWORK=1`.
+6. Avoid public launch work until the bot is personally useful and stable.
+
+### Priority 1: Telegram Daily Briefing
+
+Product goal:
+
+1. Make `/scan mine` and scheduled digests answer the practical question:
+   "What should I look at today and why?"
+2. The answer should group results by actionability, not only by score.
+3. The message should be useful without tapping follow-up buttons.
+
+Current state:
+
+1. Telegram has watchlists, scans, digests, confidence thresholds, source-backed
+   detail commands, and scheduled session modes.
+2. Done: `app/services/briefing.py` now builds deterministic scan briefings and
+   Telegram scan/digest output groups results by key signals, watch items, and
+   risk/data-quality items.
+3. Remaining: briefing items still need score deltas, latest news timestamps,
+   richer freshness/source-gap flags, and reuse in CLI recent reports.
+
+Implementation plan:
+
+1. Add a deterministic briefing builder, preferably
+   `app/services/briefing.py`, rather than burying logic in Telegram formatting.
+2. Define a `BriefingItem`/`BriefingSummary` internal dataclass with:
+   ticker, label, final_score, score_delta, confidence, freshness_state,
+   latest_news_time, risk_flags, catalyst_flags, source_gap_flags, and
+   short_reason.
+3. Build the summary from existing `AnalyzeResponse`, saved
+   `AnalysisSnapshot`, `data_quality`, `market_session`, `news`, `sec_filings`,
+   and `operation_notes`.
+4. Use it in `TelegramBotService._scan_text`, scheduled digest formatting, and
+   optionally CLI `--recent`.
+5. Keep the first message under Telegram's practical reading limit:
+   top 5 tickers, one line per ticker, then short "market context" and
+   "degraded data" sections.
+
+Suggested files:
+
+1. `app/services/briefing.py`
+2. `app/services/telegram/_formatting.py`
+3. `app/services/telegram_bot.py`
+4. `tests/test_briefing.py`
+5. `tests/test_telegram_digests.py`
+6. `tests/test_telegram_disclaimers.py`
+
+Acceptance criteria:
+
+1. `/scan mine` shows a grouped briefing with confidence and freshness visible.
+2. Scheduled digests use the same deterministic summary structure.
+3. Low-confidence and stale-source results are not hidden silently; they are
+   either filtered by user threshold or shown under a degraded-data note.
+4. Tests cover empty watchlist, partial scan failure, low confidence, stale
+   data, source disagreement, and one high-risk catalyst.
+
+### Priority 2: Mandatory Freshness And Confidence In Telegram
+
+Product goal:
+
+1. Every important Telegram answer should show whether the signal is fresh,
+   delayed, stale, or degraded.
+2. Users should see confidence and source coverage before trusting a score.
+
+Current state:
+
+1. `AnalyzeResponse` already carries `data_quality`, `market_session`,
+   `source_provenance`, and operation notes.
+2. `/sources`, `/freshness`, and `/risk` expose much of this detail.
+3. The first `/analyze` and scan/digest messages still need a compact,
+   consistent freshness line.
+
+Implementation plan:
+
+1. Add a shared formatter helper for a compact freshness line:
+   session status, latest price timestamp, provider, confidence, and flags.
+2. Use it in `_analysis_text`, `_scan_text`, digest text, `_why_text`,
+   `_risk_text`, and audit output when available.
+3. Treat missing timestamp or unknown provider as a visible degradation, not as
+   a normal state.
+4. Keep the language non-advisory: "research signal", "confidence",
+   "data quality", "source gap".
+
+Suggested files:
+
+1. `app/services/telegram/_formatting.py`
+2. `app/services/coverage.py`
+3. `app/schemas.py`
+4. `tests/test_telegram_disclaimers.py`
+5. `tests/test_telegram_details.py`
+
+Acceptance criteria:
+
+1. `/analyze AAPL` includes one compact source/freshness/confidence line.
+2. `/scan mine` includes confidence and degraded-data counts.
+3. `/risk AAPL` includes data confidence and source gaps near the top.
+4. Tests assert the first answer does not require `/sources` to discover stale
+   or low-confidence data.
+
+### Priority 3: Thread FRED Macro Data Into Core Analysis
+
+Product goal:
+
+1. Use official FRED data to improve market context without OpenAI.
+2. Let macro conditions influence risk, weighting, and Telegram explanations
+   when `FRED_API_KEY` is configured.
+3. Keep graceful fallback when no FRED key exists.
+
+Current state:
+
+1. `app/services/fred_collector.py` exists and has tests.
+2. `scanner._save_macro_indicators()` persists FRED source snapshots when a DB
+   session and `FRED_API_KEY` are available.
+3. `analyze_ticker()` currently calls `build_macro_context(generated_at,
+   news_context=news_context)` without passing `fred_latest`, so persisted FRED
+   data does not reliably affect the main score.
+
+Implementation plan:
+
+1. Add a helper in `scanner.py` or a new macro service:
+   fetch FRED once per analysis when enabled, convert latest observations into
+   `{series_id: value}`.
+2. Pass the resulting `fred_latest` into `build_macro_context(...)`.
+3. Persist the same FRED collection as a `SourceSnapshot` when `db` is present.
+4. Add operation notes when FRED is unavailable, stale, or partially failed.
+5. Avoid repeated FRED calls during multi-ticker scans; introduce a scan-level
+   macro context or short TTL cache before using this in `scan_tickers`.
+6. Update `macro_context_summary()` text so Fed rate, unemployment, and CPI
+   context is explicit and not overstated.
+
+Suggested files:
+
+1. `app/services/scanner.py`
+2. `app/services/macro_context.py`
+3. `app/services/fred_collector.py`
+4. `tests/test_macro_context.py`
+5. `tests/test_app.py`
+6. `tests/test_fred_collector.py`
+
+Acceptance criteria:
+
+1. With mocked FRED data, `analyze_ticker()` passes `fred_latest` into scoring.
+2. FRED snapshot persistence remains optional and does not break analysis.
+3. Without `FRED_API_KEY`, analysis still passes and adds a clear non-fatal
+   operation note only when user-facing context needs it.
+4. Scans do not make one FRED network call per ticker.
+5. Tests cover FRED success, missing key, partial error, and scan reuse.
+
+### Priority 4: Market Regime Context
+
+Product goal:
+
+1. Stop analyzing a ticker in isolation.
+2. Add broad U.S. market context: index trend, volatility regime, rates/yields
+   backdrop, sector rotation, and risk-on/risk-off state.
+
+Current state:
+
+1. `MacroContext` has volatility/rate/inflation fields and upcoming events.
+2. Scoring already adapts weights when macro context exists.
+3. There is no dedicated market-regime collector or normalized regime snapshot.
+
+Implementation plan:
+
+1. Add `app/services/market_regime.py`.
+2. Start with a narrow, testable U.S. regime model:
+   SPY trend, QQQ trend, VIX proxy if available through yfinance, 10Y yield
+   proxy where available, and sector ETF relative strength for a small fixed
+   set.
+3. Represent regime as deterministic fields:
+   `index_trend`, `volatility_regime`, `rates_backdrop`, `sector_rotation`,
+   `risk_appetite`, `confidence`, and `source_provenance`.
+4. Feed regime into scoring as context, not as a dominant signal.
+5. Surface one short Telegram line: "Market regime: risk-on/risk-off/mixed,
+   confidence X, source Y".
+
+Suggested files:
+
+1. `app/services/market_regime.py`
+2. `app/services/scoring.py`
+3. `app/services/scanner.py`
+4. `app/services/telegram/_formatting.py`
+5. `tests/test_market_regime.py`
+6. `tests/test_macro_aware_scoring.py`
+
+Acceptance criteria:
+
+1. Regime builder works from offline price fixtures.
+2. Missing VIX/yield data degrades confidence instead of failing analysis.
+3. Telegram analysis includes a short regime line when available.
+4. Scoring tests prove regime affects risk/weights within capped bounds.
+
+### Priority 5: Score Decomposition In User Output
+
+Product goal:
+
+1. Make the deterministic score understandable without LLM prose.
+2. Show users whether a signal comes from momentum, valuation, event risk, or
+   weak data.
+
+Current state:
+
+1. `Scores` already has `momentum_score`, `valuation_score`, `risk_score`, and
+   `final_score`.
+2. Telegram currently prints the numeric scores but needs better grouping and
+   short deterministic labels.
+
+Implementation plan:
+
+1. Add a score-explanation helper that maps score ranges and reasons into
+   stable labels:
+   technical setup, valuation setup, event/news risk, data confidence.
+2. Avoid buy/sell phrasing. Use `HIGH_INTEREST`, `WATCH`, `NEUTRAL`,
+   `CAUTION`, `HIGH_RISK` and Russian translations.
+3. Add missing-data reasons so a high final score with poor source coverage is
+   visibly low-confidence.
+4. Use the same helper in API payload, Telegram analysis, digest, and CLI
+   recent report.
+
+Suggested files:
+
+1. `app/services/scoring_explain.py` or existing `ai_explainer.py` rule-based
+   section if kept cleanly separated from OpenAI.
+2. `app/services/telegram/_formatting.py`
+3. `scripts/scan_market.py`
+4. `tests/test_research_labels.py`
+5. `tests/test_telegram_disclaimers.py`
+
+Acceptance criteria:
+
+1. Telegram shows the top deterministic reasons grouped by technical,
+   valuation, risk, and data quality.
+2. The same payload works without OpenAI.
+3. Tests prove no buy/sell-like wording returns in user-facing text.
+
+### Priority 6: Historical Replay And Backtest Quality Review
+
+Product goal:
+
+1. Validate whether the deterministic score is useful over time.
+2. Keep this as quality review, not a performance promise.
+3. Make `/backtest TICKER` honest and actionable.
+
+Current state:
+
+1. `app/services/backtesting.py` and tests exist.
+2. Telegram recognizes `/backtest TICKER`.
+3. `TelegramBotService._backtest_ticker()` currently returns a placeholder when
+   there are snapshots but no historical-price comparison.
+
+Implementation plan:
+
+1. Finish `_backtest_ticker()` by pairing saved `AnalysisSnapshot.created_at`
+   with later price data over fixed horizons: 1d, 5d, 20d.
+2. Use adjusted or raw price policy explicitly and show which one was used.
+3. Add a CLI path, for example `scripts/scan_market.py --backtest AAPL`, only
+   if it stays small; Telegram first is enough for the first slice.
+4. Report hit rate by label, average forward return, false positives, false
+   negatives, sample size, and data-quality caveats.
+5. Add a "not enough data" path that tells the user how many saved analyses are
+   needed.
+
+Suggested files:
+
+1. `app/services/backtesting.py`
+2. `app/services/telegram_bot.py`
+3. `app/services/market_data.py`
+4. `tests/test_backtesting.py`
+5. `tests/test_telegram_details.py` or a new `tests/test_telegram_backtest.py`
+
+Acceptance criteria:
+
+1. `/backtest AAPL` compares historical snapshots to later prices when enough
+   data exists.
+2. The report includes sample size and explicit "not investment performance"
+   wording.
+3. Offline tests cover correct/incorrect signal classification, insufficient
+   data, missing price data, and neutral labels.
+
+### Priority 7: Better "Why Changed" Audit
+
+Product goal:
+
+1. Make `/audit TICKER` the explanation engine without OpenAI.
+2. Show why a score moved since the last snapshot.
+
+Current state:
+
+1. Raw source snapshots and analysis snapshots are persisted.
+2. `/audit` shows recent score/provenance changes.
+3. It can be expanded into a compact delta report.
+
+Implementation plan:
+
+1. Add a deterministic delta builder:
+   price delta, final score delta, sub-score deltas, label change, confidence
+   delta, source change, latest filing/news change, market session change.
+2. Include "probable drivers" from changed fields, not guessed causal claims.
+3. Add a "source changed" warning when provider or confidence changed between
+   snapshots.
+4. Reuse the same delta in daily briefings.
+
+Suggested files:
+
+1. `app/services/history.py`
+2. `app/services/telegram_bot.py`
+3. `app/services/briefing.py`
+4. `tests/test_history.py`
+5. `tests/test_telegram_details.py`
+
+Acceptance criteria:
+
+1. `/audit AAPL` explains score movement without LLM.
+2. It distinguishes real signal movement from source/freshness/confidence
+   changes.
+3. Tests cover score delta, confidence degradation, source disagreement,
+   filing/news arrival, and label change.
+
+### Priority 8: Source Gaps And Coverage Warnings
+
+Product goal:
+
+1. Users should know when a signal is narrow because sources are missing.
+2. The bot should prefer "degraded but useful" over silent confidence.
+
+Current state:
+
+1. `/coverage` exists.
+2. Provider registry and source snapshots exist.
+3. Coverage gaps are not shown consistently in every high-level Telegram
+   answer.
+
+Implementation plan:
+
+1. Create a per-analysis source coverage summary:
+   expected sources, present sources, missing optional sources, missing critical
+   sources, source disagreement, stale source count.
+2. For U.S. equities, expected sources should initially include market data,
+   SEC filings where CIK is known, macro calendar/context, and news context.
+3. Add a short source-gap line to analysis, scans, digests, and risk view.
+4. Keep `/coverage` as the detailed static matrix and use the per-analysis
+   summary for the current ticker.
+
+Suggested files:
+
+1. `app/services/coverage.py`
+2. `app/services/scanner.py`
+3. `app/services/telegram/_formatting.py`
+4. `tests/test_app.py`
+5. `tests/test_telegram_disclaimers.py`
+
+Acceptance criteria:
+
+1. A missing SEC/FRED/news source lowers or explains confidence where relevant.
+2. The first Telegram answer shows source gaps compactly.
+3. Tests cover full coverage, partial coverage, and stale source coverage.
+
+### Priority 9: Corporate Actions And Price Policy Hardening
+
+Product goal:
+
+1. Prevent misleading technical signals around splits, dividends, missing
+   candles, and partial sessions.
+2. Make price adjustment policy visible and testable.
+
+Current state:
+
+1. Price adjustment policy metadata exists.
+2. The plan still requires stronger handling for adjusted prices, splits,
+   dividends, missing candles, partial sessions, and delayed quotes.
+
+Implementation plan:
+
+1. Add fixtures for split/dividend/missing-candle scenarios.
+2. Add data-quality flags:
+   `split_detected`, `dividend_detected`, `missing_candles`,
+   `partial_session`, `adjustment_policy_warning`.
+3. Ensure technical indicators either use a documented adjusted series or mark
+   raw-close limitations.
+4. Telegram should show a short warning when corporate-action flags affect
+   confidence.
+
+Suggested files:
+
+1. `app/services/market_data.py`
+2. `app/services/indicators.py`
+3. `app/services/source_snapshots.py`
+4. `tests/test_app.py`
+5. `tests/test_indicators.py` if created
+
+Acceptance criteria:
+
+1. Split/dividend fixtures produce deterministic data-quality flags.
+2. Technical scores do not silently treat broken series as normal.
+3. Telegram shows corporate-action warnings when confidence is degraded.
+
+### Priority 10: Scheduler And User Preference Hardening
+
+Product goal:
+
+1. Make digests reliable enough for real personal use.
+2. Avoid duplicate, missed, or timezone-confusing alerts.
+
+Current state:
+
+1. Telegram has quiet hours, daily caps, market-hours-only mode, and digest
+   deduplication.
+2. The scheduler is still basic and not a full persisted job model.
+
+Implementation plan:
+
+1. Add persisted job records with last run, next run, status, failure reason,
+   and content fingerprint.
+2. Add per-chat timezone support to scheduling and display.
+3. Distinguish scheduled digest, breaking event, price move, and weekly review
+   job types.
+4. On partial provider failure, send a degraded digest if enough data exists;
+   do not pretend the refresh was complete.
+
+Suggested files:
+
+1. `app/models.py`
+2. `app/migrations.py`
+3. `app/services/telegram_bot.py`
+4. `app/services/market_hours.py`
+5. `tests/test_telegram_digests.py`
+6. `tests/test_telegram_preferences.py`
+
+Acceptance criteria:
+
+1. Restarting the bot does not duplicate the latest digest.
+2. Quiet hours and market-hours-only mode use the user's timezone.
+3. Failure reason is stored and visible in `/status` or preferences output.
+
+### Priority 11: Minimal Product Validation Metrics
+
+Product goal:
+
+1. Learn whether the bot is useful before public launch.
+2. Track usage without storing unnecessary personal data.
+
+Current state:
+
+1. Runtime logs exist.
+2. Telegram subscriptions and preferences are persisted.
+3. There is no explicit product-validation metric layer.
+
+Implementation plan:
+
+1. Track command usage counts by command, day, and chat ID hash or internal
+   chat ID according to the privacy policy chosen for the MVP.
+2. Track return usage: active chats per day/week, watchlist size, digest opens
+   cannot be measured directly in Telegram, but follow-up button usage can.
+3. Track quality proxies: number of rescans, `/audit`, `/sources`, `/risk`,
+   and `/remove` after alerts.
+4. Add an admin-only summary command or CLI report for personal validation.
+5. Do not add public growth funnels yet.
+
+Suggested files:
+
+1. `app/models.py`
+2. `app/migrations.py`
+3. `app/services/telegram_bot.py`
+4. `scripts/scan_market.py` or new `scripts/usage_report.py`
+5. `tests/test_telegram_preferences.py`
+
+Acceptance criteria:
+
+1. Usage metrics are stored without secrets or message text.
+2. Admin report shows daily active chats, command counts, and top workflows.
+3. Tests prove unsubscribe cleanup handles personal data consistently.
+
+### Priority 12: Documentation And Runbooks For The Closed Bot
+
+Product goal:
+
+1. Make the future private Telegram deployment repeatable without rediscovery.
+2. Keep public API exposure out of scope until explicitly chosen.
+
+Implementation plan:
+
+1. Add a closed-bot runbook only when deployment work begins.
+2. Include env variables, systemd service, local-only API policy, Telegram
+   long-polling/webhook choice, SQLite backup, logs, restart, and rollback.
+3. Document Hetzner shared-server constraints:
+   bind API to localhost, use one worker initially, enforce budgets, monitor
+   memory/CPU, and consider small swap.
+4. Do not deploy as part of this roadmap unless explicitly requested.
+
+Suggested files:
+
+1. `README.md`
+2. `docs/deploy-telegram-bot.md` if docs grow beyond README.
+3. `PLAN.md`
+
+Acceptance criteria:
+
+1. A future deployment can be performed from documented commands.
+2. The docs make clear that public API exposure is not part of the first bot
+   validation phase.
 
 ## Scoring Labels, Validation, And Calibration
 
@@ -730,17 +1273,49 @@ Status: in progress.
 
 ## Phase 5: Market Intelligence Layer
 
-1. Partly done: normalized source models exist for prices, SEC filings, exchange calendars, and news context; broader fundamentals and macro-release normalization remain incomplete.
-2. Partly done: official open sources are integrated for SEC EDGAR and exchange calendars; Federal Reserve/FRED, BLS, BEA, Treasury, and FOMC calendar feeds remain pending.
-3. Add market-session modeling by symbol and exchange, including regular, pre-market, after-hours, holiday, early-close, closed, and unknown states.
-4. Add source freshness, source disagreement, and confidence scoring to every analysis.
-5. Add data-quality handling for adjusted prices, splits, dividends, missing candles, partial sessions, and delayed quotes.
-6. Add open web collectors for news sites that lack stable APIs only when the source is legally accessible and useful, with caching, rate limits, provenance, and extraction tests.
-7. Add LLM source-grounding and prompt-injection protections before summarizing web/news content.
-8. Partly done: event-aware scoring already uses earnings, SEC filings, and macro events; sector-specific catalysts and richer political/regulatory modeling remain pending.
-9. Add market-regime context: broad index trend, volatility regime, rate/yield backdrop, sector rotation, and risk-on/risk-off state.
-10. Add historical replay/backtest tooling for score calibration and quality review.
-11. Partly done: Telegram alerts now cover confidence thresholds, duplicate suppression, threshold rules, and high-impact news push, but sector- and macro-watchlist-specific breaking-event routing remains pending.
+Detailed no-OpenAI implementation guidance lives in `No-OpenAI Utility Roadmap`
+above. Keep this phase list short and status-oriented.
+
+1. Partly done: normalized source models exist for prices, SEC filings, exchange
+   calendars, FRED macro observations, and news context; broader fundamentals,
+   BLS, BEA, Treasury, FOMC calendars, and issuer-event normalization remain
+   incomplete.
+2. Partly done: official open sources are integrated for SEC EDGAR, NYSE
+   calendar logic, and FRED collection; FRED data still needs to be threaded into
+   the main `analyze_ticker` macro context and scan-level reuse.
+3. Partly done: market-session modeling exists for U.S. equities; per-symbol
+   exchange/timezone expansion and non-U.S. session handling remain pending.
+4. Partly done: source freshness, source disagreement, and confidence fields
+   exist; every high-level Telegram answer still needs a mandatory compact
+   freshness/confidence/source-gap line.
+5. Pending: strengthen data-quality handling for adjusted prices, splits,
+   dividends, missing candles, partial sessions, and delayed quotes.
+6. Pending: add open web collectors for news sites that lack stable APIs only
+   when legally accessible and useful, with caching, rate limits, provenance,
+   extraction fixtures, and source allow/block rules.
+7. Deferred: add LLM source-grounding and prompt-injection protections before
+   using OpenAI for web/news summarization; this is not required for no-OpenAI
+   usefulness.
+8. Partly done: event-aware scoring already uses earnings, SEC filings, macro
+   events, sector sensitivity, sector-tagged news, and political/regulatory
+   catalysts; richer official macro-release feeds and issuer-event sources
+   remain pending.
+9. Pending: add market-regime context: SPY/QQQ trend, volatility regime,
+   rate/yield backdrop, sector rotation, and risk-on/risk-off state.
+10. Partly done: `backtesting.py` and tests exist, and Telegram parses
+   `/backtest`; complete historical price pairing and user-facing quality
+   report remain pending.
+11. Partly done: Telegram alerts cover confidence thresholds, duplicate
+   suppression, threshold rules, high-impact news push, and sector-routed
+   digests; macro-watchlist-specific breaking-event routing remains pending.
+12. Partly done: deterministic briefing builder exists for `/scan mine` and
+   scheduled digests; next step is enriching it with score deltas, freshness,
+   latest news timestamps, and per-analysis source gaps.
+13. Pending: upgrade `/audit` into a deterministic "why changed" report that
+   separates real signal movement from source, freshness, and confidence drift.
+14. Pending: add minimal product-validation metrics for private testing:
+   command counts, active chats, follow-up usage, and workflow retention without
+   storing unnecessary message text.
 
 ## Phase 6: Controlled Market Expansion
 

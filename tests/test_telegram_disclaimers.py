@@ -86,6 +86,8 @@ class TelegramDisclaimerTests(unittest.TestCase):
                 final_score=77.7,
                 price=189.12,
                 short_reason="sample reason",
+                confidence=0.91,
+                risk_score=35.0,
             )
         ]
         errors = [SimpleNamespace(ticker="NVDA", error="yfinance timeout")]
@@ -98,6 +100,35 @@ class TelegramDisclaimerTests(unittest.TestCase):
 
         self.assertIn("Сводка операций: market-data: 1, OpenAI: 1", text)
         self.assertIn("Ошибки:", text)
+
+    def test_scan_text_groups_briefing_and_shows_confidence(self) -> None:
+        results = [
+            SimpleNamespace(
+                ticker="AAPL",
+                recommendation="HIGH_INTEREST",
+                final_score=84.0,
+                price=189.12,
+                short_reason="strong setup",
+                confidence=0.92,
+                risk_score=35.0,
+            ),
+            SimpleNamespace(
+                ticker="NVDA",
+                recommendation="CAUTION",
+                final_score=43.0,
+                price=120.0,
+                short_reason="event risk",
+                confidence=0.62,
+                risk_score=78.0,
+            ),
+        ]
+
+        text = self.service._scan_text(results, [])
+
+        self.assertIn("Ключевые сигналы:", text)
+        self.assertIn("Риск/качество данных:", text)
+        self.assertIn("уверенность 0.92", text)
+        self.assertIn("высокий риск 78", text)
 
     def test_risk_text_surfaces_data_quality_warnings(self) -> None:
         snapshot = SimpleNamespace(
