@@ -18,6 +18,11 @@ else
     tests.test_app.ConfigurationTests \
     tests.test_scripts \
     tests.test_provider_collectors \
+    tests.test_coverage \
+    tests.test_corporate_actions \
+    tests.test_scheduler \
+    tests.test_usage_metrics \
+    tests.test_telegram_digests \
     tests.test_telegram_digests \
     tests.test_telegram_details \
     tests.test_telegram_followups \

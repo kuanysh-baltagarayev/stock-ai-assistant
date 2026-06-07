@@ -147,6 +147,7 @@ class TelegramSubscription(Base):
     daily_alert_count: Mapped[int] = mapped_column(Integer, default=0)
     daily_alert_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     last_alert_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -157,4 +158,58 @@ class TelegramSubscription(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         index=True,
+    )
+
+
+class ScheduledJob(Base):
+    """Persisted job record for scheduled tasks (digests, alerts, reviews).
+
+    Fields track the job lifecycle so restarts do not duplicate work and
+    failures are visible in status output.
+    """
+
+    __tablename__ = "scheduled_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    job_type: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    content_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    schedule_cron: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class UsageMetric(Base):
+    """Aggregated usage counter, one row per (day, chat_id, command).
+
+    Stores no message text, only de-identified counts for product-validation
+    queries. The ``day`` field is a ``YYYY-MM-DD`` string in UTC.
+    """
+
+    __tablename__ = "usage_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    command: Mapped[str] = mapped_column(String(64), index=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )

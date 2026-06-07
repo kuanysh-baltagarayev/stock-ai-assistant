@@ -36,6 +36,7 @@ from app.services.sector_sensitivity import macro_impact_notes, get_sector_sensi
 from app.services.instruments import upsert_instrument
 from app.services.history import cleanup_old_snapshots
 from app.services.indicators import calculate_indicators
+from app.services.coverage import build_coverage_summary, format_coverage_gap_line
 from app.config import get_settings
 from app.services.market_data import (
     MarketDataError,
@@ -466,6 +467,11 @@ def _build_data_quality(market: dict) -> dict:
         estimated=bool(data_quality.get("estimated", False)),
         missing=bool(data_quality.get("missing", False)),
         source_disagreed=bool(data_quality.get("source_disagreed", False)),
+        split_detected=bool(data_quality.get("split_detected", False)),
+        dividend_detected=bool(data_quality.get("dividend_detected", False)),
+        missing_candles=int(data_quality.get("missing_candles", 0)),
+        partial_session=bool(data_quality.get("partial_session", False)),
+        adjustment_policy_warning=data_quality.get("adjustment_policy_warning"),
         confidence=float(data_quality.get("confidence", 1.0)),
         summary=data_quality.get("summary"),
     ).model_dump(mode="json")
@@ -646,6 +652,37 @@ def _build_operation_notes(
     quality_summary = data_quality.get("summary")
     if quality_summary and quality_summary != "ok":
         notes.append(f"Data quality: {quality_summary}.")
+
+    # Per-analysis source coverage summary
+    sec_available = bool(sec_filings)
+    cik_available = bool(sec_filings and isinstance(sec_filings, dict) and sec_filings.get("cik"))
+    # News availability: we check via the same news context used by the
+    # caller — here we skip it because news is not passed as a parameter
+    # to this function. The coverage summary still detects sec, macro and
+    # regime gaps correctly.
+    macro_present = macro_context is not None and bool(
+        getattr(macro_context, "rate_direction", None)
+        or getattr(macro_context, "inflation_level", None)
+        or getattr(macro_context, "latest_fed_funds_rate", None)
+    )
+    regime_present = market_regime is not None and getattr(market_regime, "confidence", 0) > 0
+    coverage_summary = build_coverage_summary(
+        has_sec_filings=sec_available,
+        cik_available=cik_available,
+        has_news=False,  # best-effort; news_notes are appended separately
+        has_macro_context=macro_present,
+        has_market_regime=regime_present,
+        provider_name=market.get("provider_name"),
+        source_tier=market.get("source_tier"),
+        stale=bool(data_quality.get("stale")),
+        delayed=bool(data_quality.get("delayed")),
+        missing=bool(data_quality.get("missing")),
+        source_disagreed=bool(data_quality.get("source_disagreed")),
+        confidence=data_quality.get("confidence"),
+    )
+    coverage_line = format_coverage_gap_line(coverage_summary)
+    if coverage_line:
+        notes.append(coverage_line)
 
     notes.extend(fred_notes)
     notes.extend(market_regime_summary(market_regime))

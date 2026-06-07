@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal, init_db
-from app.models import AnalysisSnapshot, SourceSnapshot, TelegramSubscription
+from app.models import AnalysisSnapshot, ScheduledJob, SourceSnapshot, TelegramSubscription, UsageMetric
 from app.services.alert_rules import (
     evaluate_rules,
     format_rule,
@@ -240,6 +240,10 @@ class TelegramBotService(
         username = user.get("username") or user.get("first_name") or user.get("last_name")
 
         action, args = self._resolve_action(text)
+        # Record product-validation metrics for user-initiated actions.
+        # Skip system-only commands (back, ticker_menu, preferences).
+        if action not in ("start", "help", "back", "ticker_menu", "preferences", "subscribe"):
+            self._record_usage(int(chat_id), action)
 
         if action == "start":
             is_first_use = self._subscription_for_chat(int(chat_id)) is None
@@ -467,6 +471,34 @@ class TelegramBotService(
             )
             return
 
+        if action == "timezone":
+            tz_arg = args[0] if args else ""
+            if not tz_arg:
+                sub = self._subscription_for_chat(int(chat_id))
+                current_tz = getattr(sub, "timezone", None) if sub else None
+                msg = f"Текущий часовой пояс: {current_tz or 'не установлен (UTC)'}.\nУстанови: /timezone America/New_York"
+                await self._send_message(int(chat_id), msg, reply_markup=self._main_keyboard())
+                return
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(tz_arg)
+            except (ValueError, ImportError):
+                await self._send_message(
+                    int(chat_id),
+                    f"Некорректный часовой пояс: {tz_arg}. Пример: /timezone America/New_York",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            self._upsert_subscription(
+                int(chat_id), username=username, active=True, preferences={"timezone": tz_arg}
+            )
+            await self._send_message(
+                int(chat_id),
+                f"Часовой пояс установлен: {tz_arg}.",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
         if action == "scan_mine":
             watchlist = self._watchlist_tickers(int(chat_id))
             if not watchlist:
@@ -517,6 +549,50 @@ class TelegramBotService(
                 self._coverage_text(),
                 reply_markup=self._main_keyboard(),
             )
+            return
+
+        if action == "usage":
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            db = SessionLocal()
+            try:
+                rows = (
+                    db.query(UsageMetric)
+                    .filter(UsageMetric.day == today)
+                    .all()
+                )
+                if not rows:
+                    await self._send_message(
+                        int(chat_id),
+                        "За сегодня нет данных об использовании.",
+                        reply_markup=self._main_keyboard(),
+                    )
+                    return
+                active_chats = len(set(r.chat_id for r in rows))
+                commands: dict[str, int] = {}
+                for r in rows:
+                    commands[r.command] = commands.get(r.command, 0) + (r.count or 0)
+                sorted_cmds = sorted(commands.items(), key=lambda x: -x[1])
+                lines = [
+                    f"📊 Использование за {today}:",
+                    f"Активные чаты: {active_chats}",
+                    "Команды:",
+                ]
+                for cmd, cnt in sorted_cmds[:10]:
+                    lines.append(f"  {cmd}: {cnt}")
+                await self._send_message(
+                    int(chat_id),
+                    "\n".join(lines),
+                    reply_markup=self._main_keyboard(),
+                )
+            except Exception:
+                logger.exception("usage_query_failed", extra={"component": "telegram"})
+                await self._send_message(
+                    int(chat_id),
+                    "❌ Ошибка при получении статистики использования.",
+                    reply_markup=self._main_keyboard(),
+                )
+            finally:
+                db.close()
             return
 
         if action == "backtest":
@@ -913,6 +989,9 @@ class TelegramBotService(
         )
 
         for subscriber in subscribers:
+            job_id = self._record_job(
+                subscriber.chat_id, job_type=f"digest_{mode}"
+            )
             skip_reason = self._digest_skip_reason(subscriber)
             if skip_reason:
                 logger.info(
@@ -923,11 +1002,13 @@ class TelegramBotService(
                         "reason": skip_reason,
                     },
                 )
+                self._complete_job(job_id, status="skipped", reason=skip_reason)
                 continue
             tickers = self._watchlist_tickers_for_subscription(subscriber)
             if not tickers:
                 tickers = self._configured_tickers()
             if not tickers:
+                self._complete_job(job_id, status="skipped", reason="no_tickers")
                 continue
 
             response = await asyncio.to_thread(scan_tickers, tickers, None)
@@ -952,7 +1033,20 @@ class TelegramBotService(
                         "reason": "duplicate_digest",
                     },
                 )
+                self._complete_job(job_id, status="skipped", reason="duplicate")
                 continue
+
+            # Degraded digest: if some tickers failed, send a degraded
+            # digest rather than skipping entirely or pretending all is well.
+            partial_failure = getattr(response.summary, "partial_failure", False)
+            if partial_failure:
+                # Scan had errors; send "degraded" digest with what worked.
+                digest_heading = "⚠️ Дайджест (неполный)"
+                self._record_job(
+                    subscriber.chat_id,
+                    job_type="degraded_digest",
+                )
+
             digest = self._digest_text(
                 response.results,
                 response.errors,
@@ -961,6 +1055,9 @@ class TelegramBotService(
                 min_confidence=min_confidence,
                 news_items=impact_items,
             )
+            if partial_failure:
+                digest = f"{digest_heading}\n{digest}"
+
             logger.info(
                 "telegram_digest_ready",
                 extra={
@@ -970,10 +1067,12 @@ class TelegramBotService(
                     "ticker_count": len(tickers),
                     "result_count": len(response.results),
                     "error_count": len(response.errors),
+                    "partial_failure": partial_failure,
                 },
             )
             await self._send_message(subscriber.chat_id, digest)
             self._mark_last_alert(subscriber.id, digest_fingerprint=digest_fingerprint)
+            self._complete_job(job_id, status="completed")
 
     def _analyze_and_persist(self, ticker: str) -> Any:
         db = SessionLocal()
@@ -1084,6 +1183,113 @@ class TelegramBotService(
                 .all()
             )
             return [sub for sub in subscribers if self._chat_is_allowed(sub.chat_id)]
+        finally:
+            db.close()
+
+    def _record_job(
+        self,
+        chat_id: int,
+        job_type: str = "digest",
+    ) -> int | None:
+        """Create or update a ScheduledJob record for the given chat + type.
+
+        Returns the job ID so callers can pass it to ``_complete_job``.
+        Returns ``None`` when persistence fails (best-effort, non-fatal).
+        """
+        db = SessionLocal()
+        try:
+            job = (
+                db.query(ScheduledJob)
+                .filter(
+                    ScheduledJob.chat_id == int(chat_id),
+                    ScheduledJob.job_type == str(job_type),
+                )
+                .order_by(ScheduledJob.id.desc())
+                .first()
+            )
+            if job is None:
+                job = ScheduledJob(
+                    chat_id=int(chat_id),
+                    job_type=str(job_type),
+                    status="running",
+                    last_run_at=datetime.now(timezone.utc),
+                )
+                db.add(job)
+            else:
+                job.status = "running"
+                job.last_run_at = datetime.now(timezone.utc)
+                job.failure_reason = None
+            db.commit()
+            db.refresh(job)
+            return job.id
+        except Exception:
+            logger.exception(
+                "job_record_failed",
+                extra={"component": "telegram", "chat_id": chat_id, "job_type": job_type},
+            )
+            return None
+        finally:
+            db.close()
+
+    def _complete_job(
+        self,
+        job_id: int | None,
+        status: str = "completed",
+        reason: str | None = None,
+    ) -> None:
+        """Mark a ScheduledJob as completed, failed, or skipped."""
+        if job_id is None:
+            return
+        db = SessionLocal()
+        try:
+            job = db.query(ScheduledJob).filter(ScheduledJob.id == job_id).first()
+            if job is not None:
+                job.status = status
+                if reason and status in ("failed", "skipped"):
+                    job.failure_reason = reason
+                db.commit()
+        except Exception:
+            logger.exception(
+                "job_complete_failed",
+                extra={"component": "telegram", "job_id": job_id, "status": status},
+            )
+        finally:
+            db.close()
+
+    def _record_usage(self, chat_id: int, command: str) -> None:
+        """Increment the usage counter for (today, chat_id, command).
+
+        Stores no message text — only a de-identified count.
+        Best-effort: failures are logged but do not affect the bot.
+        """
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        db = SessionLocal()
+        try:
+            metric = (
+                db.query(UsageMetric)
+                .filter(
+                    UsageMetric.day == today,
+                    UsageMetric.chat_id == int(chat_id),
+                    UsageMetric.command == str(command),
+                )
+                .first()
+            )
+            if metric is None:
+                metric = UsageMetric(
+                    day=today,
+                    chat_id=int(chat_id),
+                    command=str(command),
+                    count=1,
+                )
+                db.add(metric)
+            else:
+                metric.count = (metric.count or 0) + 1
+            db.commit()
+        except Exception:
+            logger.exception(
+                "usage_metric_record_failed",
+                extra={"component": "telegram", "chat_id": chat_id, "command": command},
+            )
         finally:
             db.close()
 
@@ -1489,6 +1695,17 @@ class TelegramBotService(
             return "market_hours", []
         if lowered in {"/markethours", "markethours", "/market-hours", "market-hours"}:
             return "preferences", []
+
+        if lowered.startswith("/timezone ") or lowered.startswith("timezone "):
+            parts = normalized.split(maxsplit=1)
+            if len(parts) == 2:
+                return "timezone", [parts[1].strip()]
+            return "timezone", []
+        if lowered in {"/timezone", "timezone"}:
+            return "timezone", []
+
+        if lowered in {"/usage", "usage"}:
+            return "usage", []
 
         if lowered.startswith("/add ") or lowered.startswith("add "):
             parts = normalized.split(maxsplit=1)

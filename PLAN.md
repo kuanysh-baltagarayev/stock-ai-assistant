@@ -845,35 +845,13 @@ Product goal:
 
 Current state:
 
-1. `/coverage` exists.
-2. Provider registry and source snapshots exist.
-3. Coverage gaps are not shown consistently in every high-level Telegram
-   answer.
-
-Implementation plan:
-
-1. Create a per-analysis source coverage summary:
-   expected sources, present sources, missing optional sources, missing critical
-   sources, source disagreement, stale source count.
-2. For U.S. equities, expected sources should initially include market data,
-   SEC filings where CIK is known, macro calendar/context, and news context.
-3. Add a short source-gap line to analysis, scans, digests, and risk view.
-4. Keep `/coverage` as the detailed static matrix and use the per-analysis
-   summary for the current ticker.
-
-Suggested files:
-
-1. `app/services/coverage.py`
-2. `app/services/scanner.py`
-3. `app/services/telegram/_formatting.py`
-4. `tests/test_app.py`
-5. `tests/test_telegram_disclaimers.py`
-
-Acceptance criteria:
-
-1. A missing SEC/FRED/news source lowers or explains confidence where relevant.
-2. The first Telegram answer shows source gaps compactly.
-3. Tests cover full coverage, partial coverage, and stale source coverage.
+1. Done: `app/services/coverage.py` now has `build_coverage_summary()`,
+   `format_coverage_gap_line()`, and `format_coverage_detail_lines()`.
+2. Done: the per-analysis coverage summary is added to scanner operation notes
+   as a compact one-liner (e.g. "Покрытие: частичное (нет новостей)").
+3. Done: `/risk` shows detailed coverage info via `format_coverage_detail_lines()`.
+4. Done: 20 tests in `tests/test_coverage.py` covering full, partial, minimal
+   coverage, degradation flags, and formatting.
 
 ### Priority 9: Corporate Actions And Price Policy Hardening
 
@@ -885,34 +863,17 @@ Product goal:
 
 Current state:
 
-1. Price adjustment policy metadata exists.
-2. The plan still requires stronger handling for adjusted prices, splits,
-   dividends, missing candles, partial sessions, and delayed quotes.
-
-Implementation plan:
-
-1. Add fixtures for split/dividend/missing-candle scenarios.
-2. Add data-quality flags:
-   `split_detected`, `dividend_detected`, `missing_candles`,
-   `partial_session`, `adjustment_policy_warning`.
-3. Ensure technical indicators either use a documented adjusted series or mark
-   raw-close limitations.
-4. Telegram should show a short warning when corporate-action flags affect
-   confidence.
-
-Suggested files:
-
-1. `app/services/market_data.py`
-2. `app/services/indicators.py`
-3. `app/services/source_snapshots.py`
-4. `tests/test_app.py`
-5. `tests/test_indicators.py` if created
-
-Acceptance criteria:
-
-1. Split/dividend fixtures produce deterministic data-quality flags.
-2. Technical scores do not silently treat broken series as normal.
-3. Telegram shows corporate-action warnings when confidence is degraded.
+1. Done: `DataQualityFlags` schema has `split_detected`, `dividend_detected`,
+   `missing_candles`, `partial_session`, `adjustment_policy_warning` fields.
+2. Done: `_build_data_quality()` in `market_data.py` detects splits (>33%
+   daily moves), dividends (1-33% drops), missing candles (calendar gaps >4
+   days), and partial sessions (zero volume in recent rows).
+3. Done: `indicators.py` now documents raw-close limitations in a module-level
+   comment.
+4. Done: Telegram `_data_quality_warning_lines()` shows CA warnings in Russian.
+5. Done: 12 tests in `tests/test_corporate_actions.py` covering split,
+   reverse-split, dividend, missing candles, confidence penalties, and edge
+   cases.
 
 ### Priority 10: Scheduler And User Preference Hardening
 
@@ -923,34 +884,17 @@ Product goal:
 
 Current state:
 
-1. Telegram has quiet hours, daily caps, market-hours-only mode, and digest
-   deduplication.
-2. The scheduler is still basic and not a full persisted job model.
-
-Implementation plan:
-
-1. Add persisted job records with last run, next run, status, failure reason,
-   and content fingerprint.
-2. Add per-chat timezone support to scheduling and display.
-3. Distinguish scheduled digest, breaking event, price move, and weekly review
-   job types.
-4. On partial provider failure, send a degraded digest if enough data exists;
-   do not pretend the refresh was complete.
-
-Suggested files:
-
-1. `app/models.py`
-2. `app/migrations.py`
-3. `app/services/telegram_bot.py`
-4. `app/services/market_hours.py`
-5. `tests/test_telegram_digests.py`
-6. `tests/test_telegram_preferences.py`
-
-Acceptance criteria:
-
-1. Restarting the bot does not duplicate the latest digest.
-2. Quiet hours and market-hours-only mode use the user's timezone.
-3. Failure reason is stored and visible in `/status` or preferences output.
+1. Done: `ScheduledJob` model with chat_id, job_type, status, last_run_at,
+   failure_reason, content_fingerprint, and schedule_cron.
+2. Done: `TelegramSubscription.timezone` column for per-chat timezone.
+3. Done: `_record_job()` and `_complete_job()` helpers in TelegramBotService.
+4. Done: degraded digest support — when scan_tickers returns partial_failure,
+   a "⚠️ Дайджест (неполный)" heading is prepended and a `degraded_digest`
+   job is recorded.
+5. Done: `/timezone America/New_York` command with ZoneInfo validation.
+6. Done: migration 0012 for both tables and column.
+7. Done: 12 tests in `tests/test_scheduler.py` for job CRUD and timezone
+   persistence.
 
 ### Priority 11: Minimal Product Validation Metrics
 
@@ -961,34 +905,14 @@ Product goal:
 
 Current state:
 
-1. Runtime logs exist.
-2. Telegram subscriptions and preferences are persisted.
-3. There is no explicit product-validation metric layer.
-
-Implementation plan:
-
-1. Track command usage counts by command, day, and chat ID hash or internal
-   chat ID according to the privacy policy chosen for the MVP.
-2. Track return usage: active chats per day/week, watchlist size, digest opens
-   cannot be measured directly in Telegram, but follow-up button usage can.
-3. Track quality proxies: number of rescans, `/audit`, `/sources`, `/risk`,
-   and `/remove` after alerts.
-4. Add an admin-only summary command or CLI report for personal validation.
-5. Do not add public growth funnels yet.
-
-Suggested files:
-
-1. `app/models.py`
-2. `app/migrations.py`
-3. `app/services/telegram_bot.py`
-4. `scripts/scan_market.py` or new `scripts/usage_report.py`
-5. `tests/test_telegram_preferences.py`
-
-Acceptance criteria:
-
-1. Usage metrics are stored without secrets or message text.
-2. Admin report shows daily active chats, command counts, and top workflows.
-3. Tests prove unsubscribe cleanup handles personal data consistently.
+1. Done: `UsageMetric` model with day, chat_id, command, count — no message
+   text or secrets.
+2. Done: `_record_usage()` helper in TelegramBotService, called on every
+   user-initiated action.
+3. Done: `/usage` command showing today's active chats and top commands.
+4. Done: migration 0013 for the usage_metrics table.
+5. Done: 7 tests in `tests/test_usage_metrics.py` for CRUD, aggregation,
+   per-day active chats, command totals, and no-message-text assertion.
 
 ### Priority 12: Documentation And Runbooks For The Closed Bot
 
@@ -997,27 +921,13 @@ Product goal:
 1. Make the future private Telegram deployment repeatable without rediscovery.
 2. Keep public API exposure out of scope until explicitly chosen.
 
-Implementation plan:
+Current state:
 
-1. Add a closed-bot runbook only when deployment work begins.
-2. Include env variables, systemd service, local-only API policy, Telegram
-   long-polling/webhook choice, SQLite backup, logs, restart, and rollback.
-3. Document Hetzner shared-server constraints:
-   bind API to localhost, use one worker initially, enforce budgets, monitor
-   memory/CPU, and consider small swap.
-4. Do not deploy as part of this roadmap unless explicitly requested.
-
-Suggested files:
-
-1. `README.md`
-2. `docs/deploy-telegram-bot.md` if docs grow beyond README.
-3. `PLAN.md`
-
-Acceptance criteria:
-
-1. A future deployment can be performed from documented commands.
-2. The docs make clear that public API exposure is not part of the first bot
-   validation phase.
+1. Done: `docs/deploy-telegram-bot.md` — full runbook covering systemd service,
+   .env setup, SQLite backup/restore, logs, update, rollback, resource limits
+   for Hetzner shared server, and security notes.
+2. Done: the runbook makes clear that public API exposure is not part of the
+   first bot validation phase.
 
 ## Scoring Labels, Validation, And Calibration
 

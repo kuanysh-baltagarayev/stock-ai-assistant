@@ -11,7 +11,7 @@ from app.services.alert_rules import format_rule
 from app.services.briefing import BriefingItem, BriefingSummary, build_scan_briefing
 from app.services.history import build_score_delta, list_recent_snapshots
 from app.services.operation_summaries import format_operation_summary
-from app.services.coverage import format_coverage_text
+from app.services.coverage import format_coverage_text, format_coverage_detail_lines
 from app.services.exchange_calendar import get_market_hours_info
 from app.services.correlation import calculate_correlation_matrix, correlation_insights
 
@@ -22,6 +22,7 @@ class FormattingMixin:
             "Нажимай кнопки под сообщением.\n"
             "Доступно:\n"
             "• подписка и отписка\n"
+            "• часовой пояс: /timezone America/New_York\n"
             "• статус подписки\n"
             "• coverage matrix по /coverage\n"
             "• просмотр и редактирование личного списка тикеров\n"
@@ -386,6 +387,38 @@ class FormattingMixin:
         ]
         if payload.get("short_reason"):
             lines.append(f"Short reason: {self._translate_text(str(payload.get('short_reason')))}")
+
+        # Coverage detail lines
+        sec_available = bool(sec_filings)
+        cik_available = bool(sec_filings and isinstance(sec_filings, dict) and sec_filings.get("cik"))
+        news_payload = payload.get("news") or {}
+        news_available = bool(news_payload.get("articles"))
+        macro_available = bool(
+            scores.get("macro_adjustment") is not None
+        )
+        regime_available = bool(
+            scores.get("market_regime_adjustment") is not None
+        )
+        from app.services.coverage import build_coverage_summary
+        coverage_summary = build_coverage_summary(
+            has_sec_filings=sec_available,
+            cik_available=cik_available,
+            has_news=news_available,
+            has_macro_context=macro_available,
+            has_market_regime=regime_available,
+            provider_name=data_quality.get("provider_name"),
+            source_tier=data_quality.get("source_tier"),
+            stale=bool(data_quality.get("stale")),
+            delayed=bool(data_quality.get("delayed")),
+            missing=bool(data_quality.get("missing")),
+            source_disagreed=bool(data_quality.get("source_disagreed")),
+            confidence=data_quality.get("confidence"),
+        )
+        coverage_detail = format_coverage_detail_lines(coverage_summary)
+        if coverage_detail:
+            lines.extend(["", "Покрытие источников:"])
+            lines.extend(f"- {line}" for line in coverage_detail)
+
         quality_lines = self._data_quality_warning_lines(data_quality)
         if quality_lines:
             lines.extend(["", "Quality warnings:"])
@@ -786,12 +819,15 @@ class FormattingMixin:
         daily_alert_date = getattr(subscription, "daily_alert_date", None)
         daily_alert_count = getattr(subscription, "daily_alert_count", 0) or 0
         current_count = daily_alert_count if daily_alert_date == today_key else 0
+        timezone = getattr(subscription, "timezone", None)
+        tz_line = f"• Часовой пояс: {timezone}" if timezone else "• Часовой пояс: не установлен (UTC)"
         return (
             "Настройки уведомлений:\n"
             f"• Quiet hours: {quiet_hours}\n"
             f"• Daily cap: {daily_cap}\n"
             f"• Минимальная уверенность: {confidence_text}\n"
             f"• Market-hours-only: {market_hours_only}\n"
+            f"{tz_line}\n"
             f"• Сегодня отправлено: {current_count}"
         )
 

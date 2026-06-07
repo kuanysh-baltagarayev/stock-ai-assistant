@@ -131,6 +131,7 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             latest_history_timestamp=latest_history_timestamp,
             fetched_at=fetched_at,
             currency=currency,
+            history=history,
         )
         fx = _build_fx_metadata(currency=currency, fetched_at=fetched_at)
         event_calendar = _build_event_calendar(info=info, fetched_at=fetched_at)
@@ -617,12 +618,18 @@ def _build_data_quality(
     latest_history_timestamp: datetime | None,
     fetched_at: datetime,
     currency: str | None,
+    history: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     stale = False
     delayed = False
     estimated = False
     missing = not bool(info)
     source_disagreed = False
+    split_detected = False
+    dividend_detected = False
+    missing_candles = 0
+    partial_session = False
+    adjustment_policy_warning = None
 
     if latest_history_timestamp is not None:
         stale = fetched_at - latest_history_timestamp > timedelta(days=1)
@@ -638,6 +645,50 @@ def _build_data_quality(
         baseline = max(abs(price), 1.0)
         source_disagreed = spread / baseline > 0.01
 
+    # Corporate-action and missing-candle detection from price history.
+    if history is not None and not history.empty and "Close" in history.columns:
+        close = history["Close"].dropna().astype(float)
+        if len(close) >= 5:
+            # Split detection: a daily return beyond ±33 % (ex-dividend
+            # returns are typically <20 %; anything above suggests a split
+            # or reverse-split in raw-close data).
+            daily_pct = close.pct_change().dropna()
+            if (daily_pct.abs() > 0.33).any():
+                split_detected = True
+                adjustment_policy_warning = (
+                    "raw_close_no_auto_adjustment"
+                )
+
+            # Dividend detection: a daily price drop of >1 % that is less
+            # than the split threshold and where Volume is not 0 — common
+            # ex-dividend pattern in raw data.
+            drops = daily_pct[(daily_pct < -0.01) & (daily_pct >= -0.33)]
+            if not drops.empty:
+                dividend_detected = True
+
+        # Missing-candle detection: count business-day gaps longer than
+        # 4 calendar days (covers weekends + 1 holiday, flags longer).
+        if len(history.index) >= 3:
+            dates = pd.Series(history.index)
+            date_diffs = dates.diff().dropna()
+            # Convert to calendar days
+            cal_days = date_diffs.apply(lambda d: d.days if hasattr(d, "days") else 0)
+            missing_candles = int((cal_days > 4).sum())
+
+        # Partial-session detection: if any row has zero volume when
+        # non-zero data exists for that day, flag it. Simple heuristic:
+        # check if the most recent session looks partial.
+        if "Volume" in history.columns:
+            last_volume = history["Volume"].dropna()
+            if len(last_volume) >= 3:
+                recent_volume = last_volume.iloc[-3:]
+                zero_volume_days = (recent_volume == 0).sum()
+                if zero_volume_days >= 2:
+                    partial_session = True
+                    adjustment_policy_warning = (
+                        adjustment_policy_warning or "partial_session_detected"
+                    )
+
     confidence = 1.0
     if stale:
         confidence -= 0.2
@@ -649,6 +700,14 @@ def _build_data_quality(
         confidence -= 0.1
     if source_disagreed:
         confidence -= 0.2
+    if split_detected:
+        confidence -= 0.15
+    if dividend_detected:
+        confidence -= 0.05
+    if missing_candles > 0:
+        confidence -= 0.1
+    if partial_session:
+        confidence -= 0.1
     if currency and currency.upper() != "USD":
         confidence -= 0.05
     confidence = max(0.0, round(confidence, 2))
@@ -660,6 +719,16 @@ def _build_data_quality(
         "missing": missing,
         "source_disagreed": source_disagreed,
     }.items() if enabled]
+    if split_detected:
+        flags.append("split detected")
+    if dividend_detected:
+        flags.append("dividend detected")
+    if partial_session:
+        flags.append("partial session")
+    if missing_candles > 0:
+        flags.append(f"{missing_candles} missing candles")
+    if adjustment_policy_warning:
+        flags.append(f"price: {adjustment_policy_warning}")
     summary = "ok" if not flags else ", ".join(flags)
     return {
         "stale": stale,
@@ -667,6 +736,11 @@ def _build_data_quality(
         "estimated": estimated,
         "missing": missing,
         "source_disagreed": source_disagreed,
+        "split_detected": split_detected,
+        "dividend_detected": dividend_detected,
+        "missing_candles": missing_candles,
+        "partial_session": partial_session,
+        "adjustment_policy_warning": adjustment_policy_warning,
         "confidence": confidence,
         "summary": summary,
     }

@@ -60,12 +60,7 @@ def _upgrade_0005_telegram_watchlists(connection: Connection) -> None:
     if "watchlist_symbols" in columns:
         return
     connection.execute(
-        text(
-            """
-            ALTER TABLE telegram_subscriptions
-            ADD COLUMN watchlist_symbols JSON
-            """
-        )
+        text("ALTER TABLE telegram_subscriptions ADD COLUMN watchlist_symbols JSON")
     )
 
 
@@ -86,12 +81,7 @@ def _upgrade_0006_telegram_preferences(connection: Connection) -> None:
         if column_name in columns:
             continue
         connection.execute(
-            text(
-                f"""
-                ALTER TABLE telegram_subscriptions
-                ADD COLUMN {column_name} {column_type}
-                """
-            )
+            text(f"ALTER TABLE telegram_subscriptions ADD COLUMN {column_name} {column_type}")
         )
 
 
@@ -109,12 +99,7 @@ def _upgrade_0008_telegram_min_confidence(connection: Connection) -> None:
     if "min_confidence" in columns:
         return
     connection.execute(
-        text(
-            """
-            ALTER TABLE telegram_subscriptions
-            ADD COLUMN min_confidence FLOAT
-            """
-        )
+        text("ALTER TABLE telegram_subscriptions ADD COLUMN min_confidence FLOAT")
     )
 
 
@@ -126,12 +111,7 @@ def _upgrade_0009_telegram_alert_deduplication(connection: Connection) -> None:
     if "last_digest_fingerprint" in columns:
         return
     connection.execute(
-        text(
-            """
-            ALTER TABLE telegram_subscriptions
-            ADD COLUMN last_digest_fingerprint VARCHAR(64)
-            """
-        )
+        text("ALTER TABLE telegram_subscriptions ADD COLUMN last_digest_fingerprint VARCHAR(64)")
     )
 
 
@@ -143,12 +123,7 @@ def _upgrade_0010_telegram_alert_rules(connection: Connection) -> None:
     if "alert_rules" in columns:
         return
     connection.execute(
-        text(
-            """
-            ALTER TABLE telegram_subscriptions
-            ADD COLUMN alert_rules JSON
-            """
-        )
+        text("ALTER TABLE telegram_subscriptions ADD COLUMN alert_rules JSON")
     )
 
 
@@ -160,12 +135,33 @@ def _upgrade_0011_telegram_holdings(connection: Connection) -> None:
     if "holdings" in columns:
         return
     connection.execute(
-        text(
-            """
-            ALTER TABLE telegram_subscriptions
-            ADD COLUMN holdings JSON
-            """
+        text("ALTER TABLE telegram_subscriptions ADD COLUMN holdings JSON")
+    )
+
+
+def _upgrade_0012_timezone_and_jobs(connection: Connection) -> None:
+    import app.models  # noqa: F401
+
+    columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("telegram_subscriptions")
+    }
+    if "timezone" not in columns:
+        connection.execute(
+            text("ALTER TABLE telegram_subscriptions ADD COLUMN timezone VARCHAR(64)")
         )
+    Base.metadata.create_all(
+        bind=connection,
+        tables=[app.models.ScheduledJob.__table__],
+    )
+
+
+def _upgrade_0013_usage_metrics(connection: Connection) -> None:
+    import app.models  # noqa: F401
+
+    Base.metadata.create_all(
+        bind=connection,
+        tables=[app.models.UsageMetric.__table__],
     )
 
 
@@ -224,6 +220,16 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0011_telegram_holdings",
         description="Add per-chat portfolio holdings with cost basis.",
         upgrade=_upgrade_0011_telegram_holdings,
+    ),
+    Migration(
+        revision="0012_timezone_and_jobs",
+        description="Add per-chat timezone and persisted scheduled_jobs table.",
+        upgrade=_upgrade_0012_timezone_and_jobs,
+    ),
+    Migration(
+        revision="0013_usage_metrics",
+        description="Add usage_metrics table for product validation.",
+        upgrade=_upgrade_0013_usage_metrics,
     ),
 )
 

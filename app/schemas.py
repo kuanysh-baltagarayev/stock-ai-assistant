@@ -253,6 +253,11 @@ class DataQualityFlags(BaseModel):
     estimated: bool = False
     missing: bool = False
     source_disagreed: bool = False
+    split_detected: bool = False
+    dividend_detected: bool = False
+    missing_candles: int = 0
+    partial_session: bool = False
+    adjustment_policy_warning: str | None = None
     confidence: float = 1.0
     summary: str | None = None
 

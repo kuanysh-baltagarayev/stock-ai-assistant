@@ -61,6 +61,18 @@ class DisclaimerMixin:
             lines.append("Есть пропуски в исходных данных.")
         if _get("estimated"):
             lines.append("Часть значений оценочная, а не подтверждённая.")
+        if _get("split_detected"):
+            lines.append("Обнаружен сплит (данные в raw-close).")
+        if _get("dividend_detected"):
+            lines.append("Обнаружен дивиденд (данные в raw-close).")
+        missing_candles = _get("missing_candles", 0)
+        if isinstance(missing_candles, (int, float)) and missing_candles > 0:
+            lines.append(f"Обнаружено пропущенных торговых дней: {int(missing_candles)}.")
+        if _get("partial_session"):
+            lines.append("Обнаружена неполная торговая сессия.")
+        adj_policy = _get("adjustment_policy_warning")
+        if adj_policy:
+            lines.append(f"Цены без коррекции: {adj_policy}.")
         return lines
 
     def _scan_disclaimer(self, results: list[Any]) -> str:

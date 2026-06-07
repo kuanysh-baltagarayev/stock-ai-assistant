@@ -6,6 +6,15 @@ from app.schemas import TechnicalIndicators
 
 TRADING_DAYS_PER_YEAR = 252
 
+# NOTE: this module consumes raw-close prices (no auto-adjustment) from
+# yfinance. Splits and dividends are NOT baked into the series, which
+# means percentage changes, moving averages, RSI, and volatility are
+# computed on discontinuous data when corporate actions are present.
+# The caller (market_data) flags split_detected/dividend_detected so
+# Telegram can warn users. If the history has already been adjusted
+# upstream (auto_adjust=True), results are comparable but the data
+# quality flag layer still reports raw-close behaviour from provenance.
+
 
 def calculate_indicators(history: pd.DataFrame) -> TechnicalIndicators:
     close = history["Close"].dropna().astype(float)
