@@ -21,7 +21,13 @@ from app.services.alert_rules import (
 )
 from app.services.edgar_collector import fetch_recent_filings
 from app.services.news_collector import build_news_context, high_impact_news, news_relevant_for_sectors
-from app.services.history import build_snapshot_audit_entries, list_recent_snapshots
+from app.services.history import (
+    build_score_delta,
+    build_snapshot_audit_entries,
+    format_delta_for_audit,
+    list_recent_snapshots,
+    probable_drivers,
+)
 from app.services.runtime_budget import (
     RuntimeBudgetExceeded,
     consume_runtime_budget,
@@ -1552,7 +1558,9 @@ class TelegramBotService(
                 "Сначала запусти /analyze, чтобы появились snapshot history и provenance."
             )
 
-        lines = [f"{ticker.upper()}: audit trail"]
+        lines = [f"{ticker.upper()}: аудиторский след"]
+
+        # Show recent snapshots
         for index, entry in enumerate(build_snapshot_audit_entries(snapshots), start=1):
             snapshot = entry.snapshot
             payload = snapshot.payload or {}
@@ -1573,32 +1581,18 @@ class TelegramBotService(
                 lines.append("   changes vs older snapshot:")
                 lines.extend(f"   - {self._translate_text(change)}" for change in entry.changes)
 
+        # Structured delta + probable drivers for the two latest snapshots
         if len(snapshots) >= 2:
-            latest, previous = snapshots[0], snapshots[1]
-            delta = latest.final_score - previous.final_score
-            lines.extend(["", f"Latest score delta vs previous: {delta:+.2f}"])
-            latest_payload = latest.payload or {}
-            previous_payload = previous.payload or {}
-            latest_quality = latest_payload.get("data_quality") or {}
-            previous_quality = previous_payload.get("data_quality") or {}
-            latest_session = latest_payload.get("market_session") or {}
-            previous_session = previous_payload.get("market_session") or {}
-            if latest_quality.get("source_disagreed") or previous_quality.get("source_disagreed"):
-                lines.append("Source disagreement flagged in one of the latest snapshots.")
-            lines.append(
-                "Freshness delta: "
-                f"{previous_session.get('freshness_state') or 'unknown'} -> "
-                f"{latest_session.get('freshness_state') or 'unknown'}"
-            )
-            lines.append(
-                "Provenance delta: "
-                f"{(previous_payload.get('source_provenance') or {}).get('provider_name') or 'unknown'} -> "
-                f"{(latest_payload.get('source_provenance') or {}).get('provider_name') or 'unknown'}"
-            )
-            lines.append(
-                "Recommendation delta: "
-                f"{previous.recommendation} -> {latest.recommendation}"
-            )
+            lines.extend(["", "── Изменения между последними двумя ──"])
+            delta = build_score_delta(snapshots[0], snapshots[1])
+            lines.extend(format_delta_for_audit(delta))
+            lines.append("")
+            drivers = probable_drivers(delta)
+            if drivers:
+                lines.append("Вероятные движители (наблюдаемые изменения):")
+                lines.extend(f"• {self._translate_text(d)}" for d in drivers)
+            else:
+                lines.append("Заметных изменений нет.")
 
         return self._trim_message("\n".join(lines))
 

@@ -289,9 +289,10 @@ class TelegramDetailCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sector-adjusted event", send_mock.await_args_list[3].args[1].lower())
         self.assertIn("event and session context", send_mock.await_args_list[4].args[1])
         self.assertIn("upcoming company events", send_mock.await_args_list[4].args[1].lower())
-        self.assertIn("changes vs older snapshot", send_mock.await_args_list[5].args[1].lower())
-        self.assertIn("source disagreement flagged", send_mock.await_args_list[5].args[1].lower())
-        self.assertIn("provenance delta", send_mock.await_args_list[5].args[1].lower())
+        self.assertIn("аудиторский след", send_mock.await_args_list[5].args[1].lower())
+        self.assertIn("источники расходятся", send_mock.await_args_list[5].args[1].lower())
+        self.assertIn("provider: yfinance → alpha_vantage", send_mock.await_args_list[5].args[1].lower())
+        self.assertIn("вероятные движители", send_mock.await_args_list[5].args[1].lower())
 
     async def test_calendar_today_uses_baseline_session(self) -> None:
         send_mock = AsyncMock()

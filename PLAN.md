@@ -789,18 +789,34 @@ Product goal:
 Current state:
 
 1. Raw source snapshots and analysis snapshots are persisted.
-2. `/audit` shows recent score/provenance changes.
-3. It can be expanded into a compact delta report.
+2. `/audit` shows recent score/provenance changes and structured delta.
+3. Done: `ScoreDelta` dataclass with price, final score, sub-score, label,
+   confidence, source, session, freshness, filing/news changes, and source
+   disagreement flag.
+4. Done: `build_score_delta()` compares two snapshots and returns a structured
+   `ScoreDelta`.
+5. Done: `probable_drivers()` maps changed fields to observable drivers in
+   priority order (price → score → sub-score → label → confidence → source →
+   filings/news → session → freshness). No causal claims.
+6. Done: `format_delta_for_audit()` renders structured delta for `/audit`.
+7. Done: `format_delta_for_briefing()` returns a compact one-line summary
+   (≤3 drivers).
+8. Done: `_audit_text()` rewritten to show structured delta + probable drivers
+   in Russian, with clear separation between raw changes and "вероятные
+   движители".
+9. Done: `BriefingItem` gains `score_delta` field; `_enrich_briefing_items_with_deltas()`
+   looks up previous snapshots and attaches deltas to scan/digest items.
+10. Done: 31 tests covering all delta fields, edge cases (missing payload, no
+    changes), probable drivers (all 9 categories, small deltas filtered),
+    formatting (audit + briefing), and truncated briefing output.
 
 Implementation plan:
 
-1. Add a deterministic delta builder:
-   price delta, final score delta, sub-score deltas, label change, confidence
-   delta, source change, latest filing/news change, market session change.
-2. Include "probable drivers" from changed fields, not guessed causal claims.
-3. Add a "source changed" warning when provider or confidence changed between
-   snapshots.
-4. Reuse the same delta in daily briefings.
+1. Done: Add `ScoreDelta` dataclass and `build_score_delta()` in `history.py`.
+2. Done: Add `probable_drivers()` — lists which fields moved, in priority order.
+3. Done: "Source changed" warning appears as driver when provider/tier/confidence
+   changes.
+4. Done: Delta reused in daily briefings via `score_delta` on `BriefingItem`.
 
 Suggested files:
 
@@ -812,11 +828,13 @@ Suggested files:
 
 Acceptance criteria:
 
-1. `/audit AAPL` explains score movement without LLM.
-2. It distinguishes real signal movement from source/freshness/confidence
-   changes.
-3. Tests cover score delta, confidence degradation, source disagreement,
-   filing/news arrival, and label change.
+1. Done: `/audit AAPL` explains score movement with structured delta + probable
+   drivers, no LLM.
+2. Done: It distinguishes real signal movement (price, sub-scores) from
+   source/freshness/confidence changes.
+3. Done: 31 tests cover score delta, price delta, sub-score deltas, label change,
+   confidence degradation, source agreement/disagreement, provider/tier change,
+   filing/news arrival, session/freshness change, and no-changes case.
 
 ### Priority 8: Source Gaps And Coverage Warnings
 

@@ -26,5 +26,6 @@ else
     tests.test_telegram_watchlists \
     tests.test_research_labels \
     tests.test_score_decomposition \
-    tests.test_backtesting
+    tests.test_backtesting \
+    tests.test_history
 fi

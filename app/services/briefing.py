@@ -19,6 +19,7 @@ class BriefingItem:
     market_session_status: str | None = None
     freshness_state: str | None = None
     flags: tuple[str, ...] = field(default_factory=tuple)
+    score_delta: float | None = None  # signed change vs previous snapshot
 
 
 @dataclass(frozen=True)

@@ -5,9 +5,11 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from app.database import SessionLocal
 from app.models import TelegramSubscription
 from app.services.alert_rules import format_rule
 from app.services.briefing import BriefingItem, BriefingSummary, build_scan_briefing
+from app.services.history import build_score_delta, list_recent_snapshots
 from app.services.operation_summaries import format_operation_summary
 from app.services.coverage import format_coverage_text
 from app.services.exchange_calendar import get_market_hours_info
@@ -118,6 +120,38 @@ class FormattingMixin:
             lines.extend(["", disclaimer])
         return self._trim_message("\n".join(lines))
 
+    def _enrich_briefing_items_with_deltas(self, briefing: BriefingSummary) -> BriefingSummary:
+        """Look up previous snapshots for each briefing item and attach score deltas."""
+        enriched_items: list[BriefingItem] = []
+        db = SessionLocal()
+        try:
+            for item in briefing.items:
+                snapshots = list_recent_snapshots(db, limit=2, ticker=item.ticker)
+                if len(snapshots) >= 2:
+                    delta = build_score_delta(snapshots[0], snapshots[1])
+                    if delta.score_delta is not None and abs(delta.score_delta) >= 0.5:
+                        item = BriefingItem(
+                            ticker=item.ticker,
+                            label=item.label,
+                            final_score=item.final_score,
+                            price=item.price,
+                            short_reason=item.short_reason,
+                            group=item.group,
+                            confidence=item.confidence,
+                            risk_score=item.risk_score,
+                            source_provider=item.source_provider,
+                            source_tier=item.source_tier,
+                            market_session_status=item.market_session_status,
+                            freshness_state=item.freshness_state,
+                            flags=item.flags,
+                            score_delta=delta.score_delta,
+                        )
+                enriched_items.append(item)
+        finally:
+            db.close()
+        from dataclasses import replace
+        return replace(briefing, items=tuple(enriched_items))
+
     def _scan_text(
         self,
         results: list[Any],
@@ -132,6 +166,7 @@ class FormattingMixin:
                 return f"Нет результатов выше порога уверенности {min_confidence:.2f}."
             return "Ничего не найдено."
 
+        briefing = self._enrich_briefing_items_with_deltas(briefing)
         lines = ["Результаты скана:", *self._briefing_lines(briefing)]
         if min_confidence is not None:
             lines.append(f"Порог уверенности: {min_confidence:.2f}")
@@ -562,6 +597,7 @@ class FormattingMixin:
                 return f"Нет результатов выше порога уверенности {min_confidence:.2f}."
             return "Дайджест пуст: данных для отчёта нет."
 
+        briefing = self._enrich_briefing_items_with_deltas(briefing)
         lines = [self._digest_heading(digest_mode)]
         digest_note = self._digest_mode_note(digest_mode)
         if digest_note:
@@ -609,11 +645,15 @@ class FormattingMixin:
         confidence = f" | уверенность {item.confidence:.2f}" if item.confidence is not None else " | уверенность n/a"
         source = f" | {item.source_provider or 'unknown'}/{item.source_tier or 'unknown'}"
         freshness = f" | {item.market_session_status or 'session n/a'}/{item.freshness_state or 'freshness n/a'}"
+        delta_text = ""
+        if item.score_delta is not None:
+            sign = "+" if item.score_delta > 0 else ""
+            delta_text = f" | Δ {sign}{item.score_delta:.2f}"
         flags = ""
         if item.flags:
             flags = " | " + ", ".join(self._briefing_flag_text(flag) for flag in item.flags[:3])
         reason = self._translate_text(item.short_reason)
-        return f"- {item.ticker}: {label} | оценка {item.final_score:.2f}{price}{confidence}{source}{freshness}{flags}; {reason}"
+        return f"- {item.ticker}: {label} | оценка {item.final_score:.2f}{delta_text}{price}{confidence}{source}{freshness}{flags}; {reason}"
 
     def _briefing_flag_text(self, flag: str) -> str:
         mapping = {
