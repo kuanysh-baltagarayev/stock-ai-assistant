@@ -102,6 +102,9 @@ Implemented:
 - 2026-06-08: `scripts/check.sh` passed after adding mandatory compact
   source/freshness/confidence context to Telegram analysis, scan, and risk
   output, with 358 tests passing.
+- 2026-06-08: `scripts/check.sh` passed after threading FRED observations into
+  `build_macro_context()` and reusing one FRED collection per scan, with 360
+  tests passing.
 - 2026-06-08: `scripts/test_fast.sh` passed after adding deterministic
   Telegram scan/digest briefing groups and focused briefing tests, with 97
   tests passing.
@@ -555,23 +558,29 @@ Product goal:
 Current state:
 
 1. `app/services/fred_collector.py` exists and has tests.
-2. `scanner._save_macro_indicators()` persists FRED source snapshots when a DB
-   session and `FRED_API_KEY` are available.
-3. `analyze_ticker()` currently calls `build_macro_context(generated_at,
-   news_context=news_context)` without passing `fred_latest`, so persisted FRED
-   data does not reliably affect the main score.
+2. Done: `analyze_ticker()` collects FRED once, converts latest observations
+   into `{series_id: value}`, passes them into `build_macro_context(...)`, and
+   uses that macro context for scoring and operation notes.
+3. Done: the same FRED collection is persisted as a `SourceSnapshot` when a DB
+   session is present and observations are available.
+4. Done: `scan_tickers()` builds one scan-level FRED context and passes it into
+   each ticker analysis to avoid one FRED collection per ticker.
+5. Remaining: improve `macro_context_summary()` so Fed rate, unemployment, CPI,
+   partial FRED errors, and stale macro observations are explicit without
+   overstating precision.
 
 Implementation plan:
 
-1. Add a helper in `scanner.py` or a new macro service:
+1. Done: add a helper in `scanner.py`:
    fetch FRED once per analysis when enabled, convert latest observations into
    `{series_id: value}`.
-2. Pass the resulting `fred_latest` into `build_macro_context(...)`.
-3. Persist the same FRED collection as a `SourceSnapshot` when `db` is present.
-4. Add operation notes when FRED is unavailable, stale, or partially failed.
-5. Avoid repeated FRED calls during multi-ticker scans; introduce a scan-level
+2. Done: pass the resulting `fred_latest` into `build_macro_context(...)`.
+3. Done: persist the same FRED collection as a `SourceSnapshot` when `db` is present.
+4. Partly done: add operation notes when FRED is unavailable or partially failed;
+   stale observation detection still needs explicit age thresholds.
+5. Done: avoid repeated FRED calls during multi-ticker scans; introduce a scan-level
    macro context or short TTL cache before using this in `scan_tickers`.
-6. Update `macro_context_summary()` text so Fed rate, unemployment, and CPI
+6. Pending: update `macro_context_summary()` text so Fed rate, unemployment, and CPI
    context is explicit and not overstated.
 
 Suggested files:
@@ -585,12 +594,13 @@ Suggested files:
 
 Acceptance criteria:
 
-1. With mocked FRED data, `analyze_ticker()` passes `fred_latest` into scoring.
-2. FRED snapshot persistence remains optional and does not break analysis.
-3. Without `FRED_API_KEY`, analysis still passes and adds a clear non-fatal
+1. Done: with mocked FRED data, `analyze_ticker()` passes `fred_latest` into scoring.
+2. Done: FRED snapshot persistence remains optional and does not break analysis.
+3. Done: without `FRED_API_KEY`, analysis still passes and adds a clear non-fatal
    operation note only when user-facing context needs it.
-4. Scans do not make one FRED network call per ticker.
-5. Tests cover FRED success, missing key, partial error, and scan reuse.
+4. Done: scans do not make one FRED network call per ticker.
+5. Partly done: tests cover FRED success, missing key, and scan reuse; stale and
+   partial-error presentation need deeper coverage when summary text is improved.
 
 ### Priority 4: Market Regime Context
 
@@ -1290,8 +1300,9 @@ above. Keep this phase list short and status-oriented.
    BLS, BEA, Treasury, FOMC calendars, and issuer-event normalization remain
    incomplete.
 2. Partly done: official open sources are integrated for SEC EDGAR, NYSE
-   calendar logic, and FRED collection; FRED data still needs to be threaded into
-   the main `analyze_ticker` macro context and scan-level reuse.
+   calendar logic, and FRED collection; FRED now feeds main `analyze_ticker`
+   macro context and scan-level reuse, while BLS/BEA/Treasury/FOMC feeds remain
+   pending.
 3. Partly done: market-session modeling exists for U.S. equities; per-symbol
    exchange/timezone expansion and non-U.S. session handling remain pending.
 4. Partly done: source freshness, source disagreement, and confidence fields

@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
 from zoneinfo import ZoneInfo
@@ -22,8 +23,8 @@ from app.services.ai_explainer import explain_analysis, rule_based_explanation
 from app.services.edgar_collector import EdgarCollection, fetch_recent_filings
 from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
-from app.services.fred_collector import fetch_macro_indicators
-from app.services.macro_context import build_macro_context, macro_context_summary
+from app.services.fred_collector import FredCollection, fetch_macro_indicators
+from app.services.macro_context import MacroContext, build_macro_context, macro_context_summary
 from app.services.news_collector import NewsContext, build_news_context, high_impact_news
 from app.services.risk_overlay import calculate_risk_overlay, risk_overlay_notes
 from app.services.sector_sensitivity import macro_impact_notes, get_sector_sensitivity
@@ -43,30 +44,43 @@ from app.services.scoring import score_stock
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class FredMacroContext:
+    collection: FredCollection | None = None
+    latest: dict[str, float | None] = field(default_factory=dict)
+    notes: tuple[str, ...] = ()
+
+
 def analyze_ticker(
     ticker: str,
     db: Session | None = None,
     use_ai_explanation: bool = True,
     include_edgar_context: bool = True,
     include_news: bool = True,
+    fred_macro_context: FredMacroContext | None = None,
 ) -> AnalyzeResponse:
     logger.debug("analysis_started", extra={"component": "scanner", "ticker": ticker})
     market = get_market_data(ticker, db=db)
     edgar_collection = _fetch_edgar_filings(market["ticker"]) if include_edgar_context else None
+    settings = get_settings()
+    fred_macro = fred_macro_context or _collect_fred_macro(settings)
     if db is not None:
         _save_source_snapshot(db, market)
         if edgar_collection is not None:
             _save_edgar_filings(db, edgar_collection)
-        _save_macro_indicators(db)
+        _save_macro_indicators(db, fred_macro.collection)
     fundamentals = extract_fundamentals(market["info"])
     technicals = calculate_indicators(market["history"])
 
     # Build macro context for adaptive scoring; collect news first so political
     # risk from breaking headlines can feed into the catalyst risk layer.
     generated_at = datetime.now(timezone.utc)
-    settings = get_settings()
     news_context = _collect_news_context(market["ticker"], settings, include_news)
-    macro = build_macro_context(generated_at, news_context=news_context)
+    macro = build_macro_context(
+        generated_at,
+        fred_latest=fred_macro.latest,
+        news_context=news_context,
+    )
     sec_filings_payload = _build_sec_filings_payload(edgar_collection)
     scoring = score_stock(
         market["price"],
@@ -119,6 +133,8 @@ def analyze_ticker(
         risk_score=scoring.scores.risk_score,
         fundamentals=fundamentals,
         generated_at=payload.get("generated_at"),
+        macro_context=macro,
+        fred_notes=fred_macro.notes,
     )
     operation_notes.extend(news_notes)
 
@@ -206,6 +222,9 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
     results: list[ScanResult] = []
     errors: list[ScanError] = []
     notes: list[str] = []
+    settings = get_settings()
+    fred_macro = _collect_fred_macro(settings)
+    notes.extend(fred_macro.notes)
 
     logger.info(
         "scan_started",
@@ -220,6 +239,7 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
                 use_ai_explanation=False,
                 include_edgar_context=False,
                 include_news=False,
+                fred_macro_context=fred_macro,
             )
         except MarketDataError as exc:
             errors.append(ScanError(ticker=ticker, error=str(exc)))
@@ -590,12 +610,16 @@ def _build_operation_notes(
     risk_score: float,
     fundamentals: Any,
     generated_at: Any = None,
+    macro_context: MacroContext | None = None,
+    fred_notes: tuple[str, ...] = (),
 ) -> list[str]:
     notes: list[str] = []
     data_quality = market.get("data_quality") or {}
     quality_summary = data_quality.get("summary")
     if quality_summary and quality_summary != "ok":
         notes.append(f"Data quality: {quality_summary}.")
+
+    notes.extend(fred_notes)
 
     if market_session is not None:
         session_note = market_session.get("freshness_note")
@@ -605,15 +629,16 @@ def _build_operation_notes(
     notes.extend(_event_calendar_notes(str(market.get("ticker") or "UNKNOWN"), event_calendar))
     notes.extend(_sec_filing_notes(str(market.get("ticker") or "UNKNOWN"), sec_filings))
     notes.extend(_economic_events_notes(generated_at))
-    notes.extend(_macro_context_notes(generated_at))
-    notes.extend(_sector_catalyst_notes(market.get("info", {}).get("sector"), event_calendar, generated_at))
-    notes.extend(_sector_sensitivity_notes(market.get("info", {}).get("sector"), generated_at))
+    notes.extend(_macro_context_notes(generated_at, macro_context))
+    notes.extend(_sector_catalyst_notes(market.get("info", {}).get("sector"), event_calendar, generated_at, macro_context))
+    notes.extend(_sector_sensitivity_notes(market.get("info", {}).get("sector"), generated_at, macro_context))
     notes.extend(
         _risk_overlay_notes(
             risk_score,
             market.get("info", {}).get("sector"),
             fundamentals,
             generated_at,
+            macro_context,
         )
     )
 
@@ -768,13 +793,13 @@ def _sec_filing_notes(ticker: str, sec_filings: Any) -> list[str]:
     return notes
 
 
-def _macro_context_notes(generated_at: Any) -> list[str]:
+def _macro_context_notes(generated_at: Any, macro_context: MacroContext | None = None) -> list[str]:
     """Return notes about macroeconomic context for alert interpretation."""
     if not isinstance(generated_at, datetime):
         return []
 
     try:
-        macro = build_macro_context(generated_at)
+        macro = macro_context or build_macro_context(generated_at)
         return macro_context_summary(macro)
     except Exception:
         logger.debug(
@@ -785,13 +810,17 @@ def _macro_context_notes(generated_at: Any) -> list[str]:
         return []
 
 
-def _sector_sensitivity_notes(sector: str | None, generated_at: Any) -> list[str]:
+def _sector_sensitivity_notes(
+    sector: str | None,
+    generated_at: Any,
+    macro_context: MacroContext | None = None,
+) -> list[str]:
     """Return notes about how macro conditions affect this sector."""
     if not sector or not isinstance(generated_at, datetime):
         return []
 
     try:
-        macro = build_macro_context(generated_at)
+        macro = macro_context or build_macro_context(generated_at)
         notes = macro_impact_notes(
             sector,
             fed_rate_direction=macro.rate_direction,
@@ -812,6 +841,7 @@ def _sector_catalyst_notes(
     sector: str | None,
     event_calendar: Any,
     generated_at: Any,
+    macro_context: MacroContext | None = None,
 ) -> list[str]:
     """Explain when sector sensitivity is materially shaping catalyst risk."""
     if not sector or not isinstance(generated_at, datetime):
@@ -824,7 +854,7 @@ def _sector_catalyst_notes(
     notes: list[str] = []
 
     try:
-        macro = build_macro_context(generated_at)
+        macro = macro_context or build_macro_context(generated_at)
         if macro.upcoming_high_impact_events:
             if macro.rate_direction == "rising" and sensitivity.fed_rate_sensitivity <= -0.5:
                 notes.append(
@@ -865,13 +895,14 @@ def _risk_overlay_notes(
     sector: str | None,
     fundamentals: Any,
     generated_at: Any,
+    macro_context: MacroContext | None = None,
 ) -> list[str]:
     """Return notes about risk overlay based on macro conditions."""
     if not isinstance(generated_at, datetime):
         return []
 
     try:
-        macro = build_macro_context(generated_at)
+        macro = macro_context or build_macro_context(generated_at)
         sector_sensitivity = get_sector_sensitivity(sector) if sector else None
         dividend_yield = None
         if isinstance(fundamentals, dict):
@@ -962,21 +993,53 @@ def _parse_datetime_like(value: Any) -> datetime | None:
     return parsed
 
 
-def _save_macro_indicators(db: Session) -> None:
-    settings = get_settings()
+def _collect_fred_macro(settings: Any) -> FredMacroContext:
     try:
-        collection = fetch_macro_indicators(api_key=settings.fred_api_key)
+        collection = fetch_macro_indicators(api_key=getattr(settings, "fred_api_key", None))
     except Exception:
         logger.exception(
             "fred_indicators_fetch_failed",
             extra={"component": "fred"},
         )
+        return FredMacroContext(notes=("FRED macro data unavailable: collector failed.",))
+
+    latest = {
+        observation.series_id: observation.value
+        for observation in collection.observations
+        if observation.value is not None
+    }
+    notes: list[str] = []
+    if collection.error:
+        if latest:
+            notes.append(f"FRED macro data partially unavailable: {collection.error}.")
+        else:
+            notes.append(f"FRED macro data unavailable: {collection.error}.")
+    elif not latest:
+        notes.append("FRED macro data unavailable: no observations returned.")
+
+    return FredMacroContext(
+        collection=collection,
+        latest=latest,
+        notes=tuple(notes),
+    )
+
+
+def _save_macro_indicators(db: Session, collection: FredCollection | None) -> None:
+    if collection is None:
         return
 
-    if collection.error:
+    try:
+        if collection.error and not collection.observations:
+            logger.debug(
+                "fred_indicators_error",
+                extra={"component": "fred", "error": collection.error},
+            )
+            return
+    except Exception:
         logger.debug(
-            "fred_indicators_error",
-            extra={"component": "fred", "error": collection.error},
+            "fred_indicators_collection_invalid",
+            extra={"component": "fred"},
+            exc_info=True,
         )
         return
 

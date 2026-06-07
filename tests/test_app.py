@@ -35,6 +35,8 @@ from app.schemas import (
 )
 from app.services.ai_explainer import explain_analysis
 from app.services.edgar_collector import EdgarCollection, EdgarFiling
+from app.services.fred_collector import FredCollection, FredObservation
+from app.services.macro_context import MacroContext
 from app.services import market_data
 from app.services.runtime_budget import reset_runtime_budgets
 from app.services.scanner import analyze_ticker, scan_tickers
@@ -727,6 +729,80 @@ class AppSmokeTests(unittest.TestCase):
             response.operation_notes,
         )
 
+    def test_analyze_ticker_threads_fred_data_into_macro_scoring(self) -> None:
+        market = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "info": {"sector": "Technology"},
+            "data_quality": {"summary": "ok"},
+        }
+        fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
+        technicals = TechnicalIndicators(change_1d_pct=1.0)
+        fred_collection = FredCollection(
+            observations=[
+                FredObservation("2026-05-01", 5.33, "FEDFUNDS", "Federal Funds Effective Rate (%)"),
+                FredObservation("2026-05-01", 4.1, "UNRATE", "Unemployment Rate (%)"),
+                FredObservation("2026-05-01", 325.0, "CPIAUCSL", "Consumer Price Index (all-urban)"),
+            ],
+            fetched_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+        )
+        macro = MacroContext(
+            reference_date=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+            upcoming_high_impact_events=[],
+            recent_macro_data={"fed_rate": 5.33, "unemployment": 4.1, "cpi": 325.0},
+            volatility_level="medium",
+            rate_direction="stable",
+            inflation_level="elevated",
+        )
+        scoring = SimpleNamespace(
+            scores=Scores(
+                momentum_score=60.0,
+                valuation_score=55.0,
+                risk_score=42.0,
+                final_score=60.5,
+            ),
+            recommendation="WATCH",
+            short_reason="Watch: sample reason.",
+            reasons=["macro risk included"],
+        )
+
+        with (
+            patch(
+                "app.services.scanner.get_settings",
+                return_value=SimpleNamespace(
+                    openai_api_key=None,
+                    fred_api_key="fred-key",
+                    analysis_snapshot_retention_count=50,
+                    analysis_snapshot_retention_days=365,
+                ),
+            ),
+            patch("app.services.scanner.get_market_data", return_value=market),
+            patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
+            patch("app.services.scanner.calculate_indicators", return_value=technicals),
+            patch("app.services.scanner.fetch_macro_indicators", return_value=fred_collection) as fred_mock,
+            patch("app.services.scanner.build_macro_context", return_value=macro) as macro_mock,
+            patch("app.services.scanner.score_stock", return_value=scoring) as score_stock_mock,
+            patch("app.services.scanner.explain_analysis", return_value="Mock explanation"),
+        ):
+            response = analyze_ticker(
+                "aapl",
+                db=None,
+                use_ai_explanation=True,
+                include_edgar_context=False,
+                include_news=False,
+            )
+
+        fred_mock.assert_called_once_with(api_key="fred-key")
+        macro_mock.assert_called_once()
+        self.assertEqual(
+            macro_mock.call_args.kwargs["fred_latest"],
+            {"FEDFUNDS": 5.33, "UNRATE": 4.1, "CPIAUCSL": 325.0},
+        )
+        self.assertIs(score_stock_mock.call_args.kwargs["macro_context"], macro)
+        self.assertEqual(response.scores.risk_score, 42.0)
+
     def test_market_data_builds_event_calendar_from_profile_fields(self) -> None:
         history = pd.DataFrame(
             {"Close": [100.0, 101.0, 102.0]},
@@ -919,7 +995,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(response.summary.failed_tickers, ["NVDA"])
         self.assertIn("failures", response.summary.message)
         self.assertTrue(response.summary.notes)
-        self.assertIn("Partial failure", response.summary.notes[0])
+        self.assertTrue(any("Partial failure" in note for note in response.summary.notes))
 
     def test_scan_tickers_skips_edgar_fetches(self) -> None:
         analysis = make_analysis("AAPL", 55.0)
@@ -933,6 +1009,35 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(len(response.results), 1)
         analyze_mock.assert_called_once()
         filings_mock.assert_not_called()
+
+    def test_scan_tickers_reuses_one_fred_collection(self) -> None:
+        analysis = make_analysis("AAPL", 55.0)
+        fred_collection = FredCollection(
+            observations=[
+                FredObservation("2026-05-01", 5.33, "FEDFUNDS", "Federal Funds Effective Rate (%)"),
+            ],
+            fetched_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+        )
+
+        with (
+            patch(
+                "app.services.scanner.get_settings",
+                return_value=SimpleNamespace(fred_api_key="fred-key"),
+            ),
+            patch("app.services.scanner.fetch_macro_indicators", return_value=fred_collection) as fred_mock,
+            patch("app.services.scanner.analyze_ticker", return_value=analysis) as analyze_mock,
+        ):
+            response = scan_tickers(["AAPL", "MSFT"], db=None)
+
+        self.assertEqual(len(response.results), 2)
+        fred_mock.assert_called_once_with(api_key="fred-key")
+        contexts = [
+            call.kwargs["fred_macro_context"]
+            for call in analyze_mock.call_args_list
+        ]
+        self.assertEqual(len(contexts), 2)
+        self.assertIs(contexts[0], contexts[1])
+        self.assertEqual(contexts[0].latest, {"FEDFUNDS": 5.33})
 
     def test_scan_tickers_adds_event_calendar_notes_to_summary(self) -> None:
         analysis = AnalyzeResponse(
