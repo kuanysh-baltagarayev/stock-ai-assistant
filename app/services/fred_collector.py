@@ -31,6 +31,9 @@ FRED_SOURCE_TIER = "Tier 1"
 FRED_DATA_CATEGORY = "macro_indicators"
 FRED_PARSER_VERSION = "fred-collector-v1"
 FRED_TIMEOUT_SECONDS = 10
+# Fetch a rolling window of recent observations so callers can compute trends
+# (rate direction, CPI year-over-year) instead of only reading the latest point.
+FRED_HISTORY_WINDOW = 14
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,31 @@ class FredCollection:
             "data_category": self.data_category,
             "parser_version": self.parser_version,
             "error": self.error,
+        }
+
+    def latest_by_series(self) -> dict[str, float | None]:
+        """Return the newest non-None value for each series."""
+        latest: dict[str, float | None] = {}
+        seen_dates: dict[str, str] = {}
+        for o in self.observations:
+            if o.value is None:
+                continue
+            prev = seen_dates.get(o.series_id)
+            if prev is None or o.date > prev:
+                seen_dates[o.series_id] = o.date
+                latest[o.series_id] = o.value
+        return latest
+
+    def history_by_series(self) -> dict[str, list[float]]:
+        """Return chronological (oldest-first) value series per series_id."""
+        buckets: dict[str, list[FredObservation]] = {}
+        for o in self.observations:
+            if o.value is None:
+                continue
+            buckets.setdefault(o.series_id, []).append(o)
+        return {
+            series_id: [o.value for o in sorted(obs, key=lambda x: x.date)]
+            for series_id, obs in buckets.items()
         }
 
     def as_source_snapshot_dict(self) -> dict[str, Any]:
@@ -171,13 +199,17 @@ def _fetch_series_latest(
     *,
     timeout: int,
 ) -> list[FredObservation]:
-    """Fetch the latest observation for a FRED series."""
+    """Fetch a recent window of observations for a FRED series.
+
+    Returns newest-first observations so callers can read the latest value and
+    also compute short-term trends (rate direction, CPI year-over-year).
+    """
     url = (
         f"{_FRED_API_BASE}?"
         f"series_id={series_id}&"
         f"api_key={api_key}&"
         f"file_type=json&"
-        f"limit=1&"
+        f"limit={FRED_HISTORY_WINDOW}&"
         f"sort_order=desc"
     )
     try:

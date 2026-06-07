@@ -29,6 +29,7 @@ class MacroContext:
 def build_macro_context(
     reference_date: datetime,
     fred_latest: dict[str, Any] | None = None,
+    fred_history: dict[str, list[float]] | None = None,
     news_context: Any | None = None,
 ) -> MacroContext:
     """Build macroeconomic context from available data.
@@ -36,6 +37,8 @@ def build_macro_context(
     Args:
         reference_date: Analysis timestamp
         fred_latest: Latest FRED macro data (dict with series -> value mapping)
+        fred_history: Recent FRED value series (oldest-first) per series id,
+            used to infer rate direction and year-over-year inflation trend.
 
     Returns:
         MacroContext with current economic conditions and alerts.
@@ -50,6 +53,7 @@ def build_macro_context(
 
     # Infer macro conditions from available data
     fred_data = fred_latest or {}
+    history = fred_history or {}
     fed_rate = fred_data.get("FEDFUNDS")
     unemployment = fred_data.get("UNRATE")
     inflation = fred_data.get("CPIAUCSL")
@@ -60,11 +64,13 @@ def build_macro_context(
     # - Unemployment is at unusual levels
     volatility_level = _infer_volatility_level(fed_rate, unemployment, len(high_impact))
 
-    # Rate direction from FEDFUNDS trend (simplified: any data = stable)
-    rate_direction = "stable" if fed_rate is not None else None
+    # Rate direction from the FEDFUNDS trend window when available, else fall
+    # back to a flat "stable" reading if we only have the latest point.
+    rate_direction = _infer_rate_direction(history.get("FEDFUNDS"), fed_rate)
 
-    # Inflation level from CPI (simplified)
-    inflation_level = _infer_inflation_level(inflation)
+    # Inflation level from CPI year-over-year change when enough history is
+    # present, else fall back to absolute CPI-index thresholds.
+    inflation_level = _infer_inflation_level_from_history(history.get("CPIAUCSL"), inflation)
 
     political_risk_level: str | None = None
     if news_context is not None:
@@ -120,6 +126,10 @@ def macro_context_summary(macro: MacroContext) -> list[str]:
     if macro.rate_direction == "rising":
         notes.append(
             "Федеральная ставка растёт. Это давит на оценку высокорастущих компаний."
+        )
+    elif macro.rate_direction == "falling":
+        notes.append(
+            "Федеральная ставка снижается. Это поддерживает оценку высокорастущих компаний."
         )
 
     # Political/regulatory risk from breaking news
@@ -250,5 +260,60 @@ def _infer_inflation_level(cpi: float | None) -> str | None:
     if cpi >= 320:
         return "elevated"
     elif cpi >= 310:
+        return "moderate"
+    return "low"
+
+
+def _infer_rate_direction(
+    history: list[float] | None,
+    latest: float | None,
+) -> str | None:
+    """Infer Fed funds rate direction from a recent trend window.
+
+    Compares the latest value against an earlier reference point. Small moves
+    are treated as "stable" to avoid reacting to rounding noise. Falls back to
+    "stable" when only a single point is available and ``None`` when there is no
+    data at all.
+    """
+    series = [v for v in (history or []) if v is not None]
+    if len(series) < 2:
+        return "stable" if (series or latest is not None) else None
+
+    recent = series[-1]
+    earlier = series[0]
+    delta = recent - earlier
+    # FEDFUNDS is in percent; ~5bps is below meaningful policy-move resolution.
+    if delta > 0.05:
+        return "rising"
+    if delta < -0.05:
+        return "falling"
+    return "stable"
+
+
+def _infer_inflation_level_from_history(
+    history: list[float] | None,
+    latest: float | None,
+) -> str | None:
+    """Infer inflation level from CPI year-over-year change when possible.
+
+    Needs ~13 monthly points to compare against a year ago. Falls back to the
+    absolute CPI-index thresholds in :func:`_infer_inflation_level` when there
+    is not enough history.
+
+    YoY thresholds (Fed 2% target as the reference):
+    - >= 3% = elevated
+    - >= 2% = moderate
+    - < 2%  = low
+    """
+    series = [v for v in (history or []) if v is not None]
+    if len(series) < 13 or series[-13] == 0:
+        return _infer_inflation_level(latest)
+
+    year_ago = series[-13]
+    current = series[-1]
+    yoy_pct = (current - year_ago) / year_ago * 100.0
+    if yoy_pct >= 3.0:
+        return "elevated"
+    if yoy_pct >= 2.0:
         return "moderate"
     return "low"

@@ -150,5 +150,76 @@ class MacroContextTests(unittest.TestCase):
         self.assertEqual(context.volatility_level, "low")
 
 
+    def test_rate_direction_rising_from_history(self) -> None:
+        now = datetime.now(timezone.utc)
+        context = build_macro_context(
+            now,
+            fred_latest={"FEDFUNDS": 5.33},
+            fred_history={"FEDFUNDS": [4.33, 4.83, 5.10, 5.33]},
+        )
+        self.assertEqual(context.rate_direction, "rising")
+
+    def test_rate_direction_falling_from_history(self) -> None:
+        now = datetime.now(timezone.utc)
+        context = build_macro_context(
+            now,
+            fred_latest={"FEDFUNDS": 4.33},
+            fred_history={"FEDFUNDS": [5.33, 5.10, 4.83, 4.33]},
+        )
+        self.assertEqual(context.rate_direction, "falling")
+        summary = macro_context_summary(context)
+        self.assertTrue(any("ставка снижается" in note for note in summary))
+
+    def test_rate_direction_stable_within_noise(self) -> None:
+        now = datetime.now(timezone.utc)
+        context = build_macro_context(
+            now,
+            fred_latest={"FEDFUNDS": 5.33},
+            fred_history={"FEDFUNDS": [5.31, 5.32, 5.33]},
+        )
+        self.assertEqual(context.rate_direction, "stable")
+
+    def test_rate_direction_falls_back_to_stable_without_history(self) -> None:
+        now = datetime.now(timezone.utc)
+        context = build_macro_context(now, fred_latest={"FEDFUNDS": 5.33})
+        self.assertEqual(context.rate_direction, "stable")
+
+    def test_inflation_level_from_yoy_history_elevated(self) -> None:
+        now = datetime.now(timezone.utc)
+        # 13 monthly points; current is ~3.5% above the year-ago value, so the
+        # YoY trend (not the absolute CPI index) drives the elevated reading.
+        year_ago = 300.0
+        current = year_ago * 1.035
+        history = [year_ago + i * (current - year_ago) / 12 for i in range(13)]
+        context = build_macro_context(
+            now,
+            fred_latest={"CPIAUCSL": current},
+            fred_history={"CPIAUCSL": history},
+        )
+        self.assertEqual(context.inflation_level, "elevated")
+
+    def test_inflation_level_from_yoy_history_low(self) -> None:
+        now = datetime.now(timezone.utc)
+        # High absolute CPI index but only ~1% YoY -> low, proving trend wins.
+        year_ago = 320.0
+        current = year_ago * 1.01
+        history = [year_ago + i * (current - year_ago) / 12 for i in range(13)]
+        context = build_macro_context(
+            now,
+            fred_latest={"CPIAUCSL": current},
+            fred_history={"CPIAUCSL": history},
+        )
+        self.assertEqual(context.inflation_level, "low")
+
+    def test_inflation_level_falls_back_to_absolute_without_history(self) -> None:
+        now = datetime.now(timezone.utc)
+        context = build_macro_context(
+            now,
+            fred_latest={"CPIAUCSL": 325.0},
+            fred_history={"CPIAUCSL": [324.0, 325.0]},  # too few points for YoY
+        )
+        self.assertEqual(context.inflation_level, "elevated")
+
+
 if __name__ == "__main__":
     unittest.main()

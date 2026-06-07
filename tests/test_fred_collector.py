@@ -63,6 +63,24 @@ class FredCollectorTests(unittest.TestCase):
         self.assertIsNotNone(snapshot_dict["payload_extra"])
         self.assertIsNotNone(snapshot_dict["source_provenance"])
 
+    def test_latest_and_history_by_series(self) -> None:
+        now = datetime.now(timezone.utc)
+        # Newest-first order, mixed series, with one None value to skip.
+        collection = FredCollection(
+            observations=[
+                FredObservation("2026-06-01", 5.33, "FEDFUNDS", "Federal Funds Effective Rate (%)"),
+                FredObservation("2026-05-01", 5.10, "FEDFUNDS", "Federal Funds Effective Rate (%)"),
+                FredObservation("2026-04-01", None, "FEDFUNDS", "Federal Funds Effective Rate (%)"),
+                FredObservation("2026-06-01", 4.1, "UNRATE", "Unemployment Rate (%)"),
+            ],
+            fetched_at=now,
+        )
+        self.assertEqual(collection.latest_by_series(), {"FEDFUNDS": 5.33, "UNRATE": 4.1})
+        history = collection.history_by_series()
+        # Chronological (oldest-first), None dropped.
+        self.assertEqual(history["FEDFUNDS"], [5.10, 5.33])
+        self.assertEqual(history["UNRATE"], [4.1])
+
     def test_snapshot_dict_confidence_on_error(self) -> None:
         now = datetime.now(timezone.utc)
         collection = FredCollection(

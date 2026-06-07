@@ -574,8 +574,12 @@ Current state:
    to latest available data instead of claiming real-time precision.
 6. Done: FRED operation notes now flag partial collection errors and old
    observations as possible stale macro data.
-7. Remaining: replace simplified CPI-index thresholds and stable-only rate
-   direction with trend-aware macro interpretation.
+7. Done: the FRED collector now fetches a recent observation window
+   (`FRED_HISTORY_WINDOW`), `build_macro_context()` infers `rate_direction`
+   from the FEDFUNDS trend and `inflation_level` from CPI year-over-year change
+   (falling back to absolute CPI-index thresholds when history is too short),
+   and `macro_context_summary()` surfaces falling-rate context. Priority 3 is
+   complete.
 
 Implementation plan:
 

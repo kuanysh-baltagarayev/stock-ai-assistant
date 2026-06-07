@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 class FredMacroContext:
     collection: FredCollection | None = None
     latest: dict[str, float | None] = field(default_factory=dict)
+    history: dict[str, list[float]] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
 
 
@@ -79,6 +80,7 @@ def analyze_ticker(
     macro = build_macro_context(
         generated_at,
         fred_latest=fred_macro.latest,
+        fred_history=fred_macro.history,
         news_context=news_context,
     )
     sec_filings_payload = _build_sec_filings_payload(edgar_collection)
@@ -1003,11 +1005,8 @@ def _collect_fred_macro(settings: Any) -> FredMacroContext:
         )
         return FredMacroContext(notes=("FRED macro data unavailable: collector failed.",))
 
-    latest = {
-        observation.series_id: observation.value
-        for observation in collection.observations
-        if observation.value is not None
-    }
+    latest = collection.latest_by_series()
+    history = collection.history_by_series()
     notes: list[str] = []
     if collection.error:
         if latest:
@@ -1021,6 +1020,7 @@ def _collect_fred_macro(settings: Any) -> FredMacroContext:
     return FredMacroContext(
         collection=collection,
         latest=latest,
+        history=history,
         notes=tuple(notes),
     )
 
