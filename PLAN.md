@@ -105,6 +105,10 @@ Implemented:
 - 2026-06-08: `scripts/check.sh` passed after threading FRED observations into
   `build_macro_context()` and reusing one FRED collection per scan, with 360
   tests passing.
+- 2026-06-08: `scripts/check.sh` passed after making
+  `macro_context_summary()` show latest available FRED Fed funds,
+  unemployment, CPI values, incomplete snapshots, and stale FRED warnings, with
+  363 tests passing.
 - 2026-06-08: `scripts/test_fast.sh` passed after adding deterministic
   Telegram scan/digest briefing groups and focused briefing tests, with 97
   tests passing.
@@ -565,9 +569,13 @@ Current state:
    session is present and observations are available.
 4. Done: `scan_tickers()` builds one scan-level FRED context and passes it into
    each ticker analysis to avoid one FRED collection per ticker.
-5. Remaining: improve `macro_context_summary()` so Fed rate, unemployment, CPI,
-   partial FRED errors, and stale macro observations are explicit without
-   overstating precision.
+5. Done: `macro_context_summary()` now shows latest available Fed funds,
+   unemployment, and CPI values, notes incomplete snapshots, and keeps wording
+   to latest available data instead of claiming real-time precision.
+6. Done: FRED operation notes now flag partial collection errors and old
+   observations as possible stale macro data.
+7. Remaining: replace simplified CPI-index thresholds and stable-only rate
+   direction with trend-aware macro interpretation.
 
 Implementation plan:
 
@@ -576,11 +584,11 @@ Implementation plan:
    `{series_id: value}`.
 2. Done: pass the resulting `fred_latest` into `build_macro_context(...)`.
 3. Done: persist the same FRED collection as a `SourceSnapshot` when `db` is present.
-4. Partly done: add operation notes when FRED is unavailable or partially failed;
-   stale observation detection still needs explicit age thresholds.
+4. Done: add operation notes when FRED is unavailable, partially failed, or when
+   latest observations look stale by age threshold.
 5. Done: avoid repeated FRED calls during multi-ticker scans; introduce a scan-level
    macro context or short TTL cache before using this in `scan_tickers`.
-6. Pending: update `macro_context_summary()` text so Fed rate, unemployment, and CPI
+6. Done: update `macro_context_summary()` text so Fed rate, unemployment, and CPI
    context is explicit and not overstated.
 
 Suggested files:
@@ -599,8 +607,8 @@ Acceptance criteria:
 3. Done: without `FRED_API_KEY`, analysis still passes and adds a clear non-fatal
    operation note only when user-facing context needs it.
 4. Done: scans do not make one FRED network call per ticker.
-5. Partly done: tests cover FRED success, missing key, and scan reuse; stale and
-   partial-error presentation need deeper coverage when summary text is improved.
+5. Done: tests cover FRED success, missing key, scan reuse, incomplete summary,
+   partial-error notes, and stale observation notes.
 
 ### Priority 4: Market Regime Context
 

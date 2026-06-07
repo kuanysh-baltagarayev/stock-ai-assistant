@@ -1016,12 +1016,51 @@ def _collect_fred_macro(settings: Any) -> FredMacroContext:
             notes.append(f"FRED macro data unavailable: {collection.error}.")
     elif not latest:
         notes.append("FRED macro data unavailable: no observations returned.")
+    notes.extend(_fred_staleness_notes(collection))
 
     return FredMacroContext(
         collection=collection,
         latest=latest,
         notes=tuple(notes),
     )
+
+
+def _fred_staleness_notes(collection: FredCollection) -> list[str]:
+    if not collection.observations:
+        return []
+
+    fetched_at = collection.fetched_at
+    if fetched_at.tzinfo is None:
+        fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+
+    stale_series: list[str] = []
+    for observation in collection.observations:
+        observed_date = _parse_fred_observation_date(observation.date)
+        if observed_date is None:
+            continue
+        age_days = (fetched_at.date() - observed_date.date()).days
+        if age_days > 120:
+            stale_series.append(f"{observation.series_id} {observation.date}")
+
+    if not stale_series:
+        return []
+
+    sample = ", ".join(stale_series[:3])
+    return [f"FRED macro data may be stale: latest old observations include {sample}."]
+
+
+def _parse_fred_observation_date(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _save_macro_indicators(db: Session, collection: FredCollection | None) -> None:

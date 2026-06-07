@@ -29,6 +29,33 @@ class MacroContextTests(unittest.TestCase):
         self.assertEqual(context.recent_macro_data["unemployment"], 4.1)
         self.assertEqual(context.recent_macro_data["cpi"], 314.2)
 
+    def test_macro_context_summary_includes_fred_values(self) -> None:
+        now = datetime(2025, 1, 10, 12, 0, tzinfo=timezone.utc)
+        context = build_macro_context(
+            now,
+            fred_latest={
+                "FEDFUNDS": 5.33,
+                "UNRATE": 4.1,
+                "CPIAUCSL": 325.0,
+            },
+        )
+
+        summary = macro_context_summary(context)
+
+        self.assertTrue(any("Fed funds 5.33%" in note for note in summary))
+        self.assertTrue(any("unemployment 4.10%" in note for note in summary))
+        self.assertTrue(any("CPI index 325.00" in note for note in summary))
+        self.assertTrue(any("rate-sensitive" in note for note in summary))
+
+    def test_macro_context_summary_marks_partial_fred_values(self) -> None:
+        now = datetime(2025, 1, 10, 12, 0, tzinfo=timezone.utc)
+        context = build_macro_context(now, fred_latest={"FEDFUNDS": 4.33})
+
+        summary = macro_context_summary(context)
+
+        self.assertTrue(any("Fed funds 4.33%" in note for note in summary))
+        self.assertTrue(any("missing unemployment, CPI" in note for note in summary))
+
     def test_macro_context_summary_with_events(self) -> None:
         now = datetime(2025, 1, 8, 12, 0, tzinfo=timezone.utc)
         context = build_macro_context(now)

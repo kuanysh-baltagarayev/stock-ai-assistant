@@ -39,7 +39,7 @@ from app.services.fred_collector import FredCollection, FredObservation
 from app.services.macro_context import MacroContext
 from app.services import market_data
 from app.services.runtime_budget import reset_runtime_budgets
-from app.services.scanner import analyze_ticker, scan_tickers
+from app.services.scanner import _collect_fred_macro, analyze_ticker, scan_tickers
 
 
 def make_analysis(ticker: str, final_score: float) -> AnalyzeResponse:
@@ -1038,6 +1038,22 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(len(contexts), 2)
         self.assertIs(contexts[0], contexts[1])
         self.assertEqual(contexts[0].latest, {"FEDFUNDS": 5.33})
+
+    def test_collect_fred_macro_notes_partial_and_stale_data(self) -> None:
+        fred_collection = FredCollection(
+            observations=[
+                FredObservation("2025-01-01", 5.33, "FEDFUNDS", "Federal Funds Effective Rate (%)"),
+            ],
+            fetched_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+            error="UNRATE: timeout",
+        )
+
+        with patch("app.services.scanner.fetch_macro_indicators", return_value=fred_collection):
+            context = _collect_fred_macro(SimpleNamespace(fred_api_key="fred-key"))
+
+        self.assertEqual(context.latest, {"FEDFUNDS": 5.33})
+        self.assertTrue(any("partially unavailable" in note for note in context.notes))
+        self.assertTrue(any("may be stale" in note for note in context.notes))
 
     def test_scan_tickers_adds_event_calendar_notes_to_summary(self) -> None:
         analysis = AnalyzeResponse(

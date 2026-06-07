@@ -93,6 +93,7 @@ def macro_context_summary(macro: MacroContext) -> list[str]:
     for interpreting stock movements.
     """
     notes: list[str] = []
+    notes.extend(_fred_indicator_notes(macro))
 
     # Upcoming events warning
     if macro.upcoming_high_impact_events:
@@ -132,6 +133,51 @@ def macro_context_summary(macro: MacroContext) -> list[str]:
             "Политический/регуляторный риск повышен: значимые новости о тарифах, "
             "санкциях или регулировании."
         )
+
+    return notes
+
+
+def _fred_indicator_notes(macro: MacroContext) -> list[str]:
+    data = macro.recent_macro_data or {}
+    fed_rate = _float_or_none(data.get("fed_rate"))
+    unemployment = _float_or_none(data.get("unemployment"))
+    cpi = _float_or_none(data.get("cpi"))
+    notes: list[str] = []
+
+    available_parts: list[str] = []
+    if fed_rate is not None:
+        available_parts.append(f"Fed funds {fed_rate:.2f}%")
+    if unemployment is not None:
+        available_parts.append(f"unemployment {unemployment:.2f}%")
+    if cpi is not None:
+        available_parts.append(f"CPI index {cpi:.2f}")
+
+    if available_parts:
+        notes.append(
+            "FRED latest available macro snapshot: " + ", ".join(available_parts) + "."
+        )
+
+    missing = []
+    if fed_rate is None:
+        missing.append("Fed funds")
+    if unemployment is None:
+        missing.append("unemployment")
+    if cpi is None:
+        missing.append("CPI")
+    if available_parts and missing:
+        notes.append("FRED macro snapshot is incomplete: missing " + ", ".join(missing) + ".")
+
+    if fed_rate is not None and fed_rate >= 5.0:
+        notes.append(
+            "Fed funds rate is elevated, so long-duration growth valuations may be more rate-sensitive."
+        )
+    elif fed_rate is not None and fed_rate <= 0.5:
+        notes.append("Fed funds rate is very low, so liquidity conditions may be unusually loose.")
+
+    if unemployment is not None and unemployment > 6.0:
+        notes.append("Unemployment is high, which can point to weaker growth and defensive positioning.")
+    elif unemployment is not None and unemployment < 3.5:
+        notes.append("Unemployment is very low, which can keep wage and inflation pressure in focus.")
 
     return notes
 
@@ -179,6 +225,15 @@ def _infer_volatility_level(
         return "medium"
 
     return "low"
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _infer_inflation_level(cpi: float | None) -> str | None:
