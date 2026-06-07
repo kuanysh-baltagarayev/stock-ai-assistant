@@ -30,7 +30,6 @@ from app.services.runtime_budget import (
 from app.services.exchange_calendar import get_session_state
 from app.services.scanner import analyze_ticker, scan_tickers
 from app.services.market_hours import should_defer_alert, time_until_market_open
-from app.services.backtesting import backtest_report, calculate_metrics
 from app.services.telegram._ui import UiMixin
 from app.services.telegram._parsing import ParsingMixin
 from app.services.telegram._formatting import FormattingMixin
@@ -1814,35 +1813,56 @@ class TelegramBotService(
             db.close()
 
     def _backtest_ticker(self, ticker: str) -> str:
-        """Analyze backtest accuracy for a ticker."""
+        """Analyze backtest accuracy for a ticker.
+
+        Fetches saved analysis snapshots, downloads price history, and
+        compares every recommendation against actual price movement over
+        fixed horizons (1d, 5d, 20d trading days).
+        """
         db = SessionLocal()
         try:
-            # Get recent analysis snapshots for this ticker
             snapshots = (
                 db.query(AnalysisSnapshot)
                 .filter_by(ticker=ticker)
                 .order_by(AnalysisSnapshot.created_at.desc())
-                .limit(30)
+                .limit(50)
                 .all()
             )
 
             if not snapshots:
-                return f"❌ Нет анализов для {ticker}. Запусти /analyze {ticker}"
+                return (
+                    f"❌ Нет анализов для {ticker}. Запусти /analyze {ticker}, "
+                    "чтобы накопить данные для backtesting."
+                )
 
-            # Group by recommendation type and calculate metrics
-            results = []
-            for snapshot in snapshots:
-                # We'd need real price data to backtest properly
-                # For now, just show recommendation count
-                pass
+            # Reverse to chronological order for price lookups
+            snapshots = list(reversed(snapshots))
 
+            # Fetch price history from before the earliest snapshot
+            from app.services.backtesting import (
+                backtest_report,
+                backtest_snapshots,
+                calculate_metrics,
+                fetch_price_history_for_backtest,
+            )
+
+            earliest = snapshots[0].created_at
+            history = fetch_price_history_for_backtest(ticker, earliest)
+
+            if history is None or history.empty:
+                return (
+                    f"❌ Не удалось загрузить историю цен для {ticker}.\n"
+                    "Попробуй позже."
+                )
+
+            results = backtest_snapshots(snapshots, history)
             if not results:
                 return (
-                    f"📊 Анализы для {ticker}:\n"
-                    f"• Всего анализов: {len(snapshots)}\n"
-                    f"• Последний: {snapshots[0].created_at.strftime('%d.%m %H:%M')}\n"
-                    f"• Рекомендация: {snapshots[0].recommendation}\n"
-                    f"\nДля полного backtesting нужны исторические цены."
+                    f"📊 Анализы для {ticker}: {len(snapshots)} сохранено.\n"
+                    f"• Последний: {snapshots[-1].created_at.strftime('%d.%m %H:%M')}\n"
+                    f"• Рекомендация: {snapshots[-1].recommendation}\n"
+                    f"\nНедостаточно данных для backtesting — "
+                    "нужны более старые анализы и ценовая история."
                 )
 
             metrics = calculate_metrics(results)

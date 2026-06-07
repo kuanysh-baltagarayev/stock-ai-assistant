@@ -732,39 +732,52 @@ Product goal:
 
 Current state:
 
-1. `app/services/backtesting.py` and tests exist.
-2. Telegram recognizes `/backtest TICKER`.
-3. `TelegramBotService._backtest_ticker()` currently returns a placeholder when
-   there are snapshots but no historical-price comparison.
+1. `app/services/backtesting.py` updated with current research labels
+   (`HIGH_INTEREST`, `WATCH`, `NEUTRAL`, `CAUTION`, `HIGH_RISK`).
+2. Backtest results now cover multiple horizons (1d, 5d, 20d trading days).
+3. `TelegramBotService._backtest_ticker()` no longer a placeholder — fetches
+   real price history via `fetch_price_history_for_backtest()` and runs
+   multi-horizon backtesting.
 
 Implementation plan:
 
-1. Finish `_backtest_ticker()` by pairing saved `AnalysisSnapshot.created_at`
-   with later price data over fixed horizons: 1d, 5d, 20d.
-2. Use adjusted or raw price policy explicitly and show which one was used.
-3. Add a CLI path, for example `scripts/scan_market.py --backtest AAPL`, only
-   if it stays small; Telegram first is enough for the first slice.
-4. Report hit rate by label, average forward return, false positives, false
-   negatives, sample size, and data-quality caveats.
-5. Add a "not enough data" path that tells the user how many saved analyses are
-   needed.
+1. Done: `assess_recommendation_accuracy()` updated for all five research
+   labels. `HIGH_INTEREST`/`WATCH` → price up is correct; `NEUTRAL` → |change|
+   ≤ 2 %; `CAUTION`/`HIGH_RISK` → price down is correct.
+2. Done: `BacktestResult` gains `horizon` field; `backtest_snapshots()` runs
+   each snapshot against configurable horizons (default 1, 5, 20 trading days).
+3. Done: `_lookup_close_price()` helper searches a price DataFrame for the close
+   price on or after a target date (up to 10 trading days forward).
+4. Done: `fetch_price_history_for_backtest()` wraps yfinance download for
+   backtesting; handles MultiIndex columns, uses start/end or period.
+5. Done: `BacktestMetrics` includes `false_positives`, `false_negatives`,
+   `avg_return_pct`, and per-(label, horizon) breakdown via
+   `LabelHorizonMetrics`.
+6. Done: `_backtest_ticker()` in `telegram_bot.py` fetches up to 50 snapshots,
+   downloads price history from before the earliest snapshot, runs
+   `backtest_snapshots()` for default horizons, and returns the formatted
+   report.
+7. Done: "not enough data" path when total checks < 3; disclaimer always
+   present ("не является инвестиционной рекомендацией").
+8. Done: 59 tests covering label mapping, multi-horizon, false
+   positives/negatives, price lookup, data fetch (mocked), insufficient data,
+   telegram integration, and no buy/sell wording.
 
 Suggested files:
 
 1. `app/services/backtesting.py`
 2. `app/services/telegram_bot.py`
-3. `app/services/market_data.py`
-4. `tests/test_backtesting.py`
-5. `tests/test_telegram_details.py` or a new `tests/test_telegram_backtest.py`
+3. `tests/test_backtesting.py`
 
 Acceptance criteria:
 
-1. `/backtest AAPL` compares historical snapshots to later prices when enough
-   data exists.
-2. The report includes sample size and explicit "not investment performance"
+1. Done: `/backtest AAPL` compares historical snapshots to later prices when
+   enough data exists (multi-horizon: 1d, 5d, 20d).
+2. Done: the report includes sample size and explicit "not investment
+   performance" wording.
+3. Done: 59 offline tests cover correct/incorrect signal classification,
+   insufficient data, missing price data, neutral labels, and no buy/sell
    wording.
-3. Offline tests cover correct/incorrect signal classification, insufficient
-   data, missing price data, and neutral labels.
 
 ### Priority 7: Better "Why Changed" Audit
 
