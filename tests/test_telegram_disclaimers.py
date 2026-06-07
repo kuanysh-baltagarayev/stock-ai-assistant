@@ -36,6 +36,12 @@ class TelegramDisclaimerTests(unittest.TestCase):
             scores=SimpleNamespace(final_score=86.0, momentum_score=70.0, valuation_score=65.0, risk_score=40.0),
             short_reason="HIGH_INTEREST: sample reason.",
             explanation="Sample explanation.",
+            source_provenance=SimpleNamespace(
+                provider_name="yfinance",
+                source_tier="Tier 2",
+                fetched_at="2026-06-08T13:00:00Z",
+                observed_at="2026-06-08T13:00:00Z",
+            ),
             data_quality=SimpleNamespace(
                 stale=True,
                 delayed=True,
@@ -43,12 +49,15 @@ class TelegramDisclaimerTests(unittest.TestCase):
                 confidence=0.65,
                 summary="fresh but delayed",
             ),
+            market_session=SimpleNamespace(status="closed", freshness_state="delayed"),
         )
 
         text = self.service._analysis_text(analysis)
 
         self.assertIn("Крупный сигнал", text)
         self.assertIn("AAPL: Высокий интерес", text)
+        self.assertIn("Данные: yfinance/Tier 2", text)
+        self.assertIn("confidence 0.65", text)
         self.assertIn("Качество данных:", text)
         self.assertIn("Низкая уверенность данных", text)
         self.assertIn("Источники не совпадают", text)
@@ -88,6 +97,10 @@ class TelegramDisclaimerTests(unittest.TestCase):
                 short_reason="sample reason",
                 confidence=0.91,
                 risk_score=35.0,
+                source_provider="yfinance",
+                source_tier="Tier 2",
+                market_session_status="regular_open",
+                freshness_state="fresh",
             )
         ]
         errors = [SimpleNamespace(ticker="NVDA", error="yfinance timeout")]
@@ -111,6 +124,10 @@ class TelegramDisclaimerTests(unittest.TestCase):
                 short_reason="strong setup",
                 confidence=0.92,
                 risk_score=35.0,
+                source_provider="yfinance",
+                source_tier="Tier 2",
+                market_session_status="regular_open",
+                freshness_state="fresh",
             ),
             SimpleNamespace(
                 ticker="NVDA",
@@ -120,6 +137,10 @@ class TelegramDisclaimerTests(unittest.TestCase):
                 short_reason="event risk",
                 confidence=0.62,
                 risk_score=78.0,
+                source_provider="yfinance",
+                source_tier="Tier 2",
+                market_session_status="closed",
+                freshness_state="stale",
             ),
         ]
 
@@ -128,6 +149,8 @@ class TelegramDisclaimerTests(unittest.TestCase):
         self.assertIn("Ключевые сигналы:", text)
         self.assertIn("Риск/качество данных:", text)
         self.assertIn("уверенность 0.92", text)
+        self.assertIn("yfinance/Tier 2", text)
+        self.assertIn("regular_open/fresh", text)
         self.assertIn("высокий риск 78", text)
 
     def test_risk_text_surfaces_data_quality_warnings(self) -> None:
@@ -144,7 +167,12 @@ class TelegramDisclaimerTests(unittest.TestCase):
                     "source_disagreed": True,
                     "stale": True,
                 },
-                "market_session": {"status": "closed"},
+                "source_provenance": {
+                    "provider_name": "yfinance",
+                    "source_tier": "Tier 2",
+                    "fetched_at": "2026-06-08T13:00:00Z",
+                },
+                "market_session": {"status": "closed", "freshness_state": "stale"},
                 "short_reason": "sample",
                 "explanation": "sample",
                 "event_calendar": None,
@@ -157,6 +185,8 @@ class TelegramDisclaimerTests(unittest.TestCase):
         with patch.object(self.service, "_latest_analysis_snapshot", return_value=snapshot):
             text = self.service._risk_text("NVDA")
 
+        self.assertIn("Данные: yfinance/Tier 2", text)
+        self.assertIn("freshness stale", text)
         self.assertIn("Quality warnings:", text)
         self.assertIn("Низкая уверенность данных", text)
         self.assertIn("Источники не совпадают", text)

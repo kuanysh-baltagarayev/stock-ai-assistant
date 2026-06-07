@@ -14,6 +14,10 @@ class BriefingItem:
     group: str
     confidence: float | None = None
     risk_score: float | None = None
+    source_provider: str | None = None
+    source_tier: str | None = None
+    market_session_status: str | None = None
+    freshness_state: str | None = None
     flags: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -81,6 +85,10 @@ def _briefing_item(item: Any) -> BriefingItem:
         group=_briefing_group(recommendation, risk_score=risk_score),
         confidence=confidence,
         risk_score=risk_score,
+        source_provider=_str_or_none(getattr(item, "source_provider", None)),
+        source_tier=_str_or_none(getattr(item, "source_tier", None)),
+        market_session_status=_str_or_none(getattr(item, "market_session_status", None)),
+        freshness_state=_str_or_none(getattr(item, "freshness_state", None)),
         flags=flags,
     )
 
@@ -126,6 +134,11 @@ def _quality_flags(
     if isinstance(freshness_state, str) and freshness_state in {"stale", "delayed"}:
         flags.append(f"{freshness_state} signal")
 
+    if not getattr(item, "source_provider", None):
+        flags.append("source provider n/a")
+    if not getattr(item, "market_session_status", None):
+        flags.append("session n/a")
+
     return tuple(dict.fromkeys(flags))
 
 
@@ -154,3 +167,10 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _str_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

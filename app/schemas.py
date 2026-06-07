@@ -134,6 +134,15 @@ class ScanResult(BaseModel):
     valuation_score: float
     risk_score: float
     confidence: float | None = None
+    source_provider: str | None = None
+    source_tier: str | None = None
+    market_session_status: str | None = None
+    freshness_state: str | None = None
+    data_quality_summary: str | None = None
+    stale: bool = False
+    delayed: bool = False
+    missing: bool = False
+    source_disagreed: bool = False
     recommendation: Recommendation
     short_reason: str
 

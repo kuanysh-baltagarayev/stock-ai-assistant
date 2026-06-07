@@ -62,6 +62,9 @@ Implemented:
 - Deterministic scan/digest briefing builder for Telegram that groups results
   into key signals, watch items, and risk/data-quality items with confidence
   and degradation flags, without OpenAI.
+- Compact source/freshness/confidence line in the first Telegram analysis,
+  scan, and risk answers, backed by `ScanResult` source/session/freshness
+  fields.
 - `analyze_ticker` now threads recent SEC EDGAR filing summaries into the main
   analysis payload, operation notes, and Telegram risk/detail views.
 - Recent SEC filing types and recency now feed into scoring as explicit
@@ -96,6 +99,9 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-08: `scripts/check.sh` passed after adding mandatory compact
+  source/freshness/confidence context to Telegram analysis, scan, and risk
+  output, with 358 tests passing.
 - 2026-06-08: `scripts/test_fast.sh` passed after adding deterministic
   Telegram scan/digest briefing groups and focused briefing tests, with 97
   tests passing.
@@ -504,8 +510,11 @@ Current state:
 1. `AnalyzeResponse` already carries `data_quality`, `market_session`,
    `source_provenance`, and operation notes.
 2. `/sources`, `/freshness`, and `/risk` expose much of this detail.
-3. The first `/analyze` and scan/digest messages still need a compact,
-   consistent freshness line.
+3. Done: `_source_freshness_line` now appears in first `/analyze` and `/risk`
+   output, and scan/digest briefing items include provider, source tier,
+   session, freshness, confidence, and degradation flags.
+4. Remaining: add richer per-analysis source-gap summaries, reuse the compact
+   line in `/why` and `/audit`, and show latest relevant news timestamps.
 
 Implementation plan:
 
@@ -1286,8 +1295,9 @@ above. Keep this phase list short and status-oriented.
 3. Partly done: market-session modeling exists for U.S. equities; per-symbol
    exchange/timezone expansion and non-U.S. session handling remain pending.
 4. Partly done: source freshness, source disagreement, and confidence fields
-   exist; every high-level Telegram answer still needs a mandatory compact
-   freshness/confidence/source-gap line.
+   exist; first Telegram analysis, scan/digest, and risk answers now show
+   compact source/freshness/confidence context, but richer per-analysis
+   source-gap summaries and latest-news freshness remain pending.
 5. Pending: strengthen data-quality handling for adjusted prices, splits,
    dividends, missing candles, partial sessions, and delayed quotes.
 6. Pending: add open web collectors for news sites that lack stable APIs only

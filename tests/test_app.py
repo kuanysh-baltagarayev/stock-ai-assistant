@@ -25,9 +25,12 @@ from app.models import SourceSnapshot
 from app.main import app
 from app.schemas import (
     AnalyzeResponse,
+    DataQualityFlags,
     Fundamentals,
+    MarketSession,
     ScanRequest,
     Scores,
+    SourceProvenance,
     TechnicalIndicators,
 )
 from app.services.ai_explainer import explain_analysis
@@ -881,6 +884,18 @@ class AppSmokeTests(unittest.TestCase):
 
     def test_scan_tickers_sorts_results_and_collects_errors(self) -> None:
         analysis_high = make_analysis("MSFT", 82.0)
+        analysis_high.source_provenance = SourceProvenance(
+            provider_name="yfinance",
+            source_tier="Tier 2",
+            fetched_at=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+        )
+        analysis_high.market_session = MarketSession(
+            reference_time=datetime(2026, 5, 28, 0, 0, tzinfo=timezone.utc),
+            status="closed",
+            is_open=False,
+            freshness_state="fresh",
+        )
+        analysis_high.data_quality = DataQualityFlags(confidence=0.81, summary="ok")
         analysis_low = make_analysis("AAPL", 55.0)
 
         with patch(
@@ -891,6 +906,11 @@ class AppSmokeTests(unittest.TestCase):
 
         self.assertEqual([item.ticker for item in response.results], ["MSFT", "AAPL"])
         self.assertEqual(response.results[0].final_score, 82.0)
+        self.assertEqual(response.results[0].source_provider, "yfinance")
+        self.assertEqual(response.results[0].source_tier, "Tier 2")
+        self.assertEqual(response.results[0].market_session_status, "closed")
+        self.assertEqual(response.results[0].freshness_state, "fresh")
+        self.assertEqual(response.results[0].confidence, 0.81)
         self.assertEqual(response.errors[0].ticker, "NVDA")
         self.assertTrue(response.summary.partial_failure)
         self.assertEqual(response.summary.requested_count, 3)

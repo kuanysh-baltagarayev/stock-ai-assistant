@@ -247,6 +247,15 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
                 confidence=getattr(getattr(analysis, "data_quality", None), "confidence", None)
                 if getattr(analysis, "data_quality", None) is not None
                 else None,
+                source_provider=getattr(getattr(analysis, "source_provenance", None), "provider_name", None),
+                source_tier=getattr(getattr(analysis, "source_provenance", None), "source_tier", None),
+                market_session_status=getattr(getattr(analysis, "market_session", None), "status", None),
+                freshness_state=getattr(getattr(analysis, "market_session", None), "freshness_state", None),
+                data_quality_summary=getattr(getattr(analysis, "data_quality", None), "summary", None),
+                stale=bool(getattr(getattr(analysis, "data_quality", None), "stale", False)),
+                delayed=bool(getattr(getattr(analysis, "data_quality", None), "delayed", False)),
+                missing=bool(getattr(getattr(analysis, "data_quality", None), "missing", False)),
+                source_disagreed=bool(getattr(getattr(analysis, "data_quality", None), "source_disagreed", False)),
                 recommendation=analysis.recommendation,
                 short_reason=analysis.short_reason,
             )

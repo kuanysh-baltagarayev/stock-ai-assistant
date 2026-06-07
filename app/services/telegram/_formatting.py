@@ -49,6 +49,7 @@ class FormattingMixin:
         lines = [
             f"{analysis.ticker}: {recommendation}",
             f"Цена: {analysis.price:.2f} {analysis.currency or ''}".strip(),
+            self._source_freshness_line(analysis),
             f"Итоговая оценка: {analysis.scores.final_score:.2f}",
             f"Импульс: {analysis.scores.momentum_score:.2f}",
             f"Оценка стоимости: {analysis.scores.valuation_score:.2f}",
@@ -317,6 +318,7 @@ class FormattingMixin:
         explanation = payload.get("explanation") or ""
         lines = [
             f"{ticker.upper()}: risk context",
+            self._source_freshness_line(payload),
             f"Risk score: {scores.get('risk_score', 0.0):.2f}",
             f"Final score: {scores.get('final_score', snapshot.final_score):.2f}",
             f"Recommendation: {self._translate_recommendation(str(payload.get('recommendation') or snapshot.recommendation))}",
@@ -344,6 +346,59 @@ class FormattingMixin:
         if explanation:
             lines.extend(["", self._translate_text(str(explanation))])
         return self._trim_message("\n".join(lines))
+
+    def _source_freshness_line(self, subject: Any) -> str:
+        provenance = self._subject_value(subject, "source_provenance") or {}
+        quality = self._subject_value(subject, "data_quality") or {}
+        session = self._subject_value(subject, "market_session") or {}
+
+        provider = self._nested_value(provenance, "provider_name") or "unknown"
+        tier = self._nested_value(provenance, "source_tier") or "unknown"
+        session_status = self._nested_value(session, "status") or "unknown"
+        freshness = self._nested_value(session, "freshness_state") or "fresh"
+        confidence = self._nested_value(quality, "confidence")
+        confidence_text = f"{float(confidence):.2f}" if isinstance(confidence, (int, float)) else "n/a"
+
+        flags = self._source_gap_flags(provenance, quality, session)
+        flag_text = f" | {'; '.join(flags)}" if flags else ""
+        return (
+            f"Данные: {provider}/{tier} | session {session_status} | "
+            f"freshness {freshness} | confidence {confidence_text}{flag_text}"
+        )
+
+    def _source_gap_flags(self, provenance: Any, quality: Any, session: Any) -> list[str]:
+        flags: list[str] = []
+        if not self._nested_value(provenance, "provider_name"):
+            flags.append("нет provider")
+        if not self._nested_value(provenance, "fetched_at") and not self._nested_value(provenance, "observed_at"):
+            flags.append("нет source timestamp")
+        if not self._nested_value(session, "status"):
+            flags.append("нет session")
+        if self._nested_bool(quality, "stale"):
+            flags.append("устаревшие данные")
+        if self._nested_bool(quality, "delayed"):
+            flags.append("задержка данных")
+        if self._nested_bool(quality, "missing"):
+            flags.append("неполные данные")
+        if self._nested_bool(quality, "source_disagreed"):
+            flags.append("источники расходятся")
+        confidence = self._nested_value(quality, "confidence")
+        if isinstance(confidence, (int, float)) and confidence < 0.8:
+            flags.append("пониженная уверенность")
+        return flags
+
+    def _subject_value(self, subject: Any, key: str) -> Any:
+        if isinstance(subject, dict):
+            return subject.get(key)
+        return getattr(subject, key, None)
+
+    def _nested_value(self, value: Any, key: str) -> Any:
+        if isinstance(value, dict):
+            return value.get(key)
+        return getattr(value, key, None)
+
+    def _nested_bool(self, value: Any, key: str) -> bool:
+        return bool(self._nested_value(value, key))
 
     def _calendar_text(self, ticker: str | None) -> str:
         if ticker:
@@ -528,11 +583,13 @@ class FormattingMixin:
         label = self._translate_recommendation(item.label)
         price = f" | цена {item.price:.2f}" if item.price is not None else ""
         confidence = f" | уверенность {item.confidence:.2f}" if item.confidence is not None else " | уверенность n/a"
+        source = f" | {item.source_provider or 'unknown'}/{item.source_tier or 'unknown'}"
+        freshness = f" | {item.market_session_status or 'session n/a'}/{item.freshness_state or 'freshness n/a'}"
         flags = ""
         if item.flags:
             flags = " | " + ", ".join(self._briefing_flag_text(flag) for flag in item.flags[:3])
         reason = self._translate_text(item.short_reason)
-        return f"- {item.ticker}: {label} | оценка {item.final_score:.2f}{price}{confidence}{flags}; {reason}"
+        return f"- {item.ticker}: {label} | оценка {item.final_score:.2f}{price}{confidence}{source}{freshness}{flags}; {reason}"
 
     def _briefing_flag_text(self, flag: str) -> str:
         mapping = {
@@ -543,6 +600,8 @@ class FormattingMixin:
             "source disagreement": "источники расходятся",
             "stale signal": "устаревший сигнал",
             "delayed signal": "задержанный сигнал",
+            "source provider n/a": "нет provider",
+            "session n/a": "нет session",
         }
         if flag.startswith("low confidence "):
             return f"низкая уверенность {flag.removeprefix('low confidence ')}"
