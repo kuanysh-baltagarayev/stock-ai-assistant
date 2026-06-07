@@ -44,6 +44,7 @@ class Settings(BaseModel):
     telegram_enabled: bool = Field(default=False)
     analysis_snapshot_retention_count: int = Field(default=50)
     analysis_snapshot_retention_days: int = Field(default=365)
+    market_regime_enabled: bool = Field(default=False)
 
 
 def resolve_database_url(database_url: str) -> str:
@@ -247,5 +248,10 @@ def get_settings() -> Settings:
             env_name="ANALYSIS_SNAPSHOT_RETENTION_DAYS",
             default=365,
             minimum=0,
+        ),
+        market_regime_enabled=_parse_bool(
+            os.getenv("MARKET_REGIME_ENABLED"),
+            env_name="MARKET_REGIME_ENABLED",
+            default=False,
         ),
     )

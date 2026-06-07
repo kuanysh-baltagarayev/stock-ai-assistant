@@ -462,5 +462,146 @@ class PoliticalRiskFromNewsTests(unittest.TestCase):
         self.assertIsNone(macro.political_risk_level)
 
 
+class MarketRegimeAwareScoringTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.price = 150.0
+        self.technicals = TechnicalIndicators(
+            moving_average_50=145.0,
+            moving_average_200=140.0,
+            change_1d_pct=1.5,
+            change_1m_pct=5.0,
+            change_6m_pct=20.0,
+            rsi=55.0,
+            max_drawdown=10.0,
+        )
+        self.fundamentals = Fundamentals(
+            company_name="Test Inc.",
+            sector="Technology",
+            pe_ratio=20.0,
+            dividend_yield=1.5,
+            debt_to_equity=0.5,
+        )
+
+    def _regime(self, **overrides):
+        from app.services.market_regime import MarketRegime
+
+        defaults = dict(
+            reference_date=datetime.now(timezone.utc),
+            index_trend="uptrend",
+            volatility_regime="low",
+            rates_backdrop="stable",
+            sector_rotation="risk_on",
+            risk_appetite="risk_on",
+            confidence=1.0,
+            source_provenance={"provider_name": "yfinance"},
+        )
+        defaults.update(overrides)
+        return MarketRegime(**defaults)
+
+    def test_risk_off_regime_raises_risk_score(self) -> None:
+        baseline = score_stock(self.price, self.technicals, self.fundamentals)
+        risk_off = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            market_regime=self._regime(
+                index_trend="downtrend",
+                volatility_regime="high",
+                sector_rotation="risk_off",
+                risk_appetite="risk_off",
+            ),
+        )
+        self.assertGreater(risk_off.scores.risk_score, baseline.scores.risk_score)
+        self.assertLess(risk_off.scores.final_score, baseline.scores.final_score)
+        self.assertTrue(
+            any("risk-off market regime" in r for r in risk_off.reasons)
+        )
+
+    def test_risk_on_regime_lowers_risk_score(self) -> None:
+        baseline = score_stock(self.price, self.technicals, self.fundamentals)
+        risk_on = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            market_regime=self._regime(),
+        )
+        self.assertLess(risk_on.scores.risk_score, baseline.scores.risk_score)
+
+    def test_regime_risk_adjustment_is_capped(self) -> None:
+        baseline = score_stock(self.price, self.technicals, self.fundamentals)
+        extreme = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            market_regime=self._regime(
+                index_trend="downtrend",
+                volatility_regime="high",
+                sector_rotation="risk_off",
+                risk_appetite="risk_off",
+                confidence=1.0,
+            ),
+        )
+        # Risk-off + high vol at full confidence must stay within the 5-point cap.
+        delta = extreme.scores.risk_score - baseline.scores.risk_score
+        self.assertLessEqual(delta, 5.0 + 1e-6)
+        self.assertGreater(delta, 0.0)
+
+    def test_low_confidence_regime_has_smaller_effect(self) -> None:
+        baseline = score_stock(self.price, self.technicals, self.fundamentals)
+        weak = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            market_regime=self._regime(
+                risk_appetite="risk_off", volatility_regime="elevated", confidence=0.2
+            ),
+        )
+        strong = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            market_regime=self._regime(
+                risk_appetite="risk_off", volatility_regime="elevated", confidence=1.0
+            ),
+        )
+        weak_delta = weak.scores.risk_score - baseline.scores.risk_score
+        strong_delta = strong.scores.risk_score - baseline.scores.risk_score
+        self.assertLess(weak_delta, strong_delta)
+
+    def test_unknown_regime_is_a_noop(self) -> None:
+        baseline = score_stock(self.price, self.technicals, self.fundamentals)
+        unknown = score_stock(
+            self.price,
+            self.technicals,
+            self.fundamentals,
+            market_regime=self._regime(
+                index_trend="unknown",
+                volatility_regime="unknown",
+                rates_backdrop="unknown",
+                sector_rotation="unknown",
+                risk_appetite="unknown",
+                confidence=0.0,
+            ),
+        )
+        self.assertEqual(unknown.scores.risk_score, baseline.scores.risk_score)
+        self.assertEqual(unknown.scores.final_score, baseline.scores.final_score)
+
+    def test_regime_affects_weights_within_bounds(self) -> None:
+        from app.services.scoring import _adaptive_weights
+
+        base_w = _adaptive_weights(None)
+        regime_w = _adaptive_weights(
+            None,
+            market_regime=self._regime(
+                volatility_regime="high",
+                risk_appetite="risk_off",
+            ),
+        )
+        self.assertAlmostEqual(sum(regime_w), 1.0, places=3)
+        # Risk weight should rise but only modestly (bounded nudge).
+        self.assertGreater(regime_w[2], base_w[2])
+        self.assertLess(regime_w[2] - base_w[2], 0.05)
+
+
 if __name__ == "__main__":
     unittest.main()

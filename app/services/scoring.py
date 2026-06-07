@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -12,9 +14,14 @@ from app.services.sector_sensitivity import get_sector_sensitivity
 
 if TYPE_CHECKING:
     from app.services.macro_context import MacroContext
+    from app.services.market_regime import MarketRegime
 
 
 RESEARCH_LABELS = set(NEUTRAL_RESEARCH_LABELS)
+
+# Market regime is context, not a dominant signal: cap its total risk and
+# weight influence to a small band so it never overrides company-level reads.
+_REGIME_MAX_RISK_ADJUSTMENT = 5.0
 
 
 @dataclass(frozen=True)
@@ -40,14 +47,16 @@ def score_stock(
     event_calendar: object | None = None,
     sec_filings: object | None = None,
     reference_time: datetime | None = None,
+    market_regime: "MarketRegime | None" = None,
 ) -> ScoringResult:
-    """Score a stock with optional macroeconomic context.
+    """Score a stock with optional macroeconomic and market-regime context.
 
     Args:
         price: Current stock price
         technicals: Technical indicators (MA, RSI, etc.)
         fundamentals: Fundamental metrics (P/E, dividend, etc.)
         macro_context: Optional MacroContext for adaptive weighting
+        market_regime: Optional broad-market regime, applied as bounded context
 
     Returns:
         ScoringResult with scores, recommendation, and reasons
@@ -61,13 +70,18 @@ def score_stock(
         event_calendar=event_calendar,
         sec_filings=sec_filings,
         reference_time=reference_time,
+        market_regime=market_regime,
     )
 
     # Determine weights based on macro context
     if macro_context:
-        momentum_w, valuation_w, risk_w = _adaptive_weights(macro_context)
+        momentum_w, valuation_w, risk_w = _adaptive_weights(
+            macro_context, market_regime=market_regime
+        )
     else:
-        momentum_w, valuation_w, risk_w = 0.45, 0.35, 0.20
+        momentum_w, valuation_w, risk_w = _adaptive_weights(
+            None, market_regime=market_regime
+        )
 
     final_score = (
         momentum_score * momentum_w
@@ -221,6 +235,7 @@ def _risk_score(
     event_calendar: object | None = None,
     sec_filings: object | None = None,
     reference_time: datetime | None = None,
+    market_regime: "MarketRegime | None" = None,
 ) -> tuple[float, list[str]]:
     score = 35.0
     reasons: list[str] = []
@@ -266,7 +281,50 @@ def _risk_score(
     score += catalyst_adjustment
     reasons.extend(catalyst_reasons)
 
+    regime_adjustment, regime_reason = _regime_risk_adjustment(market_regime)
+    score += regime_adjustment
+    if regime_reason:
+        reasons.append(regime_reason)
+
     return _clamp(score), reasons
+
+
+def _regime_risk_adjustment(
+    market_regime: "MarketRegime | None",
+) -> tuple[float, str | None]:
+    """Return a capped risk adjustment from the broad-market regime.
+
+    Risk-off backdrops add a small risk premium; risk-on backdrops shave a
+    little risk. The magnitude scales with regime confidence and is hard-capped
+    at ``_REGIME_MAX_RISK_ADJUSTMENT`` so regime never dominates the score.
+    """
+    if market_regime is None or not getattr(market_regime, "is_known", False):
+        return 0.0, None
+
+    base = 0.0
+    if market_regime.risk_appetite == "risk_off":
+        base = _REGIME_MAX_RISK_ADJUSTMENT
+    elif market_regime.risk_appetite == "risk_on":
+        base = -_REGIME_MAX_RISK_ADJUSTMENT * 0.6
+    else:
+        return 0.0, None
+
+    # High-volatility regimes add a touch more risk regardless of appetite.
+    if market_regime.volatility_regime == "high":
+        base += 1.0
+
+    adjustment = base * float(market_regime.confidence)
+    adjustment = max(
+        -_REGIME_MAX_RISK_ADJUSTMENT, min(_REGIME_MAX_RISK_ADJUSTMENT, adjustment)
+    )
+    if abs(adjustment) < 0.5:
+        return 0.0, None
+
+    if adjustment > 0:
+        reason = "risk-off market regime adds broad-market risk"
+    else:
+        reason = "risk-on market regime slightly lowers broad-market risk"
+    return round(adjustment, 2), reason
 
 
 def _event_catalyst_risk_adjustment(
@@ -639,8 +697,12 @@ def _short_reason(recommendation: str, reasons: list[str]) -> str:
     return f"{base}: " + "; ".join(reasons[:3]) + "."
 
 
-def _adaptive_weights(macro_context: MacroContext) -> tuple[float, float, float]:
-    """Determine score weights based on macroeconomic context.
+def _adaptive_weights(
+    macro_context: "MacroContext | None",
+    *,
+    market_regime: "MarketRegime | None" = None,
+) -> tuple[float, float, float]:
+    """Determine score weights based on macroeconomic and regime context.
 
     Standard weights: momentum=0.45, valuation=0.35, risk=0.20
 
@@ -649,6 +711,8 @@ def _adaptive_weights(macro_context: MacroContext) -> tuple[float, float, float]
       reduce valuation (long-term fundamentals less relevant)
     - RISING Fed rates: boost risk assessment, reduce valuation
     - ELEVATED inflation: boost risk (duration risk), reduce valuation
+    - Market regime: a small, bounded nudge (high-volatility/risk-off regimes
+      lean on risk and momentum) layered on top of the macro adjustments.
 
     Returns:
         Tuple of (momentum_weight, valuation_weight, risk_weight)
@@ -657,21 +721,31 @@ def _adaptive_weights(macro_context: MacroContext) -> tuple[float, float, float]
     valuation_w = 0.35
     risk_w = 0.20
 
-    # High volatility: short-term technicals matter more
-    if macro_context.volatility_level == "high":
-        momentum_w += 0.05
-        valuation_w -= 0.05
+    if macro_context is not None:
+        # High volatility: short-term technicals matter more
+        if macro_context.volatility_level == "high":
+            momentum_w += 0.05
+            valuation_w -= 0.05
 
-    # Fed rate rising: risk increases (duration risk, refinancing stress)
-    if macro_context.rate_direction == "rising":
-        risk_w += 0.03
-        valuation_w -= 0.03
+        # Fed rate rising: risk increases (duration risk, refinancing stress)
+        if macro_context.rate_direction == "rising":
+            risk_w += 0.03
+            valuation_w -= 0.03
 
-    # Elevated inflation: real returns under pressure, duration risk
-    if macro_context.inflation_level == "elevated":
-        risk_w += 0.02
-        valuation_w -= 0.02
-        momentum_w += 0.01
+        # Elevated inflation: real returns under pressure, duration risk
+        if macro_context.inflation_level == "elevated":
+            risk_w += 0.02
+            valuation_w -= 0.02
+            momentum_w += 0.01
+
+    # Market regime: bounded nudge so regime stays a contextual signal.
+    if market_regime is not None and getattr(market_regime, "is_known", False):
+        if market_regime.volatility_regime in {"elevated", "high"}:
+            momentum_w += 0.02
+            valuation_w -= 0.02
+        if market_regime.risk_appetite == "risk_off":
+            risk_w += 0.02
+            valuation_w -= 0.02
 
     # Normalize weights to sum to 1.0
     total = momentum_w + valuation_w + risk_w

@@ -25,6 +25,11 @@ from app.services.economic_calendar import upcoming_events
 from app.services.exchange_calendar import get_session_state, next_trading_day
 from app.services.fred_collector import FredCollection, fetch_macro_indicators
 from app.services.macro_context import MacroContext, build_macro_context, macro_context_summary
+from app.services.market_regime import (
+    MarketRegime,
+    collect_market_regime,
+    market_regime_summary,
+)
 from app.services.news_collector import NewsContext, build_news_context, high_impact_news
 from app.services.risk_overlay import calculate_risk_overlay, risk_overlay_notes
 from app.services.sector_sensitivity import macro_impact_notes, get_sector_sensitivity
@@ -59,12 +64,14 @@ def analyze_ticker(
     include_edgar_context: bool = True,
     include_news: bool = True,
     fred_macro_context: FredMacroContext | None = None,
+    market_regime: MarketRegime | None = None,
 ) -> AnalyzeResponse:
     logger.debug("analysis_started", extra={"component": "scanner", "ticker": ticker})
     market = get_market_data(ticker, db=db)
     edgar_collection = _fetch_edgar_filings(market["ticker"]) if include_edgar_context else None
     settings = get_settings()
     fred_macro = fred_macro_context or _collect_fred_macro(settings)
+    regime = market_regime if market_regime is not None else _collect_market_regime(settings)
     if db is not None:
         _save_source_snapshot(db, market)
         if edgar_collection is not None:
@@ -92,6 +99,7 @@ def analyze_ticker(
         event_calendar=market.get("event_calendar"),
         sec_filings=sec_filings_payload,
         reference_time=generated_at,
+        market_regime=regime,
     )
 
     if db is not None:
@@ -137,6 +145,7 @@ def analyze_ticker(
         generated_at=payload.get("generated_at"),
         macro_context=macro,
         fred_notes=fred_macro.notes,
+        market_regime=regime,
     )
     operation_notes.extend(news_notes)
 
@@ -227,6 +236,8 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
     settings = get_settings()
     fred_macro = _collect_fred_macro(settings)
     notes.extend(fred_macro.notes)
+    regime = _collect_market_regime(settings)
+    notes.extend(market_regime_summary(regime))
 
     logger.info(
         "scan_started",
@@ -242,6 +253,7 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
                 include_edgar_context=False,
                 include_news=False,
                 fred_macro_context=fred_macro,
+                market_regime=regime,
             )
         except MarketDataError as exc:
             errors.append(ScanError(ticker=ticker, error=str(exc)))
@@ -614,6 +626,7 @@ def _build_operation_notes(
     generated_at: Any = None,
     macro_context: MacroContext | None = None,
     fred_notes: tuple[str, ...] = (),
+    market_regime: MarketRegime | None = None,
 ) -> list[str]:
     notes: list[str] = []
     data_quality = market.get("data_quality") or {}
@@ -622,6 +635,7 @@ def _build_operation_notes(
         notes.append(f"Data quality: {quality_summary}.")
 
     notes.extend(fred_notes)
+    notes.extend(market_regime_summary(market_regime))
 
     if market_session is not None:
         session_note = market_session.get("freshness_note")
@@ -993,6 +1007,26 @@ def _parse_datetime_like(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _collect_market_regime(settings: Any) -> MarketRegime:
+    """Collect the broad-market regime once, gated by settings.
+
+    Disabled by default; when ``market_regime_enabled`` is set the collector
+    fetches index/VIX/yield/sector proxies via yfinance. Any failure degrades
+    confidence rather than breaking analysis.
+    """
+    try:
+        return collect_market_regime(
+            enabled=bool(getattr(settings, "market_regime_enabled", False)),
+            timeout=float(getattr(settings, "market_data_timeout_seconds", 20.0)),
+        )
+    except Exception:
+        logger.exception(
+            "market_regime_collection_failed",
+            extra={"component": "market_regime"},
+        )
+        return collect_market_regime(enabled=False)
 
 
 def _collect_fred_macro(settings: Any) -> FredMacroContext:
