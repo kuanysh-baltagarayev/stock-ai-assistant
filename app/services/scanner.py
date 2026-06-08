@@ -709,12 +709,13 @@ def _build_operation_notes(
     )
 
     if used_ai_explanation:
-        if not getattr(settings, "openai_api_key", None):
-            notes.append("OpenAI explanation is disabled, so a rule-based explanation was used.")
-        elif "Лимит OpenAI-вызовов исчерпан" in explanation:
-            notes.append("OpenAI call budget was exhausted, so a rule-based explanation was used.")
+        api_key = getattr(settings, "deepseek_api_key", None) or getattr(settings, "openai_api_key", None)
+        if not api_key:
+            notes.append("LLM explanation is disabled (neither OPENAI_API_KEY nor DEEPSEEK_API_KEY set), so a rule-based explanation was used.")
+        elif "Лимит LLM-вызовов исчерпан" in explanation:
+            notes.append("LLM call budget was exhausted, so a rule-based explanation was used.")
         elif "Объяснение от LLM недоступно" in explanation:
-            notes.append("OpenAI response was unavailable, so a rule-based explanation was used.")
+            notes.append("LLM response was unavailable, so a rule-based explanation was used.")
 
     return notes
 

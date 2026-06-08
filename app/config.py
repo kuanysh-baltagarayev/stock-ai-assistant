@@ -24,6 +24,9 @@ class Settings(BaseModel):
     allow_remote_api: bool = Field(default=False)
     openai_api_key: str | None = Field(default=None)
     openai_model: str = Field(default="gpt-4.1-mini")
+    llm_provider: str = Field(default="openai")
+    llm_api_base_url: str | None = Field(default=None)
+    deepseek_api_key: str | None = Field(default=None)
     fred_api_key: str | None = Field(default=None)
     alpha_vantage_api_key: str | None = Field(default=None)
     finnhub_api_key: str | None = Field(default=None)
@@ -166,6 +169,9 @@ def get_settings() -> Settings:
         ),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        llm_provider=os.getenv("LLM_PROVIDER", "openai"),
+        llm_api_base_url=os.getenv("LLM_API_BASE_URL") or None,
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
         fred_api_key=os.getenv("FRED_API_KEY") or None,
         alpha_vantage_api_key=os.getenv("ALPHA_VANTAGE_API_KEY") or None,
         finnhub_api_key=os.getenv("FINNHUB_API_KEY") or None,

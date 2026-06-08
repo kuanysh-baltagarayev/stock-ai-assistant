@@ -513,7 +513,7 @@ class AppSmokeTests(unittest.TestCase):
         )
 
         with (
-            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, deepseek_api_key=None, llm_provider="openai", llm_api_base_url=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
             patch("app.services.scanner.get_market_data", return_value=market),
             patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
             patch("app.services.scanner.calculate_indicators", return_value=technicals),
@@ -524,8 +524,8 @@ class AppSmokeTests(unittest.TestCase):
             response = analyze_ticker("aapl", db=None, use_ai_explanation=True)
 
         self.assertTrue(
-            any("OpenAI explanation is disabled" in note for note in response.operation_notes),
-            f"Expected OpenAI message in operation_notes, got: {response.operation_notes}"
+            any("LLM explanation is disabled" in note for note in response.operation_notes),
+            f"Expected LLM message in operation_notes, got: {response.operation_notes}"
         )
 
     def test_analyze_ticker_recent_8k_increases_risk_score(self) -> None:
@@ -550,7 +550,7 @@ class AppSmokeTests(unittest.TestCase):
         )
 
         with (
-            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, deepseek_api_key=None, llm_provider="openai", llm_api_base_url=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
             patch("app.services.scanner.get_market_data", return_value=market),
             patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
             patch("app.services.scanner.calculate_indicators", return_value=technicals),
@@ -570,7 +570,7 @@ class AppSmokeTests(unittest.TestCase):
             baseline = analyze_ticker("aapl", db=None, use_ai_explanation=True)
 
         with (
-            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, deepseek_api_key=None, llm_provider="openai", llm_api_base_url=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
             patch("app.services.scanner.get_market_data", return_value=market),
             patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
             patch("app.services.scanner.calculate_indicators", return_value=technicals),
@@ -651,7 +651,7 @@ class AppSmokeTests(unittest.TestCase):
         )
 
         with (
-            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, deepseek_api_key=None, llm_provider="openai", llm_api_base_url=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
             patch("app.services.scanner.get_market_data", return_value=market),
             patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
             patch("app.services.scanner.calculate_indicators", return_value=technicals),
@@ -705,7 +705,7 @@ class AppSmokeTests(unittest.TestCase):
         )
 
         with (
-            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key=None, deepseek_api_key=None, llm_provider="openai", llm_api_base_url=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
             patch("app.services.scanner.get_market_data", return_value=market),
             patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
             patch("app.services.scanner.calculate_indicators", return_value=technicals),
@@ -932,10 +932,11 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(providers[0].name, "yfinance")
         self.assertEqual(providers[0].source_tier, "Tier 2")
         self.assertIsNotNone(providers[0].last_success_at)
-        self.assertEqual(len(sources), 2)
+        self.assertEqual(len(sources), 3)
         source_by_provider = {s.provider_name: s for s in sources}
         self.assertIn("yfinance", source_by_provider)
         self.assertIn("edgar", source_by_provider)
+        self.assertIn("fred", source_by_provider)
         yfinance_source = source_by_provider["yfinance"]
         self.assertEqual(yfinance_source.ticker, "AAPL")
         self.assertEqual(yfinance_source.price_adjustment_policy, "raw_close")
@@ -1105,16 +1106,19 @@ class AppSmokeTests(unittest.TestCase):
             openai_api_key="sk-test",
             openai_model="gpt-4.1-mini",
             openai_call_budget=0,
+            deepseek_api_key=None,
+            llm_provider="openai",
+            llm_api_base_url=None,
         )
 
         with (
             patch("app.services.ai_explainer.get_settings", return_value=settings),
-            patch("app.services.ai_explainer._openai_explanation") as openai_mock,
+            patch("app.services.ai_explainer._llm_explanation") as llm_mock,
         ):
             text = explain_analysis(payload, ["price is above MA50"])
 
-        self.assertIn("Лимит OpenAI-вызовов исчерпан", text)
-        openai_mock.assert_not_called()
+        self.assertIn("Лимит LLM-вызовов исчерпан", text)
+        llm_mock.assert_not_called()
 
 
 class ConfigurationTests(unittest.TestCase):

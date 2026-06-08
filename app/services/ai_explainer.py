@@ -8,15 +8,16 @@ from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_b
 
 def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str]) -> str:
     settings = get_settings()
-    if not settings.openai_api_key:
+    api_key = settings.deepseek_api_key or settings.openai_api_key
+    if not api_key:
         return rule_based_explanation(analysis_payload, reasons)
 
     try:
         consume_runtime_budget("openai_calls", settings.openai_call_budget)
-        return _openai_explanation(analysis_payload, reasons)
+        return _llm_explanation(analysis_payload, reasons, api_key=api_key)
     except RuntimeBudgetExceeded:
         fallback = rule_based_explanation(analysis_payload, reasons)
-        return f"{fallback} Лимит OpenAI-вызовов исчерпан, поэтому использован rule-based вариант."
+        return f"{fallback} Лимит LLM-вызовов исчерпан, поэтому использован rule-based вариант."
     except Exception:
         fallback = rule_based_explanation(analysis_payload, reasons)
         return f"{fallback} Объяснение от LLM недоступно, поэтому использован rule-based вариант."
@@ -35,11 +36,25 @@ def rule_based_explanation(analysis_payload: dict[str, Any], reasons: list[str])
     )
 
 
-def _openai_explanation(analysis_payload: dict[str, Any], reasons: list[str]) -> str:
+def _llm_explanation(
+    analysis_payload: dict[str, Any],
+    reasons: list[str],
+    api_key: str,
+) -> str:
     from openai import OpenAI
 
     settings = get_settings()
-    client = OpenAI(api_key=settings.openai_api_key)
+    provider = (settings.llm_provider or "openai").lower()
+
+    # Determine base_url and model based on provider.
+    if provider == "deepseek":
+        base_url = settings.llm_api_base_url or "https://api.deepseek.com"
+        model = settings.openai_model or "deepseek-chat"
+    else:
+        base_url = settings.llm_api_base_url or "https://api.openai.com/v1"
+        model = settings.openai_model or "gpt-4.1-mini"
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
 
     compact_payload = {
         "ticker": analysis_payload["ticker"],
@@ -54,7 +69,7 @@ def _openai_explanation(analysis_payload: dict[str, Any], reasons: list[str]) ->
     }
 
     response = client.chat.completions.create(
-        model=settings.openai_model,
+        model=model,
         messages=[
             {
                 "role": "system",
