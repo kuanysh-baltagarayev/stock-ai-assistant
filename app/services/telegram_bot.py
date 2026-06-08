@@ -190,7 +190,7 @@ class TelegramBotService(
 
         for ticker, subs in ticker_to_subs.items():
             try:
-                market = await asyncio.to_thread(get_market_data, ticker)
+                market = await self._run_blocking_with_timeout(get_market_data, ticker, timeout=30.0)
             except Exception:
                 continue
 
@@ -682,7 +682,7 @@ class TelegramBotService(
                 return
             await self._send_message(int(chat_id), f"Анализирую accuracy для {ticker}...", reply_markup=self._main_keyboard())
             try:
-                backtest_text = await asyncio.to_thread(self._backtest_ticker, ticker)
+                backtest_text = await self._run_blocking_with_timeout(self._backtest_ticker, ticker, timeout=120.0)
                 await self._send_message(
                     int(chat_id),
                     backtest_text,
@@ -796,7 +796,7 @@ class TelegramBotService(
                     market = get_market_data(ticker_c)
                     return render_price_chart(ticker_c, market["history"])
 
-                png = await asyncio.to_thread(_make_chart)
+                png = await self._run_blocking_with_timeout(_make_chart, timeout=30.0)
                 await self._send_photo(int(chat_id), png, caption=f"{ticker_c} — цена и MA50/MA200")
             except Exception as exc:
                 await self._send_message(int(chat_id), f"Не удалось построить график {ticker_c}: {self._translate_error(str(exc))}", reply_markup=self._main_keyboard())
@@ -809,7 +809,7 @@ class TelegramBotService(
                 await self._send_message(int(chat_id), "Портфель пуст. Добавь: /buy AAPL 10 175.50", reply_markup=self._main_keyboard())
                 return
             await self._send_message(int(chat_id), "Считаю P&L...", reply_markup=self._main_keyboard())
-            text = await asyncio.to_thread(self._holdings_pnl_text, holdings)
+            text = await self._run_blocking_with_timeout(self._holdings_pnl_text, holdings, timeout=60.0)
             await self._send_message(int(chat_id), text, reply_markup=self._main_keyboard())
             return
 
@@ -1049,7 +1049,7 @@ class TelegramBotService(
                 reply_markup=followup_keyboard,
             )
             try:
-                analysis = await asyncio.to_thread(self._analyze_and_persist, ticker)
+                analysis = await self._run_blocking_with_timeout(self._analyze_and_persist, ticker, timeout=120.0)
                 await self._send_message(
                     chat_id,
                     self._analysis_text(analysis),
@@ -1226,12 +1226,12 @@ class TelegramBotService(
                     reply_markup=reply_markup,
                 )
                 return
-            text = await asyncio.to_thread(self._filings_text, filings_ticker)
+            text = await self._run_blocking_with_timeout(self._filings_text, filings_ticker, timeout=60.0)
             await self._send_message(chat_id, text, reply_markup=reply_markup)
             return
         if action == "news":
             news_ticker = ticker or (args[0].strip().upper() if args else None)
-            text = await asyncio.to_thread(self._news_text, news_ticker)
+            text = await self._run_blocking_with_timeout(self._news_text, news_ticker, timeout=60.0)
             await self._send_message(chat_id, text, reply_markup=reply_markup)
             return
         if ticker is None:
