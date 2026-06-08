@@ -64,6 +64,8 @@ class TelegramBotService(
         # Persisted polling offset so restarts don't replay old updates.
         self._offset_file = PROJECT_ROOT / ".telegram_offset"
         self._offset = self._load_offset()
+        # Dedup cache: set of (chat_id, message_id) tuples processed recently.
+        self._recent_messages: set[tuple[int, int]] = set()
 
     @property
     def enabled(self) -> bool:
@@ -242,6 +244,17 @@ class TelegramBotService(
         text = (message.get("text") or "").strip()
         if not text:
             return
+
+        # Dedup: skip if we already processed this message recently.
+        msg_id = message.get("message_id")
+        dedup_key = (int(chat_id), int(msg_id)) if msg_id else None
+        if dedup_key and dedup_key in self._recent_messages:
+            return
+        if dedup_key:
+            self._recent_messages.add(dedup_key)
+            # Keep cache bounded — remove old entries periodically.
+            if len(self._recent_messages) > 100:
+                self._recent_messages.clear()
 
         if not self._chat_is_allowed(int(chat_id)):
             await self._send_message(int(chat_id), self._access_denied_text())
@@ -972,6 +985,30 @@ class TelegramBotService(
             )
             return
 
+        # Free-form chat via LLM (DeepSeek/OpenAI) for unrecognized commands.
+        if action == "unknown":
+            api_key = getattr(self.settings, "deepseek_api_key", None) or getattr(self.settings, "openai_api_key", None)
+            if api_key:
+                chat_id_int = int(chat_id)
+                await self._send_message(
+                    chat_id_int, "🤔 Дай подумать...", reply_markup=self._main_keyboard(),
+                )
+                reply = await self._chat_with_llm(chat_id_int, text)
+                if reply:
+                    await self._send_message(chat_id_int, reply, reply_markup=self._main_keyboard())
+                    return
+            # No LLM key or LLM failed — show helpful message.
+            await self._send_message(
+                int(chat_id),
+                "Я понимаю команды:\n"
+                "/analyze AAPL — анализ акции\n"
+                "/scan mine — сканировать watchlist\n"
+                "/news AAPL — новости\n"
+                "/help — все команды",
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
         await self._send_message(
             int(chat_id),
             "Используй кнопки под сообщением.",
@@ -1444,6 +1481,80 @@ class TelegramBotService(
             loop.run_in_executor(self._executor, lambda: func(*args, **kwargs)),
             timeout=timeout,
         )
+
+    async def _chat_with_llm(self, chat_id: int, text: str) -> str | None:
+        """Send a free-form user message to the LLM and return a natural answer.
+
+        Detects ticker mentions in the text, fetches analysis for each,
+        and sends everything to DeepSeek/OpenAI for a conversational response.
+        Returns ``None`` when no LLM key is configured.
+        """
+        settings = self.settings
+        api_key = getattr(settings, "deepseek_api_key", None) or getattr(settings, "openai_api_key", None)
+        if not api_key:
+            return None
+
+        from openai import OpenAI
+        provider = (getattr(settings, "llm_provider", None) or "openai").lower()
+        if provider == "deepseek":
+            base_url = getattr(settings, "llm_api_base_url", None) or "https://api.deepseek.com"
+            model = getattr(settings, "openai_model", "deepseek-chat")
+        else:
+            base_url = getattr(settings, "llm_api_base_url", None) or "https://api.openai.com/v1"
+            model = getattr(settings, "openai_model", "gpt-4.1-mini")
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+
+        # Detect tickers in the message
+        import re
+        ticker_candidates = re.findall(r"[A-Z]{1,5}", text.upper())
+        known_tickers = [t for t in ticker_candidates if t in {"AAPL","MSFT","NVDA","TSLA","AMD","AMZN","GOOGL","META","GOOG","NFLX","SPY","QQQ","VIX"}]
+
+        context_parts = []
+        for ticker in known_tickers[:3]:
+            try:
+                analysis = await self._run_blocking_with_timeout(
+                    self._analyze_and_persist, ticker, timeout=60.0,
+                )
+                sc = getattr(analysis, "scores", None)
+                context_parts.append(
+                    f"{ticker}: score={getattr(sc, 'final_score', '?')}/100, "
+                    f"recommendation={getattr(analysis, 'recommendation', '?')}, "
+                    f"price=${getattr(analysis, 'price', '?'):.2f}, "
+                    f"sector={getattr(getattr(analysis, 'fundamentals', None), 'sector', '?')}"
+                )
+            except Exception:
+                context_parts.append(f"{ticker}: данные временно недоступны")
+
+        market_context = "; ".join(context_parts) if context_parts else "без конкретного тикера"
+        system_msg = (
+            "Ты — ассистент по анализу акций. Отвечай кратко (2-4 предложения), "
+            "на понятном русском языке, без финансовых советов. "
+            "Используй только предоставленные данные. "
+            f"Вот контекст по запрошенным тикерам:\n{market_context}"
+        )
+
+        try:
+            from app.services.runtime_budget import consume_runtime_budget
+            consume_runtime_budget("openai_calls", getattr(settings, "openai_call_budget", 50))
+        except Exception:
+            return "\u26a0\ufe0f Лимит LLM-запросов на сегодня. Попробуй завтра или используй /analyze."
+
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": text},
+                ],
+                max_tokens=300,
+            )
+            reply = response.choices[0].message.content if response.choices else None
+            if reply:
+                return reply.strip() + "\n\nℹ️ Ответ сгенерирован LLM, не является рекомендацией."
+            return None
+        except Exception:
+            return None
 
     def _subscription_for_chat(self, chat_id: int) -> TelegramSubscription | None:
         db = SessionLocal()
