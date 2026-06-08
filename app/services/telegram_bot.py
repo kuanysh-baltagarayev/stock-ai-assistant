@@ -64,8 +64,9 @@ class TelegramBotService(
         # Persisted polling offset so restarts don't replay old updates.
         self._offset_file = PROJECT_ROOT / ".telegram_offset"
         self._offset = self._load_offset()
-        # Dedup cache: set of (chat_id, message_id) tuples processed recently.
-        self._recent_messages: set[tuple[int, int]] = set()
+        # Dedup cache: dict[chat_id, (text_lower, timestamp)] — blocks
+        # identical user inputs within 30 seconds.
+        self._recent_inputs: dict[int, tuple[str, float]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -245,16 +246,16 @@ class TelegramBotService(
         if not text:
             return
 
-        # Dedup: skip if we already processed this message recently.
-        msg_id = message.get("message_id")
-        dedup_key = (int(chat_id), int(msg_id)) if msg_id else None
-        if dedup_key and dedup_key in self._recent_messages:
+        # Dedup: skip identical user inputs within 30 seconds.
+        # Telegram can deliver the same message twice with different
+        # update_ids (reconnect, retry), and message_id may differ.
+        chat_id_int = int(chat_id)
+        text_key = text.strip().lower()
+        now = __import__("time").time()
+        prev_text, prev_time = self._recent_inputs.get(chat_id_int, (None, 0.0))
+        if prev_text == text_key and (now - prev_time) < 30.0:
             return
-        if dedup_key:
-            self._recent_messages.add(dedup_key)
-            # Keep cache bounded — remove old entries periodically.
-            if len(self._recent_messages) > 100:
-                self._recent_messages.clear()
+        self._recent_inputs[chat_id_int] = (text_key, now)
 
         if not self._chat_is_allowed(int(chat_id)):
             await self._send_message(int(chat_id), self._access_denied_text())
