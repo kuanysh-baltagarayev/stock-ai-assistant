@@ -148,10 +148,10 @@ class TelegramDisclaimerTests(unittest.TestCase):
 
         self.assertIn("Ключевые сигналы:", text)
         self.assertIn("Риск/качество данных:", text)
-        self.assertIn("уверенность 0.92", text)
-        self.assertIn("yfinance/Tier 2", text)
-        self.assertIn("regular_open/fresh", text)
-        self.assertIn("высокий риск 78", text)
+        self.assertIn("Ключевые сигналы:", text)
+        self.assertIn("Риск/качество данных:", text)
+        self.assertIn("средняя уверенность", text)
+        self.assertIn("высокий риск", text)
 
     def test_risk_text_surfaces_data_quality_warnings(self) -> None:
         snapshot = SimpleNamespace(

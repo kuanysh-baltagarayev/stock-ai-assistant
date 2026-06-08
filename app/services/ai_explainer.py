@@ -2,7 +2,6 @@ import json
 from typing import Any
 
 from app.config import get_settings
-from app.services.research_labels import research_label_to_russian
 from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_budget
 
 
@@ -26,14 +25,53 @@ def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str]) -> st
 def rule_based_explanation(analysis_payload: dict[str, Any], reasons: list[str]) -> str:
     ticker = analysis_payload["ticker"]
     final_score = analysis_payload["scores"]["final_score"]
-    recommendation = analysis_payload["recommendation"]
-    reason_text = "; ".join(reasons[:5]) if reasons else "недостаточно сильных количественных сигналов"
-    return (
-        f"{ticker}: исследовательский сигнал { research_label_to_russian(recommendation) } "
-        f"с итоговой оценкой {final_score}/100. "
-        f"Основные факторы: {_translate_reason_text(reason_text)}. "
-        f"Это исследовательский сигнал, а не финансовый совет."
-    )
+    price = analysis_payload.get("price")
+
+    # Score interpretation — conversational, no marketing.
+    if final_score >= 80:
+        score_desc = "выглядит привлекательно"
+    elif final_score >= 60:
+        score_desc = "выглядит неплохо"
+    elif final_score >= 40:
+        score_desc = "нейтральная картина"
+    elif final_score >= 20:
+        score_desc = "есть поводы для осторожности"
+    else:
+        score_desc = "выглядит рискованно"
+
+    price_part = f"Цена около ${price:.2f}. " if price else ""
+
+    if reasons:
+        reason_text = _translate_reason_text("; ".join(reasons[:3]))
+    else:
+        reason_text = "недостаточно сигналов для вывода"
+
+    lines = [
+        f"📊 {ticker} — {score_desc}.",
+        f"{price_part}Общая оценка {final_score:.0f} из 100 — {_score_meaning(final_score)}.",
+        f"Что повлияло: {reason_text}.",
+    ]
+
+    sector = analysis_payload.get("fundamentals", {}).get("sector")
+    if sector:
+        lines.append(f"Сектор: {sector}.")
+
+    lines.append("ℹ️ Это аналитический сигнал для исследования, а не рекомендация.")
+    return " ".join(lines)
+
+
+def _score_meaning(score: float) -> str:
+    if score >= 85:
+        return "акция привлекла внимание по нескольким параметрам"
+    if score >= 70:
+        return "есть несколько позитивных сигналов"
+    if score >= 55:
+        return "картина смешанная, без явного перевеса"
+    if score >= 35:
+        return "есть факторы, которые настораживают"
+    if score >= 15:
+        return "больше негативных сигналов, чем позитивных"
+    return "преобладают негативные факторы — стоит быть осторожным"
 
 
 def _llm_explanation(
@@ -97,49 +135,49 @@ def _llm_explanation(
 
 def _translate_reason_text(text: str) -> str:
     replacements = {
-        "price is above MA50": "цена выше 50-дневной скользящей средней",
-        "price is below MA50": "цена ниже 50-дневной скользящей средней",
-        "price is above MA200": "цена выше 200-дневной скользящей средней",
-        "price is below MA200": "цена ниже 200-дневной скользящей средней",
-        "1-month momentum is positive": "1-месячный импульс положительный",
-        "1-month momentum is weak": "1-месячный импульс слабый",
-        "6-month trend is strong": "6-месячный тренд сильный",
-        "6-month trend is weak": "6-месячный тренд слабый",
-        "RSI shows strong overheating": "индекс относительной силы показывает сильный перегрев",
-        "RSI is overbought": "индекс относительной силы перекуплен",
-        "RSI is deeply oversold": "индекс относительной силы сильно перепродан",
-        "RSI may indicate oversold conditions": "индекс относительной силы может указывать на перепроданность",
-        "trailing P/E is not meaningful": "trailing P/E неинформативен",
-        "valuation looks inexpensive by trailing P/E": "оценка выглядит дешёвой по trailing P/E",
-        "valuation looks reasonable by trailing P/E": "оценка выглядит разумной по trailing P/E",
-        "trailing P/E is very high": "trailing P/E очень высокий",
-        "trailing P/E is elevated": "trailing P/E повышенный",
-        "forward P/E is high": "forward P/E высокий",
-        "forward P/E is lower than trailing P/E": "forward P/E ниже trailing P/E",
-        "revenue growth is strong": "рост выручки сильный",
-        "revenue growth is positive": "рост выручки положительный",
-        "revenue growth is negative": "рост выручки отрицательный",
-        "profit margins are strong": "маржа высокая",
-        "profit margins are healthy": "маржа здоровая",
-        "profit margins are negative": "маржа отрицательная",
-        "debt/equity is high": "debt/equity высокий",
-        "debt/equity is elevated": "debt/equity повышенный",
-        "debt/equity is conservative": "debt/equity консервативный",
-        "volatility is low": "волатильность низкая",
-        "volatility is very high": "волатильность очень высокая",
-        "volatility is elevated": "волатильность повышенная",
-        "max drawdown is limited": "максимальная просадка ограниченная",
-        "max drawdown is severe": "максимальная просадка серьёзная",
-        "max drawdown is large": "максимальная просадка большая",
-        "overbought RSI adds short-term risk": "перекупленный RSI повышает краткосрочный риск",
+        "price is above MA50": "цена выше среднего за 50 дней — тренд вверх",
+        "price is below MA50": "цена ниже среднего за 50 дней — тренд вниз",
+        "price is above MA200": "цена выше среднего за 200 дней — долгосрочный тренд вверх",
+        "price is below MA200": "цена ниже среднего за 200 дней — долгосрочный тренд вниз",
+        "1-month momentum is positive": "за месяц динамика положительная",
+        "1-month momentum is weak": "за месяц динамика слабая",
+        "6-month trend is strong": "полугодовой тренд уверенный",
+        "6-month trend is weak": "полугодовой тренд слабый",
+        "RSI shows strong overheating": "RSI показывает сильный перегрев — возможна коррекция",
+        "RSI is overbought": "RSI в зоне перекупленности",
+        "RSI is deeply oversold": "RSI в зоне сильной перепроданности",
+        "RSI may indicate oversold conditions": "RSI намекает на перепроданность",
+        "trailing P/E is not meaningful": "мультипликатор P/E неинформативен (убытки?)",
+        "valuation looks inexpensive by trailing P/E": "по мультипликатору P/E акция выглядит недорого",
+        "valuation looks reasonable by trailing P/E": "P/E на разумном уровне",
+        "trailing P/E is very high": "P/E очень высокий — рынок закладывает сильный рост",
+        "trailing P/E is elevated": "P/E повышенный",
+        "forward P/E is high": "ожидаемый P/E высокий",
+        "forward P/E is lower than trailing P/E": "ожидаемая прибыль растёт (forward P/E ниже текущего)",
+        "revenue growth is strong": "выручка уверенно растёт",
+        "revenue growth is positive": "выручка растёт",
+        "revenue growth is negative": "выручка падает",
+        "profit margins are strong": "маржинальность высокая — компания эффективна",
+        "profit margins are healthy": "маржинальность на здоровом уровне",
+        "profit margins are negative": "компания работает в убыток",
+        "debt/equity is high": "долговая нагрузка высокая",
+        "debt/equity is elevated": "долговая нагрузка повышена",
+        "debt/equity is conservative": "долговая нагрузка низкая — финансы в порядке",
+        "volatility is low": "волатильность низкая — цена стабильна",
+        "volatility is very high": "волатильность очень высокая — возможны резкие движения",
+        "volatility is elevated": "волатильность повышена",
+        "max drawdown is limited": "максимальная просадка небольшая",
+        "max drawdown is severe": "историческая просадка серьёзная",
+        "max drawdown is large": "просадка значительная",
+        "overbought RSI adds short-term risk": "RSI перекуплен — повышен риск краткосрочной коррекции",
         "daily move is unusually large": "дневное движение необычно большое",
-        "multiple high-impact macro events are imminent": "впереди несколько важных макро-событий",
-        "two high-impact macro events are imminent": "впереди два важных макро-события",
-        "a high-impact macro event is imminent": "впереди важное макро-событие",
-        "earnings are imminent and can sharply raise event risk": "отчетность близко и может резко повысить событийный риск",
-        "upcoming earnings keep event risk elevated": "предстоящая отчетность поддерживает повышенный событийный риск",
-        "earnings are approaching": "отчетность приближается",
-        "recent 8-K adds event risk": "свежая форма 8-K добавляет событийный риск",
+        "multiple high-impact macro events are imminent": "на этой неделе несколько важных макро-событий",
+        "two high-impact macro events are imminent": "на этой неделе два важных макро-события",
+        "a high-impact macro event is imminent": "на этой неделе важное макро-событие",
+        "earnings are imminent and can sharply raise event risk": "отчётность на носу — возможны резкие движения",
+        "upcoming earnings keep event risk elevated": "предстоящий отчёт добавляет неопределённости",
+        "earnings are approaching": "приближается отчётность",
+        "recent 8-K adds event risk": "свежая форма 8-K — компания сообщила о важном событии",
         "recent 8-K still adds event risk": "недавняя форма 8-K все еще добавляет событийный риск",
         "fresh 10-Q adds reporting-event risk": "свежий отчет 10-Q добавляет риск отчетного события",
         "recent 10-Q keeps reporting risk elevated": "недавний 10-Q сохраняет повышенный риск отчетности",

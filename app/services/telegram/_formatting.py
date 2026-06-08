@@ -49,9 +49,11 @@ class FormattingMixin:
 
     def _analysis_text(self, analysis: Any) -> str:
         recommendation = self._translate_recommendation(analysis.recommendation)
+        ticker = analysis.ticker.upper()
+        price_str = f"{analysis.price:.2f} {analysis.currency or ''}".strip()
         lines = [
-            f"{analysis.ticker}: {recommendation}",
-            f"Цена: {analysis.price:.2f} {analysis.currency or ''}".strip(),
+            f"📈 {ticker}: {recommendation}",
+            f"💵 {price_str}",
             self._source_freshness_line(analysis),
         ]
 
@@ -674,19 +676,21 @@ class FormattingMixin:
 
     def _briefing_item_line(self, item: BriefingItem) -> str:
         label = self._translate_recommendation(item.label)
-        price = f" | цена {item.price:.2f}" if item.price is not None else ""
-        confidence = f" | уверенность {item.confidence:.2f}" if item.confidence is not None else " | уверенность n/a"
-        source = f" | {item.source_provider or 'unknown'}/{item.source_tier or 'unknown'}"
-        freshness = f" | {item.market_session_status or 'session n/a'}/{item.freshness_state or 'freshness n/a'}"
-        delta_text = ""
+        parts = [f"{item.ticker}: {label}"]
+        if item.price is not None:
+            parts.append(f"${item.price:.2f}")
         if item.score_delta is not None:
             sign = "+" if item.score_delta > 0 else ""
-            delta_text = f" | Δ {sign}{item.score_delta:.2f}"
-        flags = ""
-        if item.flags:
-            flags = " | " + ", ".join(self._briefing_flag_text(flag) for flag in item.flags[:3])
+            parts.append(f"изм. {sign}{item.score_delta:.1f}")
+        if item.confidence is not None:
+            if item.confidence < 0.6:
+                parts.append("низкая уверенность")
+            elif item.confidence < 0.8:
+                parts.append("средняя уверенность")
         reason = self._translate_text(item.short_reason)
-        return f"- {item.ticker}: {label} | оценка {item.final_score:.2f}{delta_text}{price}{confidence}{source}{freshness}{flags}; {reason}"
+        flag_texts = [self._briefing_flag_text(f) for f in item.flags[:2]] if item.flags else []
+        extra = f" ({', '.join(flag_texts)})" if flag_texts else ""
+        return f"• {parts[0]} — {', '.join(parts[1:])}{extra}; {reason}"
 
     def _briefing_flag_text(self, flag: str) -> str:
         mapping = {

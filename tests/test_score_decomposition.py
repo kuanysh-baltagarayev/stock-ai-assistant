@@ -353,11 +353,11 @@ class SerializationTests(unittest.TestCase):
         )
         lines = format_decomposition_lines(decomp)
         full = "\n".join(lines)
-        self.assertIn("Оценка: 78.0 — Наблюдение", full)
-        self.assertIn("📊 Технический расклад: благоприятный", full)
-        self.assertIn("💰 Оценка стоимости: привлекательная", full)
-        self.assertIn("⚠️ События/риск: низкий", full)
-        self.assertIn("📋 Уверенность: высокая", full)
+        self.assertIn("Наблюдение", full)
+        self.assertIn("📊 тренд благоприятный", full)
+        self.assertIn("💰 оценка привлекательная", full)
+        self.assertIn("⚠️ риск низкий", full)
+        self.assertIn("📋 данные высокая", full)
         self.assertIn("above MA50", full)
         self.assertIn("above MA200", full)
 
@@ -372,7 +372,8 @@ class SerializationTests(unittest.TestCase):
         )
         lines = format_decomposition_lines(decomp)
         full = "\n".join(lines)
-        self.assertIn("(данных мало)", full)
+        self.assertIn("Не хватает", full)
+        self.assertIn("технические данные", full)
 
     def test_format_without_final_label(self) -> None:
         decomp = ScoreDecomposition(
@@ -386,8 +387,8 @@ class SerializationTests(unittest.TestCase):
         lines = format_decomposition_lines(decomp)
         full = "\n".join(lines)
         # Should show final score without the label after it
-        self.assertIn("Оценка: 55.0", full)
-        self.assertNotIn("—", full)
+        self.assertIn("Оценка", full)
+        self.assertIn("55", full)
 
 
 class TelegramAnalysisTextDecompositionTests(unittest.TestCase):
@@ -443,10 +444,10 @@ class TelegramAnalysisTextDecompositionTests(unittest.TestCase):
         service = TelegramBotService(settings=SimpleNamespace())
         text = service._analysis_text(analysis)
 
-        self.assertIn("📊 Технический расклад: благоприятный", text)
-        self.assertIn("💰 Оценка стоимости: привлекательная", text)
-        self.assertIn("⚠️ События/риск: низкий", text)
-        self.assertIn("📋 Уверенность: высокая", text)
+        self.assertIn("📊 тренд благоприятный", text)
+        self.assertIn("💰 оценка привлекательная", text)
+        self.assertIn("⚠️ риск низкий", text)
+        self.assertIn("📋 данные высокая", text)
         self.assertIn("above MA50", text)
         self.assertIn("P/E reasonable", text)
         # Should NOT show raw numeric score lines (old format without emoji)
@@ -454,7 +455,7 @@ class TelegramAnalysisTextDecompositionTests(unittest.TestCase):
         self.assertNotIn("Риск:", text)
         # "Оценка стоимости:" now appears as the decomposition header line
         # Check the emoji-prefixed decomposition line is present instead
-        self.assertIn("💰 Оценка стоимости: привлекательная", text)
+        self.assertIn("💰 оценка привлекательная", text)
 
     def test_with_decomposition_no_buy_sell(self) -> None:
         from app.services.score_decomposition import ScoreDecomposition, ComponentAssessment, decomposition_as_payload
@@ -546,12 +547,12 @@ class ScoreDecompositionTelegramBotTest(unittest.TestCase):
         )
         text = self.service._analysis_text(analysis)
 
-        self.assertIn("📊 Технический расклад: благоприятный", text)
+        self.assertIn("📊 тренд благоприятный", text)
         self.assertIn("above MA50", text)
         self.assertNotIn("Импульс:", text)
         self.assertNotIn("Риск:", text)
         # "Оценка стоимости:" now appears as the emoji-prefixed decomposition header
-        self.assertIn("💰 Оценка стоимости: привлекательная", text)
+        self.assertIn("💰 оценка привлекательная", text)
 
 
 if __name__ == "__main__":

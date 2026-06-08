@@ -283,51 +283,69 @@ def format_decomposition_lines(decomp: ScoreDecomposition) -> list[str]:
     """
     lines: list[str] = []
 
-    # Line 1: final score
+    # Line 1: final score in conversational form
     from app.services.research_labels import research_label_to_russian
 
     ru_label = research_label_to_russian(decomp.final_label) if decomp.final_label else ""
-    if decomp.final_label:
-        lines.append(f"Оценка: {decomp.final_score:.1f} — {ru_label}")
+    score = decomp.final_score
+    if score >= 80:
+        emoji = "🟢"
+    elif score >= 60:
+        emoji = "🔵"
+    elif score >= 40:
+        emoji = "🟡"
     else:
-        lines.append(f"Оценка: {decomp.final_score:.1f}")
+        emoji = "🔴"
 
-    lines.append("")
+    if decomp.final_label:
+        lines.append(f"{emoji} {ru_label} — оценка {score:.0f}")
+    else:
+        lines.append(f"{emoji} Оценка: {score:.0f}")
+
+    # Compact breakdown
+    parts: list[str] = []
 
     t = decomp.technical
-    t_missing = " (данных мало)" if t.missing else ""
-    lines.append(
-        f"📊 Технический расклад: {t.label}{t_missing} ({t.score:.1f})"
-    )
-    if t.key_reasons:
-        for r in t.key_reasons:
-            lines.append(f"  {r}")
+    parts.append(f"📊 тренд {t.label}")
 
     v = decomp.valuation
-    v_missing = " (данных мало)" if v.missing else ""
-    lines.append(
-        f"💰 Оценка стоимости: {v.label}{v_missing} ({v.score:.1f})"
-    )
-    if v.key_reasons:
-        for r in v.key_reasons:
-            lines.append(f"  {r}")
+    parts.append(f"💰 оценка {v.label}")
 
     e = decomp.event_risk
-    e_missing = " (данных мало)" if e.missing else ""
-    lines.append(
-        f"⚠️ События/риск: {e.label}{e_missing} ({e.score:.1f})"
-    )
-    if e.key_reasons:
-        for r in e.key_reasons:
-            lines.append(f"  {r}")
+    parts.append(f"⚠️ риск {e.label}")
 
     d = decomp.data_confidence
-    d_missing = " (данных мало)" if d.missing else ""
-    lines.append(
-        f"📋 Уверенность: {d.label}{d_missing} ({d.score:.1f})"
-    )
+    parts.append(f"📋 данные {d.label}")
+
+    lines.append(" · ".join(parts))
+
+    # Key reasons — short, grouped
+    all_reasons: list[str] = []
+    if t.key_reasons:
+        all_reasons.extend(t.key_reasons[:2])
+    if v.key_reasons:
+        all_reasons.extend(v.key_reasons[:1])
+    if e.key_reasons:
+        all_reasons.extend(e.key_reasons[:1])
     if d.key_reasons:
-        for r in d.key_reasons:
-            lines.append(f"  {r}")
+        all_reasons.extend(d.key_reasons[:1])
+
+    if all_reasons:
+        lines.append("")
+        for r in all_reasons[:4]:
+            lines.append(f"• {r}")
+
+    # Missing data warning
+    missing_flags = []
+    if t.missing:
+        missing_flags.append("технические данные")
+    if v.missing:
+        missing_flags.append("оценка стоимости")
+    if e.missing:
+        missing_flags.append("данные о событиях")
+    if d.missing:
+        missing_flags.append("часть данных")
+    if missing_flags:
+        lines.append(f"Не хватает: {', '.join(missing_flags)}.")
 
     return lines
