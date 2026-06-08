@@ -10,3 +10,6 @@ __pycache__/
 .coverage
 coverage.xml
 htmlcov/
+.telegram_offset
+stock_ai_assistant.db-shm
+stock_ai_assistant.db-wal
