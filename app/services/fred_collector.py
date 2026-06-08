@@ -23,6 +23,8 @@ _FRED_SERIES = {
     "CPIAUCSL": "Consumer Price Index (all-urban)",
     "PAYEMS": "Total Nonfarm Payroll (thousands)",
     "DEXUSEU": "USD/EUR Exchange Rate",
+    "PCEPILFE": "Core PCE Inflation (monthly %)",
+    "T10Y2Y": "10-Year Treasury Constant Maturity Minus 2-Year",
 }
 
 FRED_PROVIDER_NAME = "fred"

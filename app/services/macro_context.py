@@ -24,6 +24,8 @@ class MacroContext:
     rate_direction: str | None  # "rising", "falling", "stable", None
     inflation_level: str | None  # "low", "moderate", "elevated", None
     political_risk_level: str | None = None  # None, "elevated", "high"
+    yield_curve_spread: float | None = None  # 10Y-2Y spread (negative = inverted)
+    payroll_growth: float | None = None  # Nonfarm payrolls month-over-month change
 
 
 def build_macro_context(
@@ -77,6 +79,19 @@ def build_macro_context(
         from app.services.news_collector import political_risk_level_from_news
         political_risk_level = political_risk_level_from_news(news_context)
 
+    # Yield curve spread (10Y-2Y). Negative values indicate inversion.
+    yield_curve_spread: float | None = fred_data.get("T10Y2Y")
+    try:
+        yield_curve_spread = float(yield_curve_spread) if yield_curve_spread is not None else None
+    except (TypeError, ValueError):
+        yield_curve_spread = None
+
+    # Payroll month-over-month change from history
+    payroll_growth: float | None = None
+    payrolls_history = history.get("PAYEMS")
+    if payrolls_history and len(payrolls_history) >= 2:
+        payroll_growth = payrolls_history[-1] - payrolls_history[-2]
+
     return MacroContext(
         reference_date=reference_date,
         upcoming_high_impact_events=event_names,
@@ -84,11 +99,15 @@ def build_macro_context(
             "fed_rate": fed_rate,
             "unemployment": unemployment,
             "cpi": inflation,
+            "t10y2y": yield_curve_spread,
+            "payrolls": fred_data.get("PAYEMS"),
         },
         volatility_level=volatility_level,
         rate_direction=rate_direction,
         inflation_level=inflation_level,
         political_risk_level=political_risk_level,
+        yield_curve_spread=yield_curve_spread,
+        payroll_growth=payroll_growth,
     )
 
 
@@ -114,6 +133,36 @@ def macro_context_summary(macro: MacroContext) -> list[str]:
         )
     elif macro.volatility_level == "medium":
         notes.append("Ожидается умеренная волатильность из макро-факторов.")
+
+    # Yield curve context
+    yield_spread = macro.yield_curve_spread
+    if yield_spread is not None and yield_spread < 0:
+        notes.append(
+            f"Кривая доходности инвертирована (10Y-2Y: {yield_spread:.2f}%) — "
+            "исторический предиктор рецессии."
+        )
+    elif yield_spread is not None and yield_spread < 0.5:
+        notes.append(
+            f"Кривая доходности уплощается (10Y-2Y: {yield_spread:.2f}%)."
+        )
+
+    # Payroll growth context
+    payroll = macro.payroll_growth
+    if payroll is not None:
+        if payroll < -200:
+            notes.append(
+                f"Nonfarm payrolls резко упали ({payroll:+.0f} тыс.) — "
+                "возможен сигнал ослабления рынка труда."
+            )
+        elif payroll < 0:
+            notes.append(
+                f"Nonfarm payrolls сократились ({payroll:+.0f} тыс.)."
+            )
+        elif payroll > 300:
+            notes.append(
+                f"Nonfarm payrolls выросли ({payroll:+.0f} тыс.) — "
+                "рынок труда остаётся сильным."
+            )
 
     # Inflation context
     if macro.inflation_level == "elevated":

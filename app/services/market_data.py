@@ -89,6 +89,7 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             attempts=settings.market_data_max_attempts,
             retry_backoff_seconds=settings.market_data_retry_backoff_seconds,
             provider_call_budget=provider_call_budget,
+            settings=settings,
         )
         fast_info = _safe_fast_info(
             stock,
@@ -291,6 +292,7 @@ def _download_history(symbol: str, timeout_seconds: float) -> pd.DataFrame:
 _ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
 _FALLBACK_PROVIDER_NAME = "alpha_vantage"
 _FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+_FINNHUB_PROFILE_URL = "https://finnhub.io/api/v1/stock/profile2"
 
 
 def _finnhub_quote(symbol: str, timeout_seconds: float, api_key: str | None) -> float | None:
@@ -323,7 +325,45 @@ def _finnhub_quote(symbol: str, timeout_seconds: float, api_key: str | None) -> 
     return price
 
 
+
+def _finnhub_profile(symbol: str, timeout_seconds: float, api_key: str | None) -> dict[str, Any] | None:
+    """Fetch company profile from Finnhub /stock/profile2 as info fallback.
+
+    Returns a dict with keys matching those yfinance.info provides
+    (company_name via ``name``, sector via ``finnhubIndustry``, market_cap
+    via ``marketCapitalization``) or None on any failure.
+    """
+    if not api_key:
+        return None
+
+    query = parse.urlencode({"symbol": symbol, "token": api_key})
+    request = urlrequest.Request(
+        f"{_FINNHUB_PROFILE_URL}?{query}",
+        headers={"User-Agent": "stock-ai-assistant/1.0"},
+    )
+    try:
+        with urlrequest.urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+    except (urlerror.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, dict) or not payload.get("name"):
+        return None
+
+    return {
+        "longName": payload.get("name"),
+        "sector": payload.get("finnhubIndustry"),
+        "industry": payload.get("finnhubIndustry"),
+        "marketCap": _to_float(payload.get("marketCapitalization")),
+        "country": payload.get("country"),
+        "currency": payload.get("currency"),
+        "exchange": payload.get("exchange"),
+        "finnhub_profile": True,
+    }
+
+
 def _download_history_alpha_vantage(
+
     symbol: str, timeout_seconds: float, api_key: str | None
 ) -> pd.DataFrame:
     """Fetch daily OHLCV history from Alpha Vantage as a yfinance fallback.
@@ -405,6 +445,7 @@ def _safe_info(
     attempts: int,
     retry_backoff_seconds: float,
     provider_call_budget: int | None,
+    settings: Any = None,
 ) -> dict[str, Any]:
     try:
         info = _with_retries(
@@ -422,7 +463,16 @@ def _safe_info(
     except MarketDataError as exc:
         if exc.status_code == 429:
             raise
-        logger.warning("Using empty company profile for %s: %s", symbol, exc)
+        logger.warning("yfinance profile failed for %s: %s", symbol, exc)
+        # Fall back to Finnhub profile2 when available.
+        api_key = getattr(settings, "finnhub_api_key", None) if settings else None
+        profile = _finnhub_profile(symbol, 10.0, api_key)
+        if profile:
+            logger.info(
+                "finnhub_profile_fallback",
+                extra={"component": "market_data", "ticker": symbol},
+            )
+            return profile
         return {}
     return info if isinstance(info, dict) else {}
 

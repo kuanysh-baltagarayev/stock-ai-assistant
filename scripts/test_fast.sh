@@ -22,6 +22,8 @@ else
     tests.test_corporate_actions \
     tests.test_scheduler \
     tests.test_usage_metrics \
+    tests.test_integration_api \
+    tests.test_integration_telegram \
     tests.test_telegram_digests \
     tests.test_telegram_digests \
     tests.test_telegram_details \

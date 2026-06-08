@@ -3,15 +3,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 from urllib import error as urlerror
 from urllib import parse, request
 from zoneinfo import ZoneInfo
 
-from app.config import Settings, get_settings
+from app.config import PROJECT_ROOT, Settings, get_settings
 from app.database import SessionLocal, init_db
-from app.models import AnalysisSnapshot, ScheduledJob, SourceSnapshot, TelegramSubscription, UsageMetric
+from app.models import AnalysisSnapshot, ProviderRegistry, ScheduledJob, SourceSnapshot, TelegramSubscription, UsageMetric
 from app.services.alert_rules import (
     evaluate_rules,
     format_rule,
@@ -54,8 +55,15 @@ class TelegramBotService(
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._running = False
-        self._offset = 0
         self._tasks: list[asyncio.Task[None]] = []
+        # Per-chat pending-operation guard: prevents duplicate scans/analyses.
+        self._pending_ops: dict[int, bool] = {}
+        # Bounded executor to cap blocking-thread concurrency.
+        self._executor = ThreadPoolExecutor(max_workers=2)
+        self._started_at = datetime.now(timezone.utc)
+        # Persisted polling offset so restarts don't replay old updates.
+        self._offset_file = PROJECT_ROOT / ".telegram_offset"
+        self._offset = self._load_offset()
 
     @property
     def enabled(self) -> bool:
@@ -112,6 +120,7 @@ class TelegramBotService(
                 await task
             except asyncio.CancelledError:
                 pass
+        self._executor.shutdown(wait=False)
         if tasks:
             logger.info(
                 "telegram_bot_stopped",
@@ -131,6 +140,8 @@ class TelegramBotService(
                 for update in updates:
                     self._offset = max(self._offset, int(update["update_id"]) + 1)
                     await self._handle_update(update)
+                if updates:
+                    self._save_offset()
             except asyncio.CancelledError:
                 raise
             except Exception:  # pragma: no cover - resilience path
@@ -508,17 +519,28 @@ class TelegramBotService(
                     reply_markup=self._main_keyboard(),
                 )
                 return
-            await self._send_message(
-                int(chat_id),
-                "Запускаю сканирование твоего списка...",
-                reply_markup=self._main_keyboard(),
-            )
+            chat_id_int = int(chat_id)
+            if self._pending_ops.get(chat_id_int):
+                await self._send_message(
+                    chat_id_int,
+                    "Уже сканирую твой список, подожди пару секунд.",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            self._pending_ops[chat_id_int] = True
             try:
-                response = await asyncio.to_thread(scan_tickers, watchlist, None)
-                subscription = self._subscription_for_chat(int(chat_id))
+                await self._send_message(
+                    chat_id_int,
+                    "Запускаю сканирование твоего списка...",
+                    reply_markup=self._main_keyboard(),
+                )
+                response = await self._run_blocking_with_timeout(
+                    scan_tickers, watchlist, None, timeout=180.0,
+                )
+                subscription = self._subscription_for_chat(chat_id_int)
                 min_confidence = getattr(subscription, "min_confidence", None) if subscription else None
                 await self._send_message(
-                    int(chat_id),
+                    chat_id_int,
                     self._scan_text(
                         response.results,
                         response.errors,
@@ -527,12 +549,20 @@ class TelegramBotService(
                     ),
                     reply_markup=self._main_keyboard(),
                 )
-            except Exception as exc:
+            except asyncio.TimeoutError:
                 await self._send_message(
-                    int(chat_id),
-                    f"Не удалось выполнить сканирование твоего списка: {exc}",
+                    chat_id_int,
+                    "⏱️ Таймаут сканирования — некоторые источники данных не ответили вовремя. Попробуй ещё раз.",
                     reply_markup=self._main_keyboard(),
                 )
+            except Exception as exc:
+                await self._send_message(
+                    chat_id_int,
+                    f"Не удалось выполнить сканирование твоего списка: {self._translate_error(str(exc))}",
+                    reply_markup=self._main_keyboard(),
+                )
+            finally:
+                self._pending_ops.pop(chat_id_int, None)
             return
 
         if action == "status":
@@ -595,6 +625,52 @@ class TelegramBotService(
                 db.close()
             return
 
+        if action == "health":
+            chat_id_int = int(chat_id)
+            budgets = {}
+            try:
+                budgets = runtime_budget_snapshot()
+            except Exception:
+                pass
+            sub_count = len(self._active_subscribers())
+            try:
+                from app.database import check_database
+                check_database()
+                db_ok = True
+            except Exception:
+                db_ok = False
+            await self._send_message(
+                chat_id_int,
+                self._health_text(
+                    started_at=self._started_at,
+                    db_ok=db_ok,
+                    budgets=budgets,
+                    subscriber_count=sub_count,
+                ),
+                reply_markup=self._main_keyboard(),
+            )
+            return
+
+        if action == "providers":
+            chat_id_int = int(chat_id)
+            db = SessionLocal()
+            try:
+                providers = db.query(ProviderRegistry).order_by(ProviderRegistry.name).all()
+                await self._send_message(
+                    chat_id_int,
+                    self._providers_text(providers),
+                    reply_markup=self._main_keyboard(),
+                )
+            except Exception:
+                await self._send_message(
+                    chat_id_int,
+                    "❌ Ошибка при получении списка провайдеров.",
+                    reply_markup=self._main_keyboard(),
+                )
+            finally:
+                db.close()
+            return
+
         if action == "backtest":
             ticker = args[0] if args else None
             if not ticker:
@@ -615,7 +691,7 @@ class TelegramBotService(
             except Exception as exc:
                 await self._send_message(
                     int(chat_id),
-                    f"Не удалось провести backtest {ticker}: {exc}",
+                    f"Не удалось провести backtest {ticker}: {self._translate_error(str(exc))}",
                     reply_markup=self._main_keyboard(),
                 )
             return
@@ -634,7 +710,7 @@ class TelegramBotService(
                 return
             await self._send_message(int(chat_id), f"Анализирую портфель ({len(watchlist)} акций)...", reply_markup=self._main_keyboard())
             try:
-                portfolio_text = await asyncio.to_thread(self._portfolio_analysis, watchlist)
+                portfolio_text = await self._run_blocking_with_timeout(self._portfolio_analysis, watchlist, timeout=120.0)
                 await self._send_message(
                     int(chat_id),
                     portfolio_text,
@@ -643,7 +719,7 @@ class TelegramBotService(
             except Exception as exc:
                 await self._send_message(
                     int(chat_id),
-                    f"Не удалось проанализировать портфель: {exc}",
+                    f"Не удалось проанализировать портфель: {self._translate_error(str(exc))}",
                     reply_markup=self._main_keyboard(),
                 )
             return
@@ -723,7 +799,7 @@ class TelegramBotService(
                 png = await asyncio.to_thread(_make_chart)
                 await self._send_photo(int(chat_id), png, caption=f"{ticker_c} — цена и MA50/MA200")
             except Exception as exc:
-                await self._send_message(int(chat_id), f"Не удалось построить график {ticker_c}: {exc}", reply_markup=self._main_keyboard())
+                await self._send_message(int(chat_id), f"Не удалось построить график {ticker_c}: {self._translate_error(str(exc))}", reply_markup=self._main_keyboard())
             return
 
         if action == "holdings":
@@ -784,27 +860,48 @@ class TelegramBotService(
 
         if action == "analyze":
             ticker = args[0] if args else None
+            chat_id_int = int(chat_id)
             if not ticker:
                 await self._send_message(
-                    int(chat_id),
+                    chat_id_int,
                     "Выбери кнопку с тикером для анализа.",
                     reply_markup=self._main_keyboard(),
                 )
                 return
-            await self._send_message(int(chat_id), "Считаю анализ...", reply_markup=self._main_keyboard())
-            try:
-                analysis = await asyncio.to_thread(self._analyze_and_persist, ticker)
+            if self._pending_ops.get(chat_id_int):
                 await self._send_message(
-                    int(chat_id),
+                    chat_id_int,
+                    "Уже выполняю запрос, подожди.",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            self._pending_ops[chat_id_int] = True
+            try:
+                await self._send_message(
+                    chat_id_int, "Считаю анализ...", reply_markup=self._main_keyboard(),
+                )
+                analysis = await self._run_blocking_with_timeout(
+                    self._analyze_and_persist, ticker, timeout=120.0,
+                )
+                await self._send_message(
+                    chat_id_int,
                     self._analysis_text(analysis),
                     reply_markup=self._analysis_followup_keyboard(ticker),
                 )
-            except Exception as exc:
+            except asyncio.TimeoutError:
                 await self._send_message(
-                    int(chat_id),
-                    f"Не удалось проанализировать {ticker}: {exc}",
+                    chat_id_int,
+                    f"⏱️ Таймаут анализа {ticker} — источник данных не ответил вовремя.",
                     reply_markup=self._main_keyboard(),
                 )
+            except Exception as exc:
+                await self._send_message(
+                    chat_id_int,
+                    f"Не удалось проанализировать {ticker}: {self._translate_error(str(exc))}",
+                    reply_markup=self._main_keyboard(),
+                )
+            finally:
+                self._pending_ops.pop(chat_id_int, None)
             return
 
         if action == "scan":
@@ -816,21 +913,32 @@ class TelegramBotService(
                     reply_markup=self._main_keyboard(),
                 )
                 return
-            if args:
-                scan_intro = f"Запускаю сканирование: {', '.join(tickers)}..."
-            else:
-                scan_intro = "Запускаю сканирование рынка..."
-            await self._send_message(
-                int(chat_id),
-                scan_intro,
-                reply_markup=self._main_keyboard(),
-            )
+            chat_id_int = int(chat_id)
+            if self._pending_ops.get(chat_id_int):
+                await self._send_message(
+                    chat_id_int,
+                    "Уже выполняю запрос, подожди.",
+                    reply_markup=self._main_keyboard(),
+                )
+                return
+            self._pending_ops[chat_id_int] = True
             try:
-                response = await asyncio.to_thread(scan_tickers, tickers, None)
-                subscription = self._subscription_for_chat(int(chat_id))
+                if args:
+                    scan_intro = f"Запускаю сканирование: {', '.join(tickers)}..."
+                else:
+                    scan_intro = "Запускаю сканирование рынка..."
+                await self._send_message(
+                    chat_id_int,
+                    scan_intro,
+                    reply_markup=self._main_keyboard(),
+                )
+                response = await self._run_blocking_with_timeout(
+                    scan_tickers, tickers, None, timeout=180.0,
+                )
+                subscription = self._subscription_for_chat(chat_id_int)
                 min_confidence = getattr(subscription, "min_confidence", None) if subscription else None
                 await self._send_message(
-                    int(chat_id),
+                    chat_id_int,
                     self._scan_text(
                         response.results,
                         response.errors,
@@ -839,12 +947,20 @@ class TelegramBotService(
                     ),
                     reply_markup=self._main_keyboard(),
                 )
-            except Exception as exc:
+            except asyncio.TimeoutError:
                 await self._send_message(
-                    int(chat_id),
-                    f"Не удалось выполнить сканирование: {exc}",
+                    chat_id_int,
+                    "⏱️ Таймаут сканирования — некоторые источники данных не ответили вовремя.",
                     reply_markup=self._main_keyboard(),
                 )
+            except Exception as exc:
+                await self._send_message(
+                    chat_id_int,
+                    f"Не удалось выполнить сканирование: {self._translate_error(str(exc))}",
+                    reply_markup=self._main_keyboard(),
+                )
+            finally:
+                self._pending_ops.pop(chat_id_int, None)
             return
 
         if action in {"why", "sources", "events", "filings", "freshness", "calendar", "risk", "audit", "news"}:
@@ -942,7 +1058,7 @@ class TelegramBotService(
             except Exception as exc:
                 await self._send_message(
                     chat_id,
-                    f"Не удалось пересчитать {ticker.upper()}: {exc}",
+                    f"Не удалось пересчитать {ticker.upper()}: {self._translate_error(str(exc))}",
                     reply_markup=followup_keyboard,
                 )
             return
@@ -984,8 +1100,8 @@ class TelegramBotService(
         mode = digest_mode or self._scheduled_digest_mode(reference_time)
 
         # Fetch market-wide news once per digest cycle (respects rate limits).
-        news_context = await asyncio.to_thread(
-            build_news_context, None, self.settings, include_macro=True
+        news_context = await self._run_blocking_with_timeout(
+            build_news_context, None, self.settings, include_macro=True, timeout=60.0
         )
 
         for subscriber in subscribers:
@@ -1011,7 +1127,7 @@ class TelegramBotService(
                 self._complete_job(job_id, status="skipped", reason="no_tickers")
                 continue
 
-            response = await asyncio.to_thread(scan_tickers, tickers, None)
+            response = await self._run_blocking_with_timeout(scan_tickers, tickers, None, timeout=180.0)
             all_impact_items = high_impact_news(news_context)
             sub_sectors = self._watchlist_sectors(subscriber)
             impact_items = news_relevant_for_sectors(all_impact_items, sub_sectors)
@@ -1256,6 +1372,24 @@ class TelegramBotService(
         finally:
             db.close()
 
+    def _load_offset(self) -> int:
+        """Load the persisted polling offset from disk."""
+        try:
+            data = self._offset_file.read_text().strip()
+            return int(data)
+        except (FileNotFoundError, ValueError, OSError):
+            return 0
+
+    def _save_offset(self) -> None:
+        """Persist the current polling offset to disk."""
+        try:
+            self._offset_file.write_text(str(self._offset))
+        except OSError:
+            logger.exception(
+                "offset_persist_failed",
+                extra={"component": "telegram", "offset": self._offset},
+            )
+
     def _record_usage(self, chat_id: int, command: str) -> None:
         """Increment the usage counter for (today, chat_id, command).
 
@@ -1292,6 +1426,24 @@ class TelegramBotService(
             )
         finally:
             db.close()
+
+    async def _run_blocking_with_timeout(
+        self,
+        func: Any,
+        *args: Any,
+        timeout: float = 120.0,
+        **kwargs: Any,
+    ) -> Any:
+        """Run a blocking function in a thread with a timeout.
+
+        Uses the bounded ``_executor`` so I/O concurrency is capped.
+        Raises ``asyncio.TimeoutError`` if the call runs past *timeout* seconds.
+        """
+        loop = asyncio.get_running_loop()
+        return await asyncio.wait_for(
+            loop.run_in_executor(self._executor, lambda: func(*args, **kwargs)),
+            timeout=timeout,
+        )
 
     def _subscription_for_chat(self, chat_id: int) -> TelegramSubscription | None:
         db = SessionLocal()
@@ -1706,6 +1858,10 @@ class TelegramBotService(
 
         if lowered in {"/usage", "usage"}:
             return "usage", []
+        if lowered in {"/health", "health"}:
+            return "health", []
+        if lowered in {"/providers", "providers"}:
+            return "providers", []
 
         if lowered.startswith("/add ") or lowered.startswith("add "):
             parts = normalized.split(maxsplit=1)
@@ -2112,7 +2268,7 @@ class TelegramBotService(
                 getattr(self.settings, "telegram_send_budget", None),
             )
         except RuntimeBudgetExceeded as exc:
-            raise RuntimeError(f"Telegram send budget exhausted: {exc}") from exc
+            raise RuntimeError(f"Telegram send budget exhausted: {self._translate_error(str(exc))}") from exc
 
         payload = {
             "chat_id": chat_id,
@@ -2132,7 +2288,7 @@ class TelegramBotService(
                 getattr(self.settings, "telegram_send_budget", None),
             )
         except RuntimeBudgetExceeded as exc:
-            raise RuntimeError(f"Telegram send budget exhausted: {exc}") from exc
+            raise RuntimeError(f"Telegram send budget exhausted: {self._translate_error(str(exc))}") from exc
 
         token = self.settings.telegram_bot_token
         if not token:
@@ -2217,7 +2373,7 @@ class TelegramBotService(
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Telegram API error {exc.code}: {body}") from exc
         except Exception as exc:
-            raise RuntimeError(f"Telegram API request failed: {exc}") from exc
+            raise RuntimeError(f"Telegram API request failed: {self._translate_error(str(exc))}") from exc
 
         try:
             return json.loads(body)

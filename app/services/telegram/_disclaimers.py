@@ -106,6 +106,30 @@ class DisclaimerMixin:
     def _translate_recommendation(self, recommendation: str) -> str:
         return research_label_to_russian(recommendation)
 
+    def _translate_error(self, error_text: str) -> str:
+        """Translate common English error messages to Russian."""
+        translations = {
+            "Could not determine current price": "Не удалось определить текущую цену",
+            "No historical price data returned": "Нет исторических данных о ценах",
+            "Historical price data for": "Исторических данных для",
+            "has no valid close prices": "нет валидных цен закрытия",
+            "Provider call budget exhausted": "Лимит запросов к провайдеру исчерпан",
+            "Timeout": "Таймаут",
+            "timeout": "таймаут",
+            "timed out": "истекло время ожидания",
+            "Connection refused": "Соединение отклонено",
+            "connection refused": "соединение отклонено",
+            "Connection reset": "Соединение сброшено",
+            "Name or service not known": "DNS-имя не найдено",
+            "Ticker must not be empty": "Тикер не может быть пустым",
+            "Unexpected error": "Неожиданная ошибка",
+        }
+        translated = error_text
+        for source, target in translations.items():
+            if source in translated:
+                translated = translated.replace(source, target)
+        return self._translate_text(translated)
+
     def _translate_text(self, text: str) -> str:
         replacements = {
             "analytical signal": "аналитический сигнал",

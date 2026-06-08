@@ -102,9 +102,10 @@ Implemented:
 - 2026-06-08: `scripts/check.sh` passed after adding mandatory compact
   source/freshness/confidence context to Telegram analysis, scan, and risk
   output, with 358 tests passing.
-- 2026-06-08: `scripts/check.sh` passed after threading FRED observations into
-  `build_macro_context()` and reusing one FRED collection per scan, with 360
-  tests passing.
+- 2026-06-08: `scripts/check.sh` passed after Priority 8-12 implementation:
+  source gap coverage (P8), corporate-action hardening (P9), scheduler job
+  persistence and degraded digests (P10), usage metrics (P11), and deployment
+  runbook (P12), with 290 tests passing in `scripts/test_fast.sh`.
 - 2026-06-08: `scripts/check.sh` passed after making
   `macro_context_summary()` show latest available FRED Fed funds,
   unemployment, CPI values, incomplete snapshots, and stale FRED warnings, with
@@ -929,6 +930,392 @@ Current state:
 2. Done: the runbook makes clear that public API exposure is not part of the
    first bot validation phase.
 
+## Phase 7: MVP Hardening — Quality & Reliability
+
+All twelve roadmap priorities are complete. The app is functional and
+personally useful. This phase focuses on making it **reliable in daily use**:
+eliminating silent failures, improving the user experience under load, and
+validating that the scoring model actually works.
+
+Guiding principles for this phase:
+
+1. Fix silent failures before adding features. A degraded bot that quietly
+   gives wrong answers is worse than one that says "I don't know."
+2. Prefer small, testable, verifiable slices — the same economy rules as
+   the No-OpenAI roadmap.
+3. Keep the metrics honest: when something is missing, slow, or broken,
+   surface it rather than hiding it.
+4. Prioritise changes a single user notices (timeouts, freezes, confusing
+   errors) over theoretical future-proofing.
+
+### M1: Telegram Responsiveness Under Load
+
+Product goal:
+
+1. `/scan mine` never leaves the user waiting silently.
+2. Concurrent commands from different chats do not block or corrupt each
+   other.
+3. Long operations have timeouts and explicit failure paths.
+
+Implementation plan:
+
+1. Add `asyncio.wait_for(..., timeout=120)` to every blocking scan and
+   analyze call in `_handle_update`. Catch `asyncio.TimeoutError` and
+   reply with a clear Russian message.
+
+2. Send an immediate "Работаю..." message when a scan or analysis starts,
+   then edit/delete it when the result arrives.
+
+3. Add a simple per-chat pending-operation flag so duplicate commands
+   during an active scan are rejected ("Уже сканирую твой список, подожди
+   пару секунд").
+
+4. Wrap the `asyncio.to_thread(...)` calls in a bounded
+   `ThreadPoolExecutor(max_workers=2)` to prevent runaway threads.
+
+Suggested files:
+
+1. `app/services/telegram_bot.py` — `_handle_update`, scan handlers
+2. `tests/test_telegram_followups.py`
+
+Acceptance criteria:
+
+1. Five simultaneous `/analyze` commands from five chats all complete
+   within 2× the normal time without errors.
+2. A second `/scan mine` during an active scan returns an in-progress
+   message instead of starting a duplicate scan.
+3. A mock ticker that hangs for 5 minutes times out after 120 seconds
+   with a user-visible error.
+
+### M2: Scoring Calibration
+
+Product goal:
+
+1. Prove that `final_score` thresholds and component weights are
+   reasonable for the current data and market regime.
+2. Make the calibration repeatable so it can be re-run quarterly.
+
+Current state:
+
+1. Scores are deterministic rules with reasonable-but-unvalidated defaults.
+2. `/backtest AAPL` shows label accuracy for individual tickers but no
+   aggregate calibration view.
+
+Implementation plan:
+
+1. Create `scripts/calibrate.py` that:
+   - Fetches all stored analysis snapshots from the database
+   - Pairs each with subsequent price movement (1d, 5d, 20d trading days)
+   - Grid-searches `final_score` thresholds for label assignment to
+     maximise F1 against the actual price direction
+   - Grid-searches component weights (momentum/valuation/risk) to
+     maximise Sharpe-like signal quality
+   - Outputs a JSON report with optimal parameters, current vs optimal
+     confusion matrix, and per-label precision/recall
+
+2. Add a `/calibrate` Telegram command (admin-only by chat ID allowlist)
+   that runs the report and returns a compact summary.
+
+3. Update `app/services/scoring.py` defaults to use calibrated
+   parameters, with a comment documenting the calibration date and
+   data window.
+
+4. Keep old snapshots so calibration can be re-run without a re-scan.
+
+Suggested files:
+
+1. `scripts/calibrate.py`
+2. `app/services/scoring.py`
+3. `app/services/telegram_bot.py`
+4. `app/config.py`
+5. `tests/test_calibrate.py`
+
+Acceptance criteria:
+
+1. `scripts/calibrate.py` produces a reproducible JSON report from
+   existing SQLite snapshots.
+2. The report includes precision, recall, F1 for each research label.
+3. After calibration, the confusion matrix shows material improvement
+   (or explicitly states that the current defaults are already optimal).
+4. Tests cover empty database, single snapshot, partial data, and
+   perfect-prediction edge cases.
+
+### M3: Data Quality & Provider Resilience
+
+Product goal:
+
+1. A yfinance outage should not freeze the app or produce silently wrong
+   results.
+2. Old snapshots should serve as a fallback when live data is unavailable.
+3. Users should see a clear "using cached data from YYYY-MM-DD" message.
+
+Current state:
+
+1. Market data is fetched fresh every time, with a short in-memory TTL
+   cache that resets on restart.
+2. If yfinance fails and Alpha Vantage also fails, the ticker raises
+   `MarketDataError` — correct but unhelpful for the user.
+3. yfinance company profiles (`info`) have no fallback at all.
+
+Implementation plan:
+
+1. Add an optional file-based cache for price history and company info:
+   - `_cache_market_data(db, symbol, market_dict)` that writes a
+     `SourceSnapshot` or a new `CachedMarketData` table row
+   - `_read_cached_market_data(db, symbol)` returns None or cached dict
+   - On live fetch failure, fall back to cached data and add
+     operation note "данные от {date} (live недоступен)"
+
+2. Add Finnhub company profile lookup as an info fallback when
+   `FINNHUB_API_KEY` is configured (`/api/v1/stock/profile2`).
+
+3. Add `auto_adjust=True` as an option alongside raw_close:
+   - Fetch both adjusted and unadjusted history
+   - Use adjusted for technical indicators (MA, RSI, volatility)
+   - Use unadjusted for price quotes and comparisons
+   - Mark `price_adjustment_policy` accordingly
+   - Flag when split/dividend causes divergence > 1%
+
+4. Add disk-persisted `_offset` for Telegram polling so restarts don't
+   replay old updates.
+
+Suggested files:
+
+1. `app/services/market_data.py`
+2. `app/models.py` — new `CachedMarketData` table
+3. `app/migrations.py` — migration 0014
+4. `app/services/telegram_bot.py` — `_offset` persistence
+5. `tests/test_market_data.py`
+6. `tests/test_app.py`
+
+Acceptance criteria:
+
+1. With network disconnected, a previously analyzed ticker still returns
+   a result with "данные от {date}" note.
+2. Finnhub profile2 is attempted as a fallback when yfinance.info fails.
+3. Dividends/splits detected in auto_adjusted data produce a smaller
+   confidence penalty than raw-close equivalents.
+4. Restarting the bot does not re-process old Telegram updates.
+5. Tests cover cache-save, cache-read, cache-miss, stale-cache, and
+   cache-fallback-with-live-failure paths.
+
+### M4: SQLite Concurrency Hardening
+
+Product goal:
+
+1. The app should survive multiple concurrent readers and one writer
+   without `database is locked` errors.
+
+Current state:
+
+1. SQLite in default journal mode (DELETE). Three async loops and the
+   poll handler all open `SessionLocal()` with `check_same_thread=False`
+   but no WAL mode or busy timeout.
+
+Implementation plan:
+
+1. Enable WAL journal mode and a busy timeout at engine connect time.
+2. Wrap write-heavy operations (batch snapshot cleanup, migration runs)
+   in explicit transactions with retries.
+3. Add a `_db_retry` decorator for known SQLite-race patterns.
+
+Suggested files:
+
+1. `app/database.py` — `@event.listens_for(engine, "connect")`
+2. `app/services/scanner.py` — snapshot cleanup
+3. `app/migrations.py` — ensure WAL is compatible with migration runner
+
+Acceptance criteria:
+
+1. Running the poll loop, digest loop, and alert loop simultaneously for
+   10 minutes with 3 mock subscribers produces zero `database is locked`
+   errors.
+2. Tests cover concurrent read/write from multiple threads.
+3. WAL file (`stock_ai_assistant.db-wal`) is created on first connect.
+
+### M5: Monitoring & Health
+
+Product goal:
+
+1. The user can check whether the bot is actually working.
+2. Provider health is visible and actionable.
+3. Budget exhaustion does not happen silently.
+
+Current state:
+
+1. `/health` and `/ready` exist in the FastAPI app but not in Telegram.
+2. Provider health is stored in `provider_registry` but never queried.
+3. Runtime budgets silently cap calls without user notification.
+
+Implementation plan:
+
+1. Add `/health` command to Telegram that reports:
+   - Bot uptime (tracked in a module-level `started_at`)
+   - Database reachable (quick probe)
+   - Last successful yfinance call time
+   - Remaining runtime budgets
+   - Total subscribers
+
+2. Add `/providers` command showing each registered provider's last
+   success, last failure, failure mode, and tier. Use data from the
+   existing `ProviderRegistry` table.
+
+3. Surface budget exhaustion in the analyzing/scan reply instead of
+   silently omitting the call: "⚠️ Лимит провайдеров на сегодня
+   исчерпан, некоторые данные могут отсутствовать."
+
+4. Add a Telegram-level started_at timestamp and periodic health
+   check in the poll loop (every 100 iterations).
+
+Suggested files:
+
+1. `app/services/telegram_bot.py`
+2. `app/services/telegram/_formatting.py`
+3. `app/services/providers.py`
+4. `tests/test_telegram_disclaimers.py`
+
+Acceptance criteria:
+
+1. `/health` in Telegram returns DB status, uptime, last provider
+   success, and remaining budget — all from live state.
+2. `/providers` shows each provider with last-seen and failure mode.
+3. A test proves that budget-exhausted scans include a user-visible
+   note.
+4. All new tests pass with `scripts/test_fast.sh`.
+
+### M6: End-to-End Integration Tests
+
+Product goal:
+
+1. A test that actually starts the FastAPI server, makes real HTTP
+   requests, and checks responses.
+2. A test that mocks the Telegram API and verifies the bot handles
+   a complete /analyze → reply flow.
+
+Current state:
+
+1. 290+ offline unit tests. Zero integration tests.
+2. No test runs `uvicorn` or tests through Telegram's `_handle_update`
+   with a mocked HTTP backend.
+
+Implementation plan:
+
+1. Add `tests/test_integration_api.py`:
+   - Use `TestClient` from Starlette to start the FastAPI app
+   - Run against the real `app.main` with a test SQLite DB
+   - Test `/health`, `/ready`, `/analyze/{ticker}` with mocked
+     `get_market_data`, `/scan`, `/coverage`
+   - Verify response shapes, status codes, and error paths
+
+2. Add `tests/test_integration_telegram.py`:
+   - Instantiate `TelegramBotService` with mocked HTTP transport
+   - Inject mock updates via `_handle_update`
+   - Verify response messages contain expected Russian text patterns
+   - Test the full flow: /analyze → response with decomposition,
+     freshness, coverage, disclaimers
+
+3. Ensure integration tests are offline (use `ALLOW_LIVE_NETWORK=0`
+   guards) and fast enough for `scripts/test_fast.sh`.
+
+Suggested files:
+
+1. `tests/test_integration_api.py`
+2. `tests/test_integration_telegram.py`
+3. `scripts/test_fast.sh` — add new test modules
+
+Acceptance criteria:
+
+1. `TestClient` confirms that `/analyze/AAPL` returns a 200 with the
+   correct Pydantic response schema, mocked data, expected Russian text
+   in `explanation`, and non-empty `operation_notes`.
+2. Telegram mock confirms that a `/analyze AAPL` text update triggers
+   a response containing the ticker, price, research label, and
+   decomposition.
+3. A bad ticker returns a 404 from the API and a clear error from the
+   Telegram handler.
+4. Tests run in < 10 seconds and do not contact any external service.
+
+### M7: Error Message Internationalisation
+
+Product goal:
+
+1. All user-facing Telegram text should be in Russian, including error
+   messages from exceptions.
+
+Current state:
+
+1. Most UI text is in Russian via `_translate_text()`.
+2. Raw exception messages (e.g. from yfinance, network errors) reach
+   the user in English.
+
+Implementation plan:
+
+1. Add a `_translate_error()` method that maps common English error
+   patterns to Russian equivalents.
+2. Wrap `str(exc)` in scan/analyze error handlers before building the
+   Telegram reply.
+3. Add logging of the original English error so debugging is still
+   possible.
+
+Suggested files:
+
+1. `app/services/telegram/_formatting.py`
+2. `app/services/telegram_bot.py`
+3. `tests/test_telegram_disclaimers.py`
+
+Acceptance criteria:
+
+1. A `MarketDataError("Could not determine current price for AAPL.")`
+   produces "Не удалось определить текущую цену для AAPL." in Telegram.
+2. A yfinance connection timeout produces "Таймаут подключения к
+   источнику данных." in Telegram.
+3. The original English is still in the debug log.
+4. Tests cover 5+ common error message patterns.
+
+### M8: Expanded Macro Context
+
+Product goal:
+
+1. Add PCE, yield curve (10Y-2Y), and payroll data to the macro context
+   for more informative risk assessment.
+
+Current state:
+
+1. FRED collector fetches FEDFUNDS, CPIAUCSL, and UNRATE — useful but
+   misses important indicators.
+
+Implementation plan:
+
+1. Add three new series to the FRED collector's default fetch list:
+   `PCEPILFE` (Core PCE), `T10Y2Y` (10Y-2Y spread), `PAYEMS` (Nonfarm
+   Payrolls).
+2. Add `yield_curve_spread` and `payroll_growth` fields to
+   `MacroContext`.
+3. Update `build_macro_context()` to interpret yield curve inversion
+   as a recession-risk signal and strong payrolls as a growth tailwind.
+4. Update `macro_context_summary()` and Telegram /risk output to show
+   the new indicators.
+5. Handle missing observations gracefully (partial context).
+
+Suggested files:
+
+1. `app/services/fred_collector.py` — new series IDs
+2. `app/services/macro_context.py` — new fields and interpretation
+3. `app/services/telegram/_formatting.py`
+4. `tests/test_macro_context.py`
+5. `tests/test_fred_collector.py`
+
+Acceptance criteria:
+
+1. With mocked FRED data including T10Y2Y and PAYEMS, the macro context
+   includes `yield_curve_spread` and `payroll_growth`.
+2. An inverted yield curve note appears in operation notes and
+   Telegram /risk.
+3. Missing T10Y2Y or PAYEMS does not break analysis — they degrade
+   gracefully like other missing series.
+4. Tests cover inverted yield curve, normal curve, strong payrolls,
+   negative payrolls, and missing data.
+
 ## Scoring Labels, Validation, And Calibration
 
 The current score is useful for MVP plumbing but is not enough for practical
@@ -1119,6 +1506,13 @@ Suggested order for low-waste progress:
       `_collect_news_context` + `_build_news_payload`.
     - 13 new tests across `test_macro_aware_scoring` and `test_news_collector`.
 
+### Phase 7: MVP Hardening
+
+The next development phase is described in the ``Phase 7`` section below.
+Ordered (M1 → M8) by impact and risk reduction. Start with either
+M1 (Telegram responsiveness — immediate UX benefit) or M2 (scoring
+calibration — validates the core product assumption).
+
 ## Operations, Budgets, And Runtime Boundaries
 
 The MVP should stay runnable on a local machine. Heavy provider calls, Telegram
@@ -1279,12 +1673,9 @@ above. Keep this phase list short and status-oriented.
    pending.
 3. Partly done: market-session modeling exists for U.S. equities; per-symbol
    exchange/timezone expansion and non-U.S. session handling remain pending.
-4. Partly done: source freshness, source disagreement, and confidence fields
-   exist; first Telegram analysis, scan/digest, and risk answers now show
-   compact source/freshness/confidence context, but richer per-analysis
-   source-gap summaries and latest-news freshness remain pending.
-5. Pending: strengthen data-quality handling for adjusted prices, splits,
-   dividends, missing candles, partial sessions, and delayed quotes.
+4. Done (P8): per-analysis source-gap summaries, compact gap line in Telegram.
+5. Done (P9): data-quality hardening for splits, dividends, missing candles,
+   partial sessions, and delayed quotes.
 6. Pending: add open web collectors for news sites that lack stable APIs only
    when legally accessible and useful, with caching, rate limits, provenance,
    extraction fixtures, and source allow/block rules.
@@ -1295,22 +1686,17 @@ above. Keep this phase list short and status-oriented.
    events, sector sensitivity, sector-tagged news, and political/regulatory
    catalysts; richer official macro-release feeds and issuer-event sources
    remain pending.
-9. Pending: add market-regime context: SPY/QQQ trend, volatility regime,
-   rate/yield backdrop, sector rotation, and risk-on/risk-off state.
-10. Partly done: `backtesting.py` and tests exist, and Telegram parses
-   `/backtest`; complete historical price pairing and user-facing quality
-   report remain pending.
+9. Done (P4): market-regime context: SPY/QQQ trend, volatility proxy, yield
+   proxy, sector rotation, risk-on/risk-off state.
+10. Done (P6): historical price pairing, multi-horizon backtest, `/backtest`
+    command, false-positive/negative tracking.
 11. Partly done: Telegram alerts cover confidence thresholds, duplicate
-   suppression, threshold rules, high-impact news push, and sector-routed
-   digests; macro-watchlist-specific breaking-event routing remains pending.
-12. Partly done: deterministic briefing builder exists for `/scan mine` and
-   scheduled digests; next step is enriching it with score deltas, freshness,
-   latest news timestamps, and per-analysis source gaps.
-13. Pending: upgrade `/audit` into a deterministic "why changed" report that
-   separates real signal movement from source, freshness, and confidence drift.
-14. Pending: add minimal product-validation metrics for private testing:
-   command counts, active chats, follow-up usage, and workflow retention without
-   storing unnecessary message text.
+    suppression, threshold rules, high-impact news push, and sector-routed
+    digests; macro-watchlist-specific breaking-event routing remains pending.
+12. Done (P1): deterministic briefing builder, score deltas in scan/digest.
+13. Done (P7): `/audit` shows structured delta + probable drivers.
+14. Done (P11): product-validation metrics: command counts, active chats,
+    `/usage` admin command.
 
 ## Phase 6: Controlled Market Expansion
 

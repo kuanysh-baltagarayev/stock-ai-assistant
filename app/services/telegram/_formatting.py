@@ -808,6 +808,61 @@ class FormattingMixin:
             )
         )
 
+    def _health_text(
+        self,
+        *,
+        started_at: datetime | None = None,
+        db_ok: bool = True,
+        budgets: dict[str, Any] | None = None,
+        subscriber_count: int = 0,
+    ) -> str:
+        """Build a /health response for the Telegram bot."""
+        uptime = ""
+        if started_at:
+            delta = datetime.now(timezone.utc) - started_at
+            hours, remainder = divmod(int(delta.total_seconds()), 3600)
+            minutes = remainder // 60
+            uptime = f"Аптайм: {hours}ч {minutes}мин"
+
+        budget_lines = []
+        if budgets:
+            for name, value in budgets.items():
+                budget_lines.append(f"  {name}: {value.get('used', 0)}/{value.get('budget', '∞')}")
+        budget_text = "\n".join(budget_lines) if budget_lines else "  нет ограничений"
+
+        db_status = "✅" if db_ok else "❌"
+        return self._trim_message(
+            "\n".join(
+                [
+                    "📊 Telegram Bot Health:",
+                    f"{uptime}",
+                    f"БД: {db_status}",
+                    f"Подписчиков: {subscriber_count}",
+                    "Бюджеты:",
+                    budget_text,
+                ]
+            )
+        )
+
+    def _providers_text(self, providers: list[Any]) -> str:
+        """Build a /providers response showing all registered providers."""
+        if not providers:
+            return "Нет зарегистрированных провайдеров."
+
+        lines = ["📡 Провайдеры данных:"]
+        for p in providers:
+            name = getattr(p, "name", "?")
+            tier = getattr(p, "source_tier", "?") or "?"
+            last_ok = getattr(p, "last_success_at", None)
+            last_fail = getattr(p, "last_failure_at", None)
+            fail_mode = getattr(p, "last_failure_mode", None)
+            ok_str = f"✅ {self._format_dt(last_ok)}" if last_ok else "✅ никогда"
+            fail_str = f"❌ {self._format_dt(last_fail)}" if last_fail else ""
+            if fail_mode:
+                fail_str += f" ({fail_mode})"
+            lines.append(f"• {name} (tier {tier}): {ok_str} {fail_str}".strip())
+        return self._trim_message("\n".join(lines))
+
     def _preferences_summary_text(self, subscription: TelegramSubscription) -> str:
         quiet_hours = self._format_quiet_hours(subscription)
         max_alerts = getattr(subscription, "max_alerts_per_day", None)
