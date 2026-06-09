@@ -1974,7 +1974,7 @@ class TelegramBotService(
 
         if lowered in {"/usage", "usage"}:
             return "usage", []
-        if lowered in {"/health", "health"}:
+        if lowered in {"/health", "health", "/ping", "ping"}:
             return "health", []
         if lowered in {"/providers", "providers"}:
             return "providers", []

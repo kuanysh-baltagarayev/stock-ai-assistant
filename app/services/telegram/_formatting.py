@@ -36,6 +36,7 @@ class FormattingMixin:
             "• алерты: /alert AAPL < 300  |  /alert AAPL move 5  |  /alerts  |  /alert_clear\n"
             "• портфель P&L: /buy AAPL 10 175.50  |  /sell AAPL  |  /holdings\n"
             "• график: /chart AAPL (цена + MA50/MA200)\n"
+            "• healthcheck: /ping\n"
         )
 
     def _welcome_text(self, is_first_use: bool = False) -> str:

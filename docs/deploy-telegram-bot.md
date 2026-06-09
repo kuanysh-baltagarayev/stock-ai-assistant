@@ -76,7 +76,7 @@ User=stockbot
 WorkingDirectory=/home/stockbot/stock-ai-assistant
 EnvironmentFile=/home/stockbot/stock-ai-assistant/.env
 ExecStart=/home/stockbot/stock-ai-assistant/.venv/bin/python \
-  -m app.services.telegram_bot
+  /home/stockbot/stock-ai-assistant/scripts/run_telegram_bot.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
