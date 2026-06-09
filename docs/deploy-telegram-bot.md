@@ -6,6 +6,24 @@ research assistant on a shared Hetzner server (`avtoqyzmet.kz`).
 The API remains bound to localhost throughout the MVP phase — only the
 Telegram long-polling bot is exposed to the network.
 
+## Current Production Status
+
+Deployed successfully on the existing Hetzner server for `avtoqyzmet.kz` on
+2026-06-10 Asia/Almaty time.
+
+- Host alias: `avto`.
+- App user: `stockbot`.
+- App root: `/home/stockbot/stock-ai-assistant`.
+- Systemd service: `stockbot-telegram.service`.
+- Bot: `@StockQ1AssistantBot`.
+- Verification passed: Telegram live check returned `ok`, `stockbot-telegram`
+  was `active` and `enabled`, logs showed `telegram_bot_started`, server
+  `compileall` passed on Python 3.11, and `avtoqyzmet.kz` still returned
+  `HTTP/2 200` through nginx.
+- Delivery method used for this deployment: `rsync` into the separate
+  `/home/stockbot/stock-ai-assistant` tree. Nginx and `/app/frontend-quasar`
+  were not changed.
+
 ---
 
 ## Prerequisites
@@ -39,7 +57,7 @@ sudo -u stockbot vim /home/stockbot/stock-ai-assistant/.env
 ```ini
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_ENABLED=1
-TELEGRAM_ALLOWED_CHAT_IDS=12345678,87654321
+TELEGRAM_ALLOWED_CHAT_IDS=
 FRED_API_KEY=optional_fred_key
 ALPHA_VANTAGE_API_KEY=optional_av_key
 FINNHUB_API_KEY=optional_finnhub_key
@@ -48,6 +66,8 @@ ALLOW_REMOTE_API=0
 
 Only `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ENABLED` are required for the bot
 to start. All other keys are optional and control specific data sources.
+Set `TELEGRAM_ALLOWED_CHAT_IDS` only after replacing it with real chat IDs;
+do not leave placeholder values in production.
 
 ---
 

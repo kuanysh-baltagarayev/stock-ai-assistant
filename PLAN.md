@@ -424,6 +424,19 @@ Current product-validation stance:
 5. Use Telegram access controls during the early validation phase so product-quality testing is not confused by public abuse, random traffic, or premature growth experiments.
 6. Treat public onboarding, open discovery, and broader demand testing as later phases after the bot is stable and personally useful.
 
+Production deployment note:
+
+1. Done on 2026-06-10 Asia/Almaty time: private Telegram MVP was deployed to
+   the existing Hetzner server via `rsync` under `/home/stockbot/stock-ai-assistant`.
+2. The deployment uses the separate `stockbot` user and
+   `stockbot-telegram.service`; nginx and `/app/frontend-quasar` were not
+   changed.
+3. Verification passed: Telegram live check was `ok`, the bot
+   `@StockQ1AssistantBot` started through systemd, server `compileall` passed
+   under Python 3.11, and `avtoqyzmet.kz` still returned `HTTP/2 200`.
+4. Runtime note: free-form company names such as `apple` are not guaranteed to
+   trigger ticker analysis yet; `/analyze AAPL` is the reliable command.
+
 OpenAI stance for deployment and product validation:
 
 1. OpenAI is worth adding only as an optional explanation and summarization layer on top of deterministic facts.
