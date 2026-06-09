@@ -100,6 +100,7 @@ def get_market_data(ticker: str, db: Session | None = None) -> dict[str, Any]:
             symbol,
             settings.market_data_timeout_seconds,
             getattr(settings, "finnhub_api_key", None),
+            provider_call_budget,
         )
         fast_price = _to_float(_fast_info_value(fast_info, "last_price"))
         current_price = _to_float(info.get("currentPrice"))
@@ -245,6 +246,11 @@ def _acquire_history(
         if exc.status_code == 429:
             raise
         try:
+            _consume_provider_call(
+                provider_call_budget,
+                symbol=symbol,
+                action="alpha vantage fallback history",
+            )
             fallback = _validate_history(
                 _download_history_alpha_vantage(
                     symbol,
@@ -295,7 +301,12 @@ _FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
 _FINNHUB_PROFILE_URL = "https://finnhub.io/api/v1/stock/profile2"
 
 
-def _finnhub_quote(symbol: str, timeout_seconds: float, api_key: str | None) -> float | None:
+def _finnhub_quote(
+    symbol: str,
+    timeout_seconds: float,
+    api_key: str | None,
+    provider_call_budget: int | None = None,
+) -> float | None:
     """Return the latest real-time price from Finnhub's free /quote endpoint.
 
     Requires FINNHUB_API_KEY; without it this is a no-op returning None, so the
@@ -305,6 +316,11 @@ def _finnhub_quote(symbol: str, timeout_seconds: float, api_key: str | None) -> 
     if not api_key:
         return None
 
+    _consume_provider_call(
+        provider_call_budget,
+        symbol=symbol,
+        action="finnhub quote",
+    )
     query = parse.urlencode({"symbol": symbol, "token": api_key})
     request = urlrequest.Request(
         f"{_FINNHUB_QUOTE_URL}?{query}",
@@ -326,7 +342,12 @@ def _finnhub_quote(symbol: str, timeout_seconds: float, api_key: str | None) -> 
 
 
 
-def _finnhub_profile(symbol: str, timeout_seconds: float, api_key: str | None) -> dict[str, Any] | None:
+def _finnhub_profile(
+    symbol: str,
+    timeout_seconds: float,
+    api_key: str | None,
+    provider_call_budget: int | None = None,
+) -> dict[str, Any] | None:
     """Fetch company profile from Finnhub /stock/profile2 as info fallback.
 
     Returns a dict with keys matching those yfinance.info provides
@@ -336,6 +357,11 @@ def _finnhub_profile(symbol: str, timeout_seconds: float, api_key: str | None) -
     if not api_key:
         return None
 
+    _consume_provider_call(
+        provider_call_budget,
+        symbol=symbol,
+        action="finnhub profile",
+    )
     query = parse.urlencode({"symbol": symbol, "token": api_key})
     request = urlrequest.Request(
         f"{_FINNHUB_PROFILE_URL}?{query}",
@@ -468,7 +494,7 @@ def _safe_info(
         logger.warning("yfinance profile failed for %s: %s", symbol, exc)
         # Fall back to Finnhub profile2 when available.
         api_key = getattr(settings, "finnhub_api_key", None) if settings else None
-        profile = _finnhub_profile(symbol, 10.0, api_key)
+        profile = _finnhub_profile(symbol, 10.0, api_key, provider_call_budget)
         if profile:
             logger.info(
                 "finnhub_profile_fallback",

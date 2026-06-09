@@ -33,7 +33,7 @@ class FormattingMixin:
             "• backtest accuracy (/backtest AAPL)\n"
             "• source-backed детали: /why, /sources, /events, /filings, /freshness, /calendar, /risk, /audit\n"
             "• новости и настрой: /news AAPL (или /news для рынка и макро)\n"
-            "• алерты: /alert AAPL < 300  |  /alert AAPL move 5  |  /alerts  |  /alert_clear\n"
+            "• алерты: /alert AAPL < 300  |  /alert AAPL move 5  |  /alert AAPL high_interest  |  /alerts  |  /alert_clear\n"
             "• портфель P&L: /buy AAPL 10 175.50  |  /sell AAPL  |  /holdings\n"
             "• график: /chart AAPL (цена + MA50/MA200)\n"
             "• healthcheck: /ping\n"
@@ -717,7 +717,7 @@ class FormattingMixin:
         if not rules:
             return (
                 "Алертов нет.\n"
-                "Добавь: /alert AAPL < 300  |  /alert AAPL > 350  |  /alert AAPL move 5  |  /alert AAPL sell"
+                "Добавь: /alert AAPL < 300  |  /alert AAPL > 350  |  /alert AAPL move 5  |  /alert AAPL high_interest"
             )
         lines = [f"Твои алерты ({len(rules)}):"]
         for rule in rules:
@@ -832,7 +832,17 @@ class FormattingMixin:
         budget_lines = []
         if budgets:
             for name, value in budgets.items():
-                budget_lines.append(f"  {name}: {value.get('used', 0)}/{value.get('budget', '∞')}")
+                if hasattr(value, "used"):
+                    # RuntimeBudgetSnapshot dataclass
+                    used = value.used
+                    limit = value.limit if value.limit is not None else "∞"
+                elif isinstance(value, dict):
+                    used = value.get("used", "?")
+                    limit = value.get("budget", value.get("limit", "∞"))
+                else:
+                    used = "?"
+                    limit = "∞"
+                budget_lines.append(f"  {name}: {used}/{limit}")
         budget_text = "\n".join(budget_lines) if budget_lines else "  нет ограничений"
 
         db_status = "✅" if db_ok else "❌"

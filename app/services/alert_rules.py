@@ -7,7 +7,12 @@ Supported kinds:
   price_below   — fires when price < value
   price_above   — fires when price > value
   pct_move      — fires when abs(daily pct change) >= value (e.g. 5 means ±5%)
-  recommendation — fires when recommendation matches value (e.g. "SELL", "BUY")
+  recommendation — fires when recommendation matches value
+                   Supported labels: HIGH_INTEREST, WATCH, NEUTRAL, CAUTION, HIGH_RISK
+                   (old aliases: buy→BUY, sell→SELL, hold→HOLD still accepted for parsing)
+
+Note: recommendation alerts only fire during explicit analysis, not in the
+background alert loop (which skips full analysis for speed).
 """
 from __future__ import annotations
 
@@ -17,12 +22,16 @@ from typing import Any
 
 
 _RECOMMENDATION_ALIASES: dict[str, str] = {
-    "buy": "BUY",
-    "sell": "SELL",
-    "hold": "HOLD",
+    # New research labels (produced by current scoring)
+    "high_interest": "HIGH_INTEREST",
     "watch": "WATCH",
     "neutral": "NEUTRAL",
-    "high_interest": "HIGH_INTEREST",
+    "caution": "CAUTION",
+    "high_risk": "HIGH_RISK",
+    # Legacy aliases — still accepted for backward compatibility
+    "buy": "HIGH_INTEREST",
+    "sell": "HIGH_RISK",
+    "hold": "NEUTRAL",
 }
 
 
@@ -33,8 +42,9 @@ def parse_rule(text: str) -> dict[str, Any] | None:
       "AAPL < 300"      -> price_below 300
       "AAPL > 350"      -> price_above 350
       "AAPL move 5"     -> pct_move 5  (fires on ±5% daily move)
-      "AAPL sell"       -> recommendation SELL
-      "AAPL buy"        -> recommendation BUY
+      "AAPL high_interest"  -> recommendation HIGH_INTEREST
+      "AAPL caution"        -> recommendation CAUTION
+    Legacy aliases: buy→HIGH_INTEREST, sell→HIGH_RISK, hold→NEUTRAL
     Returns None if the format is not recognised.
     """
     text = text.strip()

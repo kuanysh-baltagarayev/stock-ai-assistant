@@ -1,6 +1,8 @@
 import unittest
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import pandas as pd
 
 from app.services.correlation import (
     CorrelationPair,
@@ -110,31 +112,29 @@ class CorrelationCalculationTests(unittest.TestCase):
         self.assertIsNone(result)
 
     @patch("app.services.correlation.get_market_data")
-    def test_calculate_with_mock_data(self, mock_get: MagicMock) -> None:
-        # Mock market data for two stocks
-        aapl_data = MagicMock()
-        aapl_data.price_history = [
-            ("2026-01-01", 150, 151, 149, 150.5, 1000000),
-            ("2026-01-02", 150.5, 152, 150, 151.5, 1100000),
-            ("2026-01-03", 151.5, 153, 151, 152.0, 1200000),
-            ("2026-01-04", 152, 154, 152, 153.5, 1300000),
-            ("2026-01-05", 153.5, 155, 153, 154.0, 1400000),
-        ]
-
-        msft_data = MagicMock()
-        msft_data.price_history = [
-            ("2026-01-01", 300, 301, 299, 300.5, 2000000),
-            ("2026-01-02", 300.5, 302, 300, 301.5, 2100000),
-            ("2026-01-03", 301.5, 303, 301, 302.0, 2200000),
-            ("2026-01-04", 302, 304, 302, 303.5, 2300000),
-            ("2026-01-05", 303.5, 305, 303, 304.0, 2400000),
-        ]
+    def test_calculate_with_mock_data(self, mock_get: patch) -> None:
+        # Mock market data for two stocks — return dicts matching get_market_data() contract
+        dates = pd.date_range("2026-01-01", periods=5, freq="D")
+        aapl_df = pd.DataFrame({
+            "Open": [150, 150.5, 151.5, 152, 153.5],
+            "High": [151, 152, 153, 154, 155],
+            "Low": [149, 150, 151, 152, 153],
+            "Close": [150.5, 151.5, 152.0, 153.5, 154.0],
+            "Volume": [1_000_000, 1_100_000, 1_200_000, 1_300_000, 1_400_000],
+        }, index=dates)
+        msft_df = pd.DataFrame({
+            "Open": [300, 300.5, 301.5, 302, 303.5],
+            "High": [301, 302, 303, 304, 305],
+            "Low": [299, 300, 301, 302, 303],
+            "Close": [300.5, 301.5, 302.0, 303.5, 304.0],
+            "Volume": [2_000_000, 2_100_000, 2_200_000, 2_300_000, 2_400_000],
+        }, index=dates)
 
         def mock_get_side_effect(ticker: str):
             if ticker == "AAPL":
-                return aapl_data
+                return {"history": aapl_df}
             elif ticker == "MSFT":
-                return msft_data
+                return {"history": msft_df}
             else:
                 return None
 

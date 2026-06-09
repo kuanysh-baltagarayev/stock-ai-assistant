@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 
 from app.services.market_data import get_market_data
 
@@ -93,10 +94,21 @@ def calculate_correlation_matrix(
     for ticker in tickers:
         try:
             data = get_market_data(ticker)
-            if data and data.price_history:
-                # Extract closing prices from history
-                # Assuming price_history is list of (date, open, high, low, close, volume)
-                prices_dict[ticker] = data.price_history
+            if data and data.get("history") is not None:
+                history = data["history"]
+                if isinstance(history, pd.DataFrame) and not history.empty and "Close" in history.columns:
+                    # Convert DataFrame rows to (date, open, high, low, close, volume) tuples
+                    rows = []
+                    for date_idx, row in history.iterrows():
+                        rows.append((
+                            date_idx.to_pydatetime() if hasattr(date_idx, "to_pydatetime") else date_idx,
+                            _to_float(row.get("Open")),
+                            _to_float(row.get("High")),
+                            _to_float(row.get("Low")),
+                            _to_float(row.get("Close")),
+                            _to_float(row.get("Volume")),
+                        ))
+                    prices_dict[ticker] = rows
         except Exception:
             # Skip tickers with data issues
             continue
@@ -243,3 +255,17 @@ def correlation_insights(matrix: CorrelationMatrix) -> list[str]:
         )
 
     return insights
+
+
+def _to_float(value: object) -> float | None:
+    """Safely convert a value to float, returning None on failure."""
+    if value is None:
+        return None
+    try:
+        import pandas as pd
+        f = float(value)
+        if pd.isna(f):
+            return None
+        return f
+    except (TypeError, ValueError):
+        return None

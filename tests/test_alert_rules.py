@@ -36,12 +36,12 @@ class ParseRuleTests(unittest.TestCase):
         rule = parse_rule("TSLA sell")
         self.assertIsNotNone(rule)
         self.assertEqual(rule["kind"], "recommendation")
-        self.assertEqual(rule["value"], "SELL")
+        self.assertEqual(rule["value"], "HIGH_RISK")
 
     def test_recommendation_buy_case_insensitive(self) -> None:
         rule = parse_rule("AMD BUY")
         self.assertIsNotNone(rule)
-        self.assertEqual(rule["value"], "BUY")
+        self.assertEqual(rule["value"], "HIGH_INTEREST")
 
     def test_invalid_returns_none(self) -> None:
         self.assertIsNone(parse_rule("just some text"))

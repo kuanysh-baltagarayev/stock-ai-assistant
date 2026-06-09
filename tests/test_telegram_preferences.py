@@ -25,6 +25,12 @@ class TelegramPreferenceTests(unittest.IsolatedAsyncioTestCase):
         self.session_factory = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
         self.session_patcher = patch("app.services.telegram_bot.SessionLocal", self.session_factory)
         self.session_patcher.start()
+        # Mock news collector to prevent GDELT / external network calls in digest tests.
+        self.news_patcher = patch(
+            "app.services.telegram_bot.build_news_context",
+            return_value=SimpleNamespace(items=[], overall_sentiment_label="neutral", high_impact_items=[]),
+        )
+        self.news_patcher.start()
         self.service = TelegramBotService(
             settings=SimpleNamespace(
                 telegram_enabled=True,
@@ -40,6 +46,7 @@ class TelegramPreferenceTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         reset_runtime_budgets()
         self.session_patcher.stop()
+        self.news_patcher.stop()
         self.engine.dispose()
         self._tmpdir.cleanup()
 

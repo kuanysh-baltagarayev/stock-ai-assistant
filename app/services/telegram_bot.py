@@ -643,9 +643,19 @@ class TelegramBotService(
             chat_id_int = int(chat_id)
             budgets = {}
             try:
-                budgets = runtime_budget_snapshot()
+                settings = get_settings()
+                budget_names = {
+                    "provider_calls": getattr(settings, "provider_call_budget", None),
+                    "telegram_sends": getattr(settings, "telegram_send_budget", None),
+                    "openai_calls": getattr(settings, "openai_call_budget", None),
+                }
+                for name, limit in budget_names.items():
+                    try:
+                        budgets[name] = runtime_budget_snapshot(name, limit)
+                    except Exception:
+                        budgets[name] = {"used": "?", "budget": limit or "∞"}
             except Exception:
-                pass
+                budgets = {}
             sub_count = len(self._active_subscribers())
             try:
                 from app.database import check_database
@@ -1996,7 +2006,11 @@ class TelegramBotService(
 
         if lowered.startswith("/portfolio ") or lowered.startswith("portfolio "):
             parts = normalized.split(maxsplit=1)
-            return "portfolio", [parts[1].strip().upper()] if len(parts) > 1 else []
+            if len(parts) > 1:
+                # Support space- and comma-separated tickers, limit to 10
+                symbols = [s.strip().upper() for s in parts[1].replace(",", " ").split() if s.strip()]
+                return "portfolio", symbols[:10]
+            return "portfolio", []
         if lowered in {"/portfolio", "portfolio"}:
             return "portfolio", []
 
@@ -2267,15 +2281,8 @@ class TelegramBotService(
 
 
     def _get_user_watchlist(self, chat_id: int) -> list[str]:
-        """Get user's watchlist from preferences."""
-        db = SessionLocal()
-        try:
-            sub = db.query(TelegramSubscription).filter_by(chat_id=chat_id).first()
-            if sub and sub.watchlist:
-                return sub.watchlist.split(",")
-            return []
-        finally:
-            db.close()
+        """Get user's watchlist using existing helper (reads watchlist_symbols)."""
+        return self._watchlist_tickers(chat_id)
 
     def _get_user_watchlist_for_analysis(self, analysis: Any) -> list[str]:
         """Get user's watchlist from analysis context."""

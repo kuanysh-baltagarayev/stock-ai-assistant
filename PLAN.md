@@ -99,6 +99,12 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-10: `ruff`, `compileall`, and full fast-test suite (555 tests) passed
+  after applying a batch of 10 bug fixes: correlation dict contract, Telegram
+  watchlist field, recommendation alert labels, /health budget snapshots,
+  _session_window closed-state routing, /portfolio multi-ticker parser,
+  provider budget coverage (Finnhub & Alpha Vantage), atomic persistent budget,
+  test network isolation guard, and PLAN.md sync.
 - 2026-06-08: `scripts/check.sh` passed after adding mandatory compact
   source/freshness/confidence context to Telegram analysis, scan, and risk
   output, with 358 tests passing.
@@ -280,6 +286,43 @@ Implemented:
 - 2026-05-28: compile check passed for `app`, `scripts`, and `tests` after API runner and config diagnostics updates.
 - 2026-05-28: live `yfinance` smoke passed with `scripts/live_smoke.py --ticker AAPL --scan AAPL`.
 - 2026-05-28: `scripts/check.sh` passed after API runner and config diagnostics updates, with `ruff`, 27 coverage-wrapped tests, coverage report, and compile check.
+
+## Bug Fixes Applied (2026-06-10)
+
+Fix batch addressing 10 bugs found during deployment validation:
+
+1. **Fixed: correlation.py dict contract** — `calculate_correlation_matrix` now reads
+   `data["history"]` from the `get_market_data()` dict (was `data.price_history` on a
+   non-existent attribute). Converts DataFrame rows to tuples for downstream processing.
+   Test updated to return dicts instead of MagicMock objects.
+2. **Fixed: Telegram watchlist field** — `_get_user_watchlist` now delegates to the
+   existing `_watchlist_tickers()` helper instead of accessing the non-existent
+   `sub.watchlist` field. The model stores `watchlist_symbols`.
+3. **Fixed: recommendation alert labels** — migrated `_RECOMMENDATION_ALIASES` from
+   legacy `buy`/`sell`/`hold` (mapped to `BUY`/`SELL`/`HOLD`) to the current research
+   labels (`HIGH_INTEREST`, `WATCH`, `NEUTRAL`, `CAUTION`, `HIGH_RISK`). Legacy aliases
+   kept for backward compatibility. Help text updated. Note: recommendation alerts
+   still require explicit analysis (background alert loop sets `recommendation=None`).
+4. **Fixed: /health budget snapshot** — `runtime_budget_snapshot()` requires
+   `(name, limit)` arguments; the health handler now passes known budget names
+   (`provider_calls`, `telegram_sends`, `openai_calls`) with limits from settings.
+5. **Fixed: _session_window closed-state routing** — removed `"closed"` from the
+   `{"closed", "pre_market"}` condition so late-night closed sessions no longer
+   display as `"pre-market"`. `"closed"` is now handled alongside `"holiday"`/`"weekend"`
+   with a `next_open` return.
+6. **Fixed: /portfolio multi-ticker parser** — `/portfolio AAPL MSFT` now correctly
+   parses both tickers instead of treating `"AAPL MSFT"` as a single symbol.
+   Supports space and comma separators, limited to 10 symbols.
+7. **Fixed: provider budget coverage** — added `_consume_provider_call` before
+   Finnhub `/quote`, Finnhub `/profile2`, and Alpha Vantage fallback calls so all
+   external provider requests count toward the runtime budget.
+8. **Fixed: atomic persistent budget** — `consume_runtime_budget` now acquires
+   `_LOCK` for the persistent path and uses SQLite UPSERT with
+   `SET used = used + amount` for atomic increment instead of read-compare-write.
+9. **Fixed: test network isolation** — added `socket.create_connection` guard in
+   `tests/__init__.py` that blocks external connections unless
+   `ALLOW_LIVE_NETWORK=1` is set. Localhost connections remain allowed.
+10. **Updated: PLAN.md** — this entry.
 
 ## Known Limits
 

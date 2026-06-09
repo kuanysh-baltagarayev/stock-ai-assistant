@@ -577,7 +577,7 @@ def _session_window(local_reference: datetime) -> tuple[datetime | None, datetim
         market_close = local_reference.replace(hour=13, minute=0, second=0, microsecond=0)
 
     # Determine next open time based on session state
-    if session_state in {"holiday", "weekend"}:
+    if session_state in {"holiday", "weekend", "closed"}:
         next_open_date = next_trading_day(local_date)
         next_open = datetime(
             next_open_date.year, next_open_date.month, next_open_date.day,
@@ -585,10 +585,10 @@ def _session_window(local_reference: datetime) -> tuple[datetime | None, datetim
         )
         return next_open, None, session_state
 
-    if session_state in {"closed", "pre_market"}:
+    if session_state == "pre_market":
         return market_open, market_close, "pre-market"
 
-    if session_state in {"after_hours", "closed"}:
+    if session_state == "after_hours":
         next_open_date = next_trading_day(local_date)
         next_open = datetime(
             next_open_date.year, next_open_date.month, next_open_date.day,

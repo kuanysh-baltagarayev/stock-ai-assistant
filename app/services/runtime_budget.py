@@ -37,9 +37,10 @@ def consume_runtime_budget(
         return RuntimeBudgetSnapshot(name=name, limit=None, used=0, remaining=None)
 
     normalized_limit = max(0, int(limit))
-    persistent_used = _read_persistent_usage(name)
-    if persistent_used is None:
-        with _LOCK:
+
+    with _LOCK:
+        persistent_used = _read_persistent_usage(name)
+        if persistent_used is None:
             used = _COUNTERS.get(name, 0)
             if used + normalized_amount > normalized_limit:
                 raise RuntimeBudgetExceeded(
@@ -48,29 +49,22 @@ def consume_runtime_budget(
                 )
             used += normalized_amount
             _COUNTERS[name] = used
-            return RuntimeBudgetSnapshot(
-                name=name,
-                limit=normalized_limit,
-                used=used,
-                remaining=normalized_limit - used,
-            )
+        else:
+            if persistent_used + normalized_amount > normalized_limit:
+                raise RuntimeBudgetExceeded(
+                    f"{name} budget exhausted: used {persistent_used}/{normalized_limit}, "
+                    f"requested {normalized_amount}."
+                )
+            _atomic_increment_persistent_usage(name, normalized_amount)
+            used = persistent_used + normalized_amount
+            _COUNTERS[name] = used
 
-    if persistent_used + normalized_amount > normalized_limit:
-        raise RuntimeBudgetExceeded(
-            f"{name} budget exhausted: used {persistent_used}/{normalized_limit}, "
-            f"requested {normalized_amount}."
+        return RuntimeBudgetSnapshot(
+            name=name,
+            limit=normalized_limit,
+            used=used,
+            remaining=normalized_limit - used,
         )
-
-    used = persistent_used + normalized_amount
-    _write_persistent_usage(name, used)
-    with _LOCK:
-        _COUNTERS[name] = used
-    return RuntimeBudgetSnapshot(
-        name=name,
-        limit=normalized_limit,
-        used=used,
-        remaining=normalized_limit - used,
-    )
 
 
 def runtime_budget_snapshot(name: str, limit: int | None) -> RuntimeBudgetSnapshot:
@@ -78,12 +72,11 @@ def runtime_budget_snapshot(name: str, limit: int | None) -> RuntimeBudgetSnapsh
         return RuntimeBudgetSnapshot(name=name, limit=None, used=0, remaining=None)
 
     normalized_limit = max(0, int(limit))
-    used = _read_persistent_usage(name)
-    if used is None:
-        with _LOCK:
+    with _LOCK:
+        used = _read_persistent_usage(name)
+        if used is None:
             used = _COUNTERS.get(name, 0)
-    else:
-        with _LOCK:
+        else:
             _COUNTERS[name] = used
     return RuntimeBudgetSnapshot(
         name=name,
@@ -101,6 +94,7 @@ def reset_runtime_budgets(*, clear_persistent: bool = True) -> None:
 
 
 def _read_persistent_usage(name: str) -> int | None:
+    """Read persistent usage. Returns None if the database is unavailable."""
     try:
         from app.database import engine
     except Exception:
@@ -117,26 +111,35 @@ def _read_persistent_usage(name: str) -> int | None:
     return int(value) if value is not None else 0
 
 
-def _write_persistent_usage(name: str, used: int) -> None:
+def _atomic_increment_persistent_usage(name: str, amount: int) -> None:
+    """Atomically increment a persistent budget counter.
+
+    Uses SQLite UPSERT with ``used = used + amount`` so the read-check-write
+    is atomic at the SQL level.  The caller already holds ``_LOCK``, which
+    eliminates inter-thread races within the same process.
+    """
     try:
         from app.database import engine
     except Exception:
         return
 
     now = datetime.now(timezone.utc)
-    statement = sqlite_insert(RuntimeBudgetCounter).values(
-        name=name,
-        used=used,
-        updated_at=now,
-    )
-    statement = statement.on_conflict_do_update(
-        index_elements=[RuntimeBudgetCounter.name],
-        set_={"used": used, "updated_at": now},
-    )
-
     try:
         with engine.begin() as connection:
-            connection.execute(statement)
+            # UPSERT: insert 0 on first use, then atomically increment
+            stmt = sqlite_insert(RuntimeBudgetCounter).values(
+                name=name,
+                used=amount,
+                updated_at=now,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[RuntimeBudgetCounter.name],
+                set_={
+                    "used": RuntimeBudgetCounter.used + amount,
+                    "updated_at": now,
+                },
+            )
+            connection.execute(stmt)
     except Exception:
         return
 
