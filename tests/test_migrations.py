@@ -50,10 +50,15 @@ class MigrationTests(unittest.TestCase):
                     "0009_telegram_alert_deduplication",
                     "0010_telegram_alert_rules",
                     "0011_telegram_holdings",
+                    "0012_timezone_and_jobs",
+                    "0013_usage_metrics",
                 ],
             )
             self.assertIn("alert_rules", telegram_columns)
             self.assertIn("holdings", telegram_columns)
+            self.assertIn("timezone", telegram_columns)
+            self.assertIn("scheduled_jobs", inspector.get_table_names())
+            self.assertIn("usage_metrics", inspector.get_table_names())
 
     def test_apply_migrations_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -69,7 +74,7 @@ class MigrationTests(unittest.TestCase):
                     text("SELECT COUNT(*) FROM schema_migrations")
                 ).scalar_one()
 
-            self.assertEqual(revision_count, 11)
+            self.assertEqual(revision_count, 13)
 
     def test_init_db_uses_migrations(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

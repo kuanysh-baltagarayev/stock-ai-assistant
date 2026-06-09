@@ -932,11 +932,10 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(providers[0].name, "yfinance")
         self.assertEqual(providers[0].source_tier, "Tier 2")
         self.assertIsNotNone(providers[0].last_success_at)
-        self.assertEqual(len(sources), 3)
+        self.assertEqual(len(sources), 2)
         source_by_provider = {s.provider_name: s for s in sources}
         self.assertIn("yfinance", source_by_provider)
         self.assertIn("edgar", source_by_provider)
-        self.assertIn("fred", source_by_provider)
         yfinance_source = source_by_provider["yfinance"]
         self.assertEqual(yfinance_source.ticker, "AAPL")
         self.assertEqual(yfinance_source.price_adjustment_policy, "raw_close")

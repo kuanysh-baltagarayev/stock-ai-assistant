@@ -90,7 +90,11 @@ class MacroAwareScoringTests(unittest.TestCase):
         )
         # Should still have a valid recommendation
         valid_recommendations = {
-            "BUY", "HOLD", "SELL", "STRONG BUY", "STRONG SELL", "WATCH", "NEUTRAL"
+            "HIGH_INTEREST",
+            "WATCH",
+            "NEUTRAL",
+            "CAUTION",
+            "HIGH_RISK",
         }
         self.assertIn(result.recommendation, valid_recommendations)
 
