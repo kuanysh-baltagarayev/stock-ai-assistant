@@ -24,6 +24,26 @@ Deployed successfully on the existing Hetzner server for `avtoqyzmet.kz` on
   `/home/stockbot/stock-ai-assistant` tree. Nginx and `/app/frontend-quasar`
   were not changed.
 
+### Update deploy — 2026-06-10 (commit `0cbca7f`)
+
+Shipped the `0cbca7f` bug-fix batch (10 fixes from deployment validation:
+correlation/watchlist/alerts/budget/session-window). Code-only change; tests
+and `PLAN.md` also synced.
+
+- Method: `rsync -rlptz --delete` (local macOS rsync 2.6.9 lacks `--chown`, so
+  ownership was restored afterward with `chown -R stockbot:stockbot`).
+- Excludes: `.env`, `.env.backup*`, `.venv/`, `.git/`, `*.db*`, caches,
+  `.telegram_offset`. The server `.env` (`LLM_PROVIDER=deepseek` + tokens) was
+  left untouched.
+- `requirements.txt` unchanged → no `pip install` needed.
+- Verification passed: `compileall` on Python 3.11 returned `compile_ok`,
+  `systemctl restart` left the service `active`, logs showed
+  `database_initialized` and `telegram_bot_started` (3 tasks), and the Telegram
+  live check returned `status: ok` for `@StockQ1AssistantBot`.
+- Pre-restart logs carried two unrelated transient data-source errors (a
+  yfinance `KeyError: 'exchangeTimezoneName'` on NVDA during a scan, and a
+  one-off Telegram long-poll timeout); post-restart logs were clean.
+
 ---
 
 ## Prerequisites
