@@ -1499,7 +1499,7 @@ class TelegramBotService(
         provider = (getattr(settings, "llm_provider", None) or "openai").lower()
         if provider == "deepseek":
             base_url = getattr(settings, "llm_api_base_url", None) or "https://api.deepseek.com"
-            model = getattr(settings, "openai_model", "deepseek-chat")
+            model = "deepseek-chat"
         else:
             base_url = getattr(settings, "llm_api_base_url", None) or "https://api.openai.com/v1"
             model = getattr(settings, "openai_model", "gpt-4.1-mini")
@@ -1554,7 +1554,11 @@ class TelegramBotService(
             if reply:
                 return reply.strip() + "\n\nℹ️ Ответ сгенерирован LLM, не является рекомендацией."
             return None
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "chat_with_llm_failed",
+                extra={"component": "telegram", "error": str(exc)},
+            )
             return None
 
     def _subscription_for_chat(self, chat_id: int) -> TelegramSubscription | None:

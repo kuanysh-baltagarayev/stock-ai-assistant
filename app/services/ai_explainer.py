@@ -87,7 +87,7 @@ def _llm_explanation(
     # Determine base_url and model based on provider.
     if provider == "deepseek":
         base_url = settings.llm_api_base_url or "https://api.deepseek.com"
-        model = settings.openai_model or "deepseek-chat"
+        model = "deepseek-chat"
     else:
         base_url = settings.llm_api_base_url or "https://api.openai.com/v1"
         model = settings.openai_model or "gpt-4.1-mini"
