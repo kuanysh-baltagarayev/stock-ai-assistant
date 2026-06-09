@@ -13,6 +13,8 @@ class Fundamentals(BaseModel):
     market_cap: float | None = None
     trailing_pe: float | None = None
     forward_pe: float | None = None
+    price_to_sales: float | None = None
+    dividend_yield: float | None = None
     revenue_growth: float | None = None
     profit_margins: float | None = None
     debt_to_equity: float | None = None
@@ -25,6 +27,11 @@ class TechnicalIndicators(BaseModel):
     moving_average_50: float | None = None
     moving_average_200: float | None = None
     rsi: float | None = None
+    macd_line: float | None = None
+    macd_signal: float | None = None
+    macd_histogram: float | None = None
+    volume_avg_21d: float | None = None
+    volume_recent_ratio: float | None = None
     volatility_pct: float | None = None
     max_drawdown_pct: float | None = None
 

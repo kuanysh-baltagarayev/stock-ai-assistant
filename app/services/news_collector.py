@@ -363,12 +363,14 @@ def _fetch_finnhub_market_news(settings: Any, timeout: float, limit: int) -> lis
 
 
 def _fetch_gdelt_news(timeout: float, limit: int) -> list[NewsItem]:
+    # GDELT is very noisy — hard-cap at 3 items and filter by relevance.
+    gdelt_limit = max(1, min(limit, 3))
     query = parse.urlencode(
         {
             "query": "(stock market OR federal reserve OR inflation OR tariff OR economy) sourcelang:eng",
             "mode": "ArtList",
             "format": "json",
-            "maxrecords": str(max(1, min(limit, 25))),
+            "maxrecords": str(min(gdelt_limit, 25)),
             "sort": "DateDesc",
         }
     )
@@ -379,12 +381,24 @@ def _fetch_gdelt_news(timeout: float, limit: int) -> list[NewsItem]:
     if not isinstance(articles, list):
         return []
 
+    # Minimum-keyword filter: skip articles that don't mention at least one
+    # high-impact term in the title (reduces noise from tangential stories).
+    _HIGH_IMPACT_TERMS: tuple[str, ...] = (
+        "stock", "market", "inflation", "tariff", "federal reserve", "fed ",
+        "economy", "trade", "gdp", "recession", "jobs", "unemployment",
+        "consumer", "business", "earnings", "bank", "cpi", "ppi", "rate hike",
+        "rate cut", "yield", "crash", "rally", "dow jones", "s&p", "nasdaq",
+    )
+
     items: list[NewsItem] = []
-    for article in articles:
+    for article in articles[:gdelt_limit]:
         if not isinstance(article, dict):
             continue
         title = str(article.get("title") or "").strip()
         if not title:
+            continue
+        title_lower = title.lower()
+        if not any(term in title_lower for term in _HIGH_IMPACT_TERMS):
             continue
         score = _lexicon_sentiment(title)
         items.append(

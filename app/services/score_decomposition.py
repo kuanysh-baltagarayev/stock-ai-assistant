@@ -20,11 +20,12 @@ def _normalize_data_quality(dq: Any) -> DataQualityFlags:
 _TECHNICAL_REASON_KEYWORDS: tuple[str, ...] = (
     "MA50", "MA200", "RSI", "momentum", "trend",
     "overheating", "overbought", "oversold",
+    "MACD", "crossover", "volume", "uptrend", "distribution",
 )
 
 _VALUATION_REASON_KEYWORDS: tuple[str, ...] = (
     "P/E", "valuation", "revenue", "profit margin",
-    "debt/equity", "dividend",
+    "debt/equity", "dividend", "price-to-sales",
 )
 
 _RISK_REASON_KEYWORDS: tuple[str, ...] = (

@@ -21,8 +21,7 @@ class MacroAwareScoringTests(unittest.TestCase):
         self.fundamentals = Fundamentals(
             company_name="Test Inc.",
             sector="Technology",
-            pe_ratio=20.0,
-            dividend_yield=1.5,
+            trailing_pe=20.0,
             debt_to_equity=0.5,
         )
 
@@ -365,7 +364,7 @@ class PoliticalRegulatoryRiskTests(unittest.TestCase):
         fundamentals = Fundamentals(
             company_name="Test Inc.",
             sector=sector,
-            pe_ratio=20.0,
+            trailing_pe=20.0,
         )
         return technicals, fundamentals
 
@@ -477,8 +476,7 @@ class MarketRegimeAwareScoringTests(unittest.TestCase):
         self.fundamentals = Fundamentals(
             company_name="Test Inc.",
             sector="Technology",
-            pe_ratio=20.0,
-            dividend_yield=1.5,
+            trailing_pe=20.0,
             debt_to_equity=0.5,
         )
 

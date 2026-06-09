@@ -432,6 +432,8 @@ def extract_fundamentals(info: dict[str, Any]) -> Fundamentals:
         market_cap=_to_float(info.get("marketCap")),
         trailing_pe=_to_float(info.get("trailingPE")),
         forward_pe=_to_float(info.get("forwardPE")),
+        price_to_sales=_to_float(info.get("priceToSalesTrailing12Months")),
+        dividend_yield=_to_float(info.get("dividendYield")),
         revenue_growth=_to_float(info.get("revenueGrowth")),
         profit_margins=_to_float(info.get("profitMargins")),
         debt_to_equity=_to_float(info.get("debtToEquity")),

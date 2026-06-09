@@ -151,11 +151,40 @@ def _momentum_score(price: float, technicals: TechnicalIndicators) -> tuple[floa
             score -= 15
             reasons.append("RSI is overbought")
         elif technicals.rsi < 25:
-            score -= 5
-            reasons.append("RSI is deeply oversold")
+            score += 8
+            reasons.append("RSI suggests a deeply oversold bounce may be near")
         elif technicals.rsi < 30:
             score += 5
             reasons.append("RSI may indicate oversold conditions")
+
+    # --- MACD crossover ---
+    if technicals.macd_histogram is not None and technicals.macd_line is not None and technicals.macd_signal is not None:
+        if technicals.macd_histogram > 0 and technicals.macd_line > technicals.macd_signal:
+            score += 10
+            reasons.append("MACD bullish crossover signals upward momentum")
+        elif technicals.macd_histogram < 0 and technicals.macd_line < technicals.macd_signal:
+            score -= 10
+            reasons.append("MACD bearish crossover signals downward momentum")
+
+    # --- Volume confirmation ---
+    if technicals.volume_recent_ratio is not None and technicals.volume_recent_ratio > 1.5:
+        above_ma = False
+        has_ma = False
+        if technicals.moving_average_50 is not None:
+            has_ma = True
+            if price > technicals.moving_average_50:
+                above_ma = True
+        if not has_ma and technicals.moving_average_200 is not None:
+            has_ma = True
+            if price > technicals.moving_average_200:
+                above_ma = True
+        if has_ma and above_ma:
+            score += 5
+            reasons.append("above-average volume confirms the uptrend")
+        elif has_ma and not above_ma:
+            score -= 5
+            reasons.append("above-average volume confirms distribution")
+        # When no MA is available we cannot interpret volume direction.
 
     return _clamp(score), reasons
 
@@ -175,10 +204,10 @@ def _valuation_score(fundamentals: Fundamentals) -> tuple[float, list[str]]:
         elif trailing_pe < 25:
             score += 10
             reasons.append("valuation looks reasonable by trailing P/E")
-        elif trailing_pe > 60:
+        elif trailing_pe >= 60:
             score -= 30
             reasons.append("trailing P/E is very high")
-        elif trailing_pe > 40:
+        elif trailing_pe >= 40:
             score -= 15
             reasons.append("trailing P/E is elevated")
 
@@ -190,6 +219,31 @@ def _valuation_score(fundamentals: Fundamentals) -> tuple[float, list[str]]:
         elif trailing_pe and forward_pe < trailing_pe * 0.8:
             score += 8
             reasons.append("forward P/E is lower than trailing P/E")
+
+    if fundamentals.price_to_sales is not None:
+        if fundamentals.price_to_sales < 1.0:
+            score += 12
+            reasons.append("price-to-sales ratio suggests undervaluation")
+        elif fundamentals.price_to_sales < 3.0:
+            score += 6
+            reasons.append("price-to-sales ratio is reasonable")
+        elif fundamentals.price_to_sales > 15:
+            score -= 15
+            reasons.append("price-to-sales ratio is very high")
+        elif fundamentals.price_to_sales > 10:
+            score -= 8
+            reasons.append("price-to-sales ratio is elevated")
+
+    if fundamentals.dividend_yield is not None:
+        if fundamentals.dividend_yield > 0.04:
+            score += 8
+            reasons.append("dividend yield is attractive")
+        elif fundamentals.dividend_yield > 0.02:
+            score += 4
+            reasons.append("dividend yield is decent")
+        elif fundamentals.dividend_yield <= 0.0:
+            score -= 2
+            reasons.append("no dividend")
 
     if fundamentals.revenue_growth is not None:
         if fundamentals.revenue_growth > 0.15:
@@ -256,10 +310,10 @@ def _risk_score(
         if drawdown_abs < 15:
             score -= 10
             reasons.append("max drawdown is limited")
-        elif drawdown_abs > 50:
+        elif drawdown_abs >= 50:
             score += 25
             reasons.append("max drawdown is severe")
-        elif drawdown_abs > 30:
+        elif drawdown_abs >= 30:
             score += 15
             reasons.append("max drawdown is large")
 

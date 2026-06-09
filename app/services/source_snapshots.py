@@ -55,6 +55,10 @@ def _build_snapshot_payload(market: dict[str, Any]) -> dict[str, Any]:
     if isinstance(history, pd.DataFrame):
         history_rows = _serialize_history(history)
 
+    # Sanitise the info dict: yfinance returns datetime and numpy types that
+    # are not JSON-serializable, which crashes the SQLite JSON column.
+    raw_info = market.get("info") or {}
+
     payload = {
         "ticker": _normalize_symbol(market.get("ticker")),
         "provider_name": market.get("provider_name") or "yfinance",
@@ -73,7 +77,7 @@ def _build_snapshot_payload(market: dict[str, Any]) -> dict[str, Any]:
         "price": _to_float(market.get("price")),
         "data_quality": market.get("data_quality"),
         "fx": market.get("fx"),
-        "info": market.get("info") or {},
+        "info": _sanitize_info(raw_info),
         "history_rows": history_rows,
     }
     payload_extra = market.get("payload_extra")
@@ -96,12 +100,35 @@ def _serialize_history(history: pd.DataFrame) -> list[dict[str, Any]]:
 def _json_safe(value: Any) -> Any:
     if isinstance(value, datetime):
         return _dt_to_iso(value)
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
     if hasattr(value, "item"):
         try:
             return value.item()
         except Exception:
             return str(value)
     return value
+
+
+def _sanitize_info(info: dict[str, Any]) -> dict[str, Any]:
+    """Recursively convert a yfinance info dict to JSON-safe types.
+
+    yfinance returns Python datetime objects and numpy scalars that crash
+    SQLite's JSON column serialiser.  This walks the dict and converts every
+    value to a plain JSON-safe equivalent.
+    """
+    cleaned: dict[str, Any] = {}
+    for key, value in info.items():
+        if isinstance(value, dict):
+            cleaned[str(key)] = _sanitize_info(value)
+        elif isinstance(value, (list, tuple)):
+            cleaned[str(key)] = [
+                _sanitize_info(v) if isinstance(v, dict) else _json_safe(v)
+                for v in value
+            ]
+        else:
+            cleaned[str(key)] = _json_safe(value)
+    return cleaned
 
 
 def _content_hash(payload: dict[str, Any]) -> str:
