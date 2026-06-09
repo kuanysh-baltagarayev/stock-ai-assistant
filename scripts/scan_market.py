@@ -296,12 +296,13 @@ def _recent_snapshot_summary(rows) -> dict[str, object]:
     recommendation_counts = Counter(report["recommendation"] for report in reports)
     source_providers = sorted({report["source_provider"] for report in reports if report["source_provider"] != "n/a"})
     warning_count = sum(1 for row in rows if _recent_data_quality_summary(row) not in {"fresh", "ok", "n/a"})
+    average_final_score = mean(float(report["final_score"]) for report in reports)
 
     return {
         "count": len(rows),
         "unique_tickers": len({report["ticker"] for report in reports}),
         "latest_created_at": max(report["created_at"] for report in reports),
-        "average_final_score": f"{mean(float(report["final_score"]) for report in reports):.2f}",
+        "average_final_score": f"{average_final_score:.2f}",
         "recommendation_counts": dict(sorted(recommendation_counts.items())),
         "source_providers": source_providers,
         "warning_count": warning_count,
