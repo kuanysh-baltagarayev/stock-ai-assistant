@@ -18,32 +18,10 @@ from app.services.correlation import calculate_correlation_matrix, correlation_i
 
 class FormattingMixin:
     def _help_text(self) -> str:
-        return (
-            "Нажимай кнопки под сообщением.\n"
-            "Доступно:\n"
-            "• подписка и отписка\n"
-            "• часовой пояс: /timezone America/New_York\n"
-            "• статус подписки\n"
-            "• coverage matrix по /coverage\n"
-            "• просмотр и редактирование личного списка тикеров\n"
-            "• просмотр и изменение настроек уведомлений\n"
-            "• анализ отдельных тикеров (/analyze AAPL)\n"
-            "• сканирование рынка (/scan mine или /scan AAPL MSFT)\n"
-            "• анализ портфеля (/portfolio)\n"
-            "• backtest accuracy (/backtest AAPL)\n"
-            "• source-backed детали: /why, /sources, /events, /filings, /freshness, /calendar, /risk, /audit\n"
-            "• новости и настрой: /news AAPL (или /news для рынка и макро)\n"
-            "• алерты: /alert AAPL < 300  |  /alert AAPL move 5  |  /alert AAPL high_interest  |  /alerts  |  /alert_clear\n"
-            "• портфель P&L: /buy AAPL 10 175.50  |  /sell AAPL  |  /holdings\n"
-            "• график: /chart AAPL (цена + MA50/MA200)\n"
-            "• healthcheck: /ping\n"
-        )
+        return self._t("help")
 
     def _welcome_text(self, is_first_use: bool = False) -> str:
-        text = (
-            "Привет. Я бот для анализа акций.\n"
-            "Нажимай кнопки под сообщением, чтобы не вводить команды вручную."
-        )
+        text = self._t("welcome")
         if is_first_use:
             text = f"{text}\n\n{self._first_use_disclaimer()}"
         return text

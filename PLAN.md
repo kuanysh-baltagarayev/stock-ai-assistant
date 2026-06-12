@@ -45,6 +45,8 @@ Implemented:
 - Normalized market-data provider contract plus offline fixture loader for future collectors.
 - Session-aware market analysis with exchange-hours freshness notes for U.S. equities.
 - Telegram bot service and entrypoint.
+- Per-chat Telegram language selection on first use, persisted in SQLite and
+  applied to keyboard/help/disclaimer text plus OpenAI/rule-based explanations.
 - CLI scanner with default watchlist, custom tickers, and JSON output.
 - live smoke script for real market data checks without OpenAI or Telegram.
 - Per-chat Telegram watchlists with `/watchlist`, `/add`, `/remove`, and `/scan mine`.
@@ -99,6 +101,10 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-12: implemented per-chat Telegram language selection for Russian,
+  English, and Kazakh. The selected language is stored on the subscription and
+  passed into `analyze_ticker`, OpenAI explanations, and rule-based fallback
+  explanations.
 - 2026-06-12: `scripts/check.sh` passed after tightening Telegram free-form
   LLM routing: off-topic messages no longer call LLM, in-scope LLM failures no
   longer report a scope error, ticker extraction supports broader valid symbols

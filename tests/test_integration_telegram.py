@@ -62,6 +62,7 @@ class TelegramIntegrationTest(unittest.TestCase):
                 chat_id=12345,
                 is_active=True,
                 watchlist_symbols=[],
+                language="ru",
             )
             db.add(sub)
             db.commit()
@@ -88,6 +89,42 @@ class TelegramIntegrationTest(unittest.TestCase):
         self.bot._send_message.assert_called_once()
         args = self.bot._send_message.call_args[0]
         self.assertIn("Привет", args[1])
+
+    def test_start_command_prompts_for_language_on_first_visit(self):
+        self._clean_db()
+
+        self._run(self._make_update("/start"))
+
+        self.bot._send_message.assert_called_once()
+        args = self.bot._send_message.call_args[0]
+        kwargs = self.bot._send_message.call_args.kwargs
+        self.assertIn("Выбери язык", args[1])
+        keyboard = kwargs["reply_markup"]["keyboard"]
+        self.assertEqual(keyboard[0][0]["text"], "Русский")
+
+    def test_language_selection_persists_and_localizes_help(self):
+        self._run(self._make_update("English"))
+
+        self.bot._send_message.assert_called_once()
+        args = self.bot._send_message.call_args[0]
+        kwargs = self.bot._send_message.call_args.kwargs
+        self.assertIn("Language saved", args[1])
+        keyboard_text = " ".join(
+            button["text"] for row in kwargs["reply_markup"]["keyboard"] for button in row
+        )
+        self.assertIn("Scan market", keyboard_text)
+
+        db = SessionLocal()
+        try:
+            sub = db.query(TelegramSubscription).filter_by(chat_id=12345).one()
+            self.assertEqual(sub.language, "en")
+        finally:
+            db.close()
+
+        self.bot._send_message.reset_mock()
+        self._run(self._make_update("/help"))
+        help_text = self.bot._send_message.call_args[0][1]
+        self.assertIn("Available", help_text)
 
     def test_help_command(self):
         self._run(self._make_update("/help"))

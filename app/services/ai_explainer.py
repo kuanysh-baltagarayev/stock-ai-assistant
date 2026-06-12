@@ -5,27 +5,54 @@ from app.config import get_settings
 from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_budget
 
 
-def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str]) -> str:
+def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str], language: str = "ru") -> str:
     settings = get_settings()
     api_key = settings.deepseek_api_key or settings.openai_api_key
     if not api_key:
-        return rule_based_explanation(analysis_payload, reasons)
+        return rule_based_explanation(analysis_payload, reasons, language=language)
 
     try:
         consume_runtime_budget("openai_calls", settings.openai_call_budget)
-        return _llm_explanation(analysis_payload, reasons, api_key=api_key)
+        return _llm_explanation(analysis_payload, reasons, api_key=api_key, language=language)
     except RuntimeBudgetExceeded:
-        fallback = rule_based_explanation(analysis_payload, reasons)
-        return f"{fallback} Лимит LLM-вызовов исчерпан, поэтому использован rule-based вариант."
+        lang = _normalize_language(language)
+        fallback = rule_based_explanation(analysis_payload, reasons, language=language)
+        return f"{fallback} {_fallback_note(lang, 'budget')}"
     except Exception:
-        fallback = rule_based_explanation(analysis_payload, reasons)
-        return f"{fallback} Объяснение от LLM недоступно, поэтому использован rule-based вариант."
+        lang = _normalize_language(language)
+        fallback = rule_based_explanation(analysis_payload, reasons, language=language)
+        return f"{fallback} {_fallback_note(lang, 'unavailable')}"
 
 
-def rule_based_explanation(analysis_payload: dict[str, Any], reasons: list[str]) -> str:
+def rule_based_explanation(analysis_payload: dict[str, Any], reasons: list[str], language: str = "ru") -> str:
     ticker = analysis_payload["ticker"]
     final_score = analysis_payload["scores"]["final_score"]
     price = analysis_payload.get("price")
+    language = _normalize_language(language)
+    if language == "en":
+        reason_text_en = "; ".join(reasons[:3]) if reasons else "not enough signals for a conclusion"
+        sector = analysis_payload.get("fundamentals", {}).get("sector")
+        lines = [
+            f"📊 {ticker} — {_score_desc_en(final_score)}.",
+            f"{f'Price around ${price:.2f}. ' if price else ''}Overall score {final_score:.0f}/100 — {_score_meaning_en(final_score)}.",
+            f"What mattered: {reason_text_en}.",
+        ]
+        if sector:
+            lines.append(f"Sector: {sector}.")
+        lines.append("ℹ️ This is a research signal, not financial advice.")
+        return " ".join(lines)
+    if language == "kk":
+        reason_text_kk = "; ".join(reasons[:3]) if reasons else "қорытынды жасауға сигнал жеткіліксіз"
+        sector = analysis_payload.get("fundamentals", {}).get("sector")
+        lines = [
+            f"📊 {ticker} — {_score_desc_kk(final_score)}.",
+            f"{f'Баға шамамен ${price:.2f}. ' if price else ''}Жалпы баға {final_score:.0f}/100 — {_score_meaning_kk(final_score)}.",
+            f"Не әсер етті: {reason_text_kk}.",
+        ]
+        if sector:
+            lines.append(f"Сектор: {sector}.")
+        lines.append("ℹ️ Бұл зерттеу сигналы, қаржылық кеңес емес.")
+        return " ".join(lines)
 
     # Score interpretation — conversational, no marketing.
     if final_score >= 80:
@@ -74,10 +101,86 @@ def _score_meaning(score: float) -> str:
     return "преобладают негативные факторы — стоит быть осторожным"
 
 
+def _normalize_language(language: str | None) -> str:
+    lang = (language or "ru").strip().lower()
+    if lang.startswith("en"):
+        return "en"
+    if lang.startswith(("kk", "kz", "kaz")):
+        return "kk"
+    return "ru"
+
+
+def _score_desc_en(score: float) -> str:
+    if score >= 80:
+        return "looks interesting"
+    if score >= 60:
+        return "looks reasonably constructive"
+    if score >= 40:
+        return "has a mixed setup"
+    if score >= 20:
+        return "has reasons for caution"
+    return "looks risky"
+
+
+def _score_meaning_en(score: float) -> str:
+    if score >= 85:
+        return "several metrics stand out"
+    if score >= 70:
+        return "there are multiple positive signals"
+    if score >= 55:
+        return "the picture is mixed"
+    if score >= 35:
+        return "some factors are concerning"
+    if score >= 15:
+        return "negative signals outweigh positives"
+    return "negative factors dominate"
+
+
+def _score_desc_kk(score: float) -> str:
+    if score >= 80:
+        return "қызықты көрінеді"
+    if score >= 60:
+        return "жаман емес көрінеді"
+    if score >= 40:
+        return "аралас көрініс"
+    if score >= 20:
+        return "сақтық қажет"
+    return "тәуекелі жоғары көрінеді"
+
+
+def _score_meaning_kk(score: float) -> str:
+    if score >= 85:
+        return "бірнеше көрсеткіш назар аударады"
+    if score >= 70:
+        return "бірнеше оң сигнал бар"
+    if score >= 55:
+        return "көрініс аралас"
+    if score >= 35:
+        return "алаңдататын факторлар бар"
+    if score >= 15:
+        return "теріс сигналдар басым"
+    return "теріс факторлар басым"
+
+
+def _fallback_note(language: str, reason: str) -> str:
+    if language == "en":
+        if reason == "budget":
+            return "The LLM call budget is exhausted, so the rule-based version was used."
+        return "The LLM explanation is unavailable, so the rule-based version was used."
+    if language == "kk":
+        if reason == "budget":
+            return "LLM шақыру лимиті таусылды, сондықтан rule-based нұсқа қолданылды."
+        return "LLM түсіндірмесі қолжетімсіз, сондықтан rule-based нұсқа қолданылды."
+    if reason == "budget":
+        return "Лимит LLM-вызовов исчерпан, поэтому использован rule-based вариант."
+    return "Объяснение от LLM недоступно, поэтому использован rule-based вариант."
+
+
 def _llm_explanation(
     analysis_payload: dict[str, Any],
     reasons: list[str],
     api_key: str,
+    language: str = "ru",
 ) -> str:
     from openai import OpenAI
 
@@ -93,6 +196,12 @@ def _llm_explanation(
         model = settings.openai_model or "gpt-4.1-mini"
 
     client = OpenAI(api_key=api_key, base_url=base_url)
+    language = _normalize_language(language)
+    language_instruction = {
+        "ru": "Пишите на русском языке.",
+        "en": "Write in English.",
+        "kk": "Қазақ тілінде жазыңыз.",
+    }[language]
 
     compact_payload = {
         "ticker": analysis_payload["ticker"],
@@ -114,7 +223,8 @@ def _llm_explanation(
                 "content": (
                     "Вы объясняете результаты количественного анализа акций для частного пользователя. "
                     "Используйте только JSON-данные, предоставленные приложением. Не выдумывайте, "
-                    "не оценивайте и не добавляйте числа от себя. Пишите кратко. Укажите, что это "
+                    "не оценивайте и не добавляйте числа от себя. Пишите кратко. "
+                    f"{language_instruction} Укажите, что это "
                     "аналитический сигнал, а не финансовый совет."
                 ),
             },
@@ -129,7 +239,7 @@ def _llm_explanation(
     )
     text = response.choices[0].message.content if response.choices else None
     if not text:
-        return rule_based_explanation(analysis_payload, reasons)
+        return rule_based_explanation(analysis_payload, reasons, language=language)
     return text.strip()
 
 

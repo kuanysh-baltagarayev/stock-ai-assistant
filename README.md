@@ -17,6 +17,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - `GET /providers` and `GET /providers/{name}` expose provider registry entries and health.
 - CLI scanner for a default watchlist, custom tickers, JSON output, and recent-analysis reports.
 - Telegram bot with `/analyze`, `/scan`, watchlists, preferences, source-backed detail commands, and session-aware scheduled digests.
+- Telegram asks for interface language on first use, persists the per-chat language, and uses it for Telegram UI text plus OpenAI/rule-based analysis explanations.
 - Telegram alert preferences include quiet hours, daily caps, minimum confidence, and market-hours-only mode via `/quiet`, `/cap`, `/confidence`, and `/markethours`.
 - Telegram `/coverage` command and API `/coverage` endpoint for supported markets, asset classes, source tiers, calendars, currencies, and known gaps.
 - Telegram analysis responses include inline follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
@@ -151,6 +152,8 @@ TELEGRAM_DIGEST_INTERVAL_MINUTES=1440
 Set `TELEGRAM_ALLOWED_CHAT_IDS` to a comma-separated list of chat IDs to restrict the bot to approved chats. Leave it empty to allow any chat that can reach the bot.
 
 The bot stores subscriptions, watchlists, and alert preferences in SQLite. If `TELEGRAM_ENABLED=1` and `TELEGRAM_BOT_TOKEN` are set, it starts automatically when the app runs.
+
+On first `/start`, the bot asks for a language. The selected language is stored per chat and is used for the main Telegram keyboard, help/disclaimer text, and analysis explanations sent through OpenAI or the rule-based fallback.
 
 The default SQLite database path is resolved relative to the project root, so the file stays in this repository even if you launch `uvicorn` from another directory.
 

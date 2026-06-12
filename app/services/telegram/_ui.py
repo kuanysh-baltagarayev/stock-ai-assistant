@@ -20,43 +20,43 @@ class UiMixin:
         return "Доступ к этому боту временно ограничен."
 
     def _button_subscribe(self) -> str:
-        return "Подписаться"
+        return self._t("button_subscribe")
 
     def _button_unsubscribe(self) -> str:
-        return "Отписаться"
+        return self._t("button_unsubscribe")
 
     def _button_status(self) -> str:
-        return "Статус"
+        return self._t("button_status")
 
     def _button_scan(self) -> str:
-        return "Сканировать рынок"
+        return self._t("button_scan")
 
     def _button_help(self) -> str:
-        return "Помощь"
+        return self._t("button_help")
 
     def _button_choose_ticker(self) -> str:
-        return "Выбрать тикер"
+        return self._t("button_choose_ticker")
 
     def _button_watchlist(self) -> str:
-        return "Мой список"
+        return self._t("button_watchlist")
 
     def _button_preferences(self) -> str:
-        return "Настройки"
+        return self._t("button_preferences")
 
     def _button_back(self) -> str:
-        return "Назад"
+        return self._t("button_back")
 
     def _button_chart(self) -> str:
-        return "График"
+        return self._t("button_chart")
 
     def _button_portfolio(self) -> str:
-        return "Портфель"
+        return self._t("button_portfolio")
 
     def _button_alerts(self) -> str:
-        return "Алерты"
+        return self._t("button_alerts")
 
     def _button_news(self) -> str:
-        return "Новости"
+        return self._t("button_news")
 
     def _ticker_buttons(self) -> list[str]:
         return [f"Анализ {ticker}" for ticker in self._configured_tickers()]
@@ -88,6 +88,15 @@ class UiMixin:
             "keyboard": keyboard,
             "resize_keyboard": True,
             "is_persistent": True,
+        }
+
+    def _language_keyboard(self) -> dict[str, Any]:
+        return {
+            "keyboard": [
+                [{"text": "Русский"}, {"text": "English"}, {"text": "Қазақша"}],
+            ],
+            "resize_keyboard": True,
+            "one_time_keyboard": True,
         }
 
     def _ticker_keyboard(self) -> dict[str, Any]:

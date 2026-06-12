@@ -1119,6 +1119,37 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("Лимит LLM-вызовов исчерпан", text)
         llm_mock.assert_not_called()
 
+    def test_openai_budget_exhaustion_preserves_selected_language(self) -> None:
+        payload = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "fundamentals": {},
+            "technicals": {},
+            "scores": {"final_score": 62.5},
+            "recommendation": "NEUTRAL",
+            "short_reason": "Neutral: sample reason.",
+        }
+        settings = SimpleNamespace(
+            openai_api_key="sk-test",
+            openai_model="gpt-4.1-mini",
+            openai_call_budget=0,
+            deepseek_api_key=None,
+            llm_provider="openai",
+            llm_api_base_url=None,
+        )
+
+        with (
+            patch("app.services.ai_explainer.get_settings", return_value=settings),
+            patch("app.services.ai_explainer._llm_explanation") as llm_mock,
+        ):
+            text = explain_analysis(payload, ["price is above MA50"], language="en")
+
+        self.assertIn("Overall score", text)
+        self.assertIn("The LLM call budget is exhausted", text)
+        self.assertNotIn("Лимит LLM", text)
+        llm_mock.assert_not_called()
+
 
 class ConfigurationTests(unittest.TestCase):
     def tearDown(self) -> None:

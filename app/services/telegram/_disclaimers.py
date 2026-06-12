@@ -7,10 +7,7 @@ from app.services.research_labels import research_label_to_russian
 
 class DisclaimerMixin:
     def _first_use_disclaimer(self) -> str:
-        return (
-            "Важно: это исследовательский инструмент, а не финансовый совет. "
-            "Сигналы могут быть неполными, задержанными или устаревшими."
-        )
+        return self._t("first_use_disclaimer")
 
     def _analysis_disclaimer(self, analysis: Any) -> str:
         notes: list[str] = []

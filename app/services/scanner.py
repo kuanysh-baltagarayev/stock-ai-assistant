@@ -66,6 +66,7 @@ def analyze_ticker(
     include_news: bool = True,
     fred_macro_context: FredMacroContext | None = None,
     market_regime: MarketRegime | None = None,
+    language: str = "ru",
 ) -> AnalyzeResponse:
     logger.debug("analysis_started", extra={"component": "scanner", "ticker": ticker})
     market = get_market_data(ticker, db=db)
@@ -129,9 +130,9 @@ def analyze_ticker(
     }
 
     if use_ai_explanation:
-        explanation = explain_analysis(_json_ready(payload), scoring.reasons)
+        explanation = explain_analysis(_json_ready(payload), scoring.reasons, language=language)
     else:
-        explanation = rule_based_explanation(_json_ready(payload), scoring.reasons)
+        explanation = rule_based_explanation(_json_ready(payload), scoring.reasons, language=language)
 
     operation_notes = _build_operation_notes(
         market=market,

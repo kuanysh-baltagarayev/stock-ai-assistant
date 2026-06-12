@@ -165,6 +165,18 @@ def _upgrade_0013_usage_metrics(connection: Connection) -> None:
     )
 
 
+def _upgrade_0014_telegram_language(connection: Connection) -> None:
+    columns = {
+        column["name"]
+        for column in inspect(connection).get_columns("telegram_subscriptions")
+    }
+    if "language" in columns:
+        return
+    connection.execute(
+        text("ALTER TABLE telegram_subscriptions ADD COLUMN language VARCHAR(8)")
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         revision="0001_initial_schema",
@@ -230,6 +242,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         revision="0013_usage_metrics",
         description="Add usage_metrics table for product validation.",
         upgrade=_upgrade_0013_usage_metrics,
+    ),
+    Migration(
+        revision="0014_telegram_language",
+        description="Add per-chat Telegram language preference.",
+        upgrade=_upgrade_0014_telegram_language,
     ),
 )
 

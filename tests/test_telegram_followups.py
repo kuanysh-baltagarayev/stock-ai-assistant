@@ -44,7 +44,13 @@ class TelegramFollowupButtonTests(unittest.IsolatedAsyncioTestCase):
         self.engine.dispose()
         self._tmpdir.cleanup()
 
-    def _fake_analyze_ticker(self, ticker: str, db=None, use_ai_explanation: bool = True) -> SimpleNamespace:
+    def _fake_analyze_ticker(
+        self,
+        ticker: str,
+        db=None,
+        use_ai_explanation: bool = True,
+        language: str = "ru",
+    ) -> SimpleNamespace:
         if db is not None:
             db.add(
                 AnalysisSnapshot(
