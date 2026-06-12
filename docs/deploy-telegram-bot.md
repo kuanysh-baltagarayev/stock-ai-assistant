@@ -60,6 +60,24 @@ ticker extraction now supports broader valid symbols with stop-word filtering.
   Telegram live check returned `status: ok` for `@StockQ1AssistantBot`, and
   `avtoqyzmet.kz` still returned `HTTP/2 200`.
 
+### Update deploy — 2026-06-13 (commit `16a942e`)
+
+Shipped full localization of the Telegram analysis and scan reports: verdict
+labels, field headings, data-quality warnings, source/briefing flags, and
+disclaimers now render in the chat's selected language (ru/en/kk) instead of
+always Russian, and `_translate_text` no longer force-translates English/Kazakh
+output back into Russian.
+
+- Method: `rsync -rlptz --delete` with the standard production excludes (`.env`,
+  `.venv/`, `.git/`, `*.db*`, caches, `.telegram_offset`, plus `.coverage`).
+  Ownership restored afterward with `chown -R stockbot:staff`.
+- `requirements.txt` unchanged, so no server `pip install` was required.
+- Verification passed: server `compileall` returned `COMPILE_OK` on Python
+  3.10, `stockbot-telegram.service` restarted to `active` and `enabled`,
+  post-restart logs showed `database_initialized` and `telegram_bot_started`
+  (3 tasks) with no errors, and the Telegram live check returned `status: True`
+  for `@StockQ1AssistantBot`.
+
 ---
 
 ## Prerequisites
