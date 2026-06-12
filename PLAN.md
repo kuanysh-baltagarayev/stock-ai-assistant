@@ -99,6 +99,11 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-12: `scripts/check.sh` passed after tightening Telegram free-form
+  LLM routing: off-topic messages no longer call LLM, in-scope LLM failures no
+  longer report a scope error, ticker extraction supports broader valid symbols
+  with stop-word filtering, and Telegram long-poll transient network errors are
+  logged as recoverable warnings. The suite passed with 571 tests.
 - 2026-06-10: `ruff`, `compileall`, and full fast-test suite (555 tests) passed
   after applying a batch of 10 bug fixes: correlation dict contract, Telegram
   watchlist field, recommendation alert labels, /health budget snapshots,

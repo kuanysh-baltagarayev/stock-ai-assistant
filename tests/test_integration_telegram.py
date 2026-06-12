@@ -131,6 +131,45 @@ class TelegramIntegrationTest(unittest.TestCase):
         args = self.bot._send_message.call_args[0]
         self.assertIn("Использование", args[1])
 
+    def test_unknown_off_topic_message_does_not_call_llm(self):
+        self.bot.settings.openai_api_key = "sk-test"
+        self.bot._chat_with_llm = AsyncMock(return_value="Should not be used")  # type: ignore[method-assign]
+
+        self._run(self._make_update("напиши рецепт блинов"))
+
+        self.bot._chat_with_llm.assert_not_called()
+        self.bot._send_message.assert_called_once()
+        args = self.bot._send_message.call_args[0]
+        self.assertIn("только по анализу акций", args[1])
+
+    def test_unknown_market_topic_message_calls_llm(self):
+        self.bot.settings.openai_api_key = "sk-test"
+        self.bot._chat_with_llm = AsyncMock(return_value="AAPL выглядит нейтрально.")  # type: ignore[method-assign]
+
+        self._run(self._make_update("что думаешь про AAPL сейчас?"))
+
+        self.bot._chat_with_llm.assert_awaited_once()
+        self.assertEqual(self.bot._send_message.call_count, 2)
+        final_message = self.bot._send_message.call_args[0][1]
+        self.assertIn("AAPL выглядит нейтрально", final_message)
+
+    def test_unknown_market_topic_llm_failure_shows_commands_not_scope_error(self):
+        self.bot.settings.openai_api_key = "sk-test"
+        self.bot._chat_with_llm = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+        self._run(self._make_update("что думаешь про IBM сейчас?"))
+
+        self.bot._chat_with_llm.assert_awaited_once()
+        self.assertEqual(self.bot._send_message.call_count, 2)
+        final_message = self.bot._send_message.call_args[0][1]
+        self.assertIn("Я понимаю команды", final_message)
+        self.assertNotIn("только по анализу акций", final_message)
+
+    def test_app_topic_detects_valid_tickers_outside_default_examples(self):
+        self.assertTrue(self.bot._is_app_topic_message("что думаешь про IBM?"))
+        self.assertEqual(self.bot._extract_ticker_mentions("IBM и BRK.B"), ["IBM", "BRK.B"])
+        self.assertEqual(self.bot._extract_ticker_mentions("WHAT ABOUT IBM IS GOOD NOW"), ["IBM"])
+
     def test_watchlist_command(self):
         self._run(self._make_update("/watchlist"))
         self.bot._send_message.assert_called_once()

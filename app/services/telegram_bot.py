@@ -36,6 +36,7 @@ from app.services.runtime_budget import (
 )
 from app.services.exchange_calendar import get_session_state
 from app.services.scanner import analyze_ticker, scan_tickers
+from app.services.market_data import InvalidTickerError, normalize_ticker
 from app.services.market_hours import should_defer_alert, time_until_market_open
 from app.services.telegram._ui import UiMixin
 from app.services.telegram._parsing import ParsingMixin
@@ -44,6 +45,72 @@ from app.services.telegram._disclaimers import DisclaimerMixin
 
 
 logger = logging.getLogger(__name__)
+
+_LLM_TICKER_STOPWORDS = {
+    "A",
+    "ABOUT",
+    "I",
+    "AI",
+    "AM",
+    "AN",
+    "AND",
+    "ARE",
+    "AS",
+    "AT",
+    "BUY",
+    "CAN",
+    "DO",
+    "FOR",
+    "FROM",
+    "GO",
+    "GOOD",
+    "HOW",
+    "IN",
+    "IS",
+    "IT",
+    "ME",
+    "MY",
+    "NO",
+    "NOW",
+    "OF",
+    "ON",
+    "OR",
+    "SELL",
+    "THE",
+    "THIS",
+    "TO",
+    "UP",
+    "US",
+    "VS",
+    "WHAT",
+    "WHY",
+    "WITH",
+}
+
+
+def _is_transient_network_error(exc: BaseException) -> bool:
+    """Return True for routine long-poll timeouts / network hiccups.
+
+    ``_request_json`` wraps low-level failures in ``RuntimeError`` while chaining
+    the original via ``raise ... from exc``, so we walk the cause chain looking
+    for a timeout or a generic ``URLError`` (DNS/connection reset). HTTP errors
+    and other failures are treated as real problems worth a traceback.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError):
+            return True
+        if isinstance(current, urlerror.URLError) and not isinstance(
+            current, urlerror.HTTPError
+        ):
+            reason = getattr(current, "reason", None)
+            if isinstance(reason, TimeoutError) or "timed out" in str(reason).lower():
+                return True
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 class TelegramBotService(
@@ -147,8 +214,16 @@ class TelegramBotService(
                     self._save_offset()
             except asyncio.CancelledError:
                 raise
-            except Exception:  # pragma: no cover - resilience path
-                logger.exception("Telegram polling loop failed")
+            except Exception as exc:  # pragma: no cover - resilience path
+                if _is_transient_network_error(exc):
+                    # Long-poll getUpdates routinely times out on a quiet chat;
+                    # the loop recovers on the next iteration, so this is expected.
+                    logger.warning(
+                        "Telegram polling loop timed out, retrying",
+                        extra={"component": "telegram", "error": str(exc)},
+                    )
+                else:
+                    logger.exception("Telegram polling loop failed")
                 await asyncio.sleep(5)
 
     async def _digest_loop(self) -> None:
@@ -999,7 +1074,8 @@ class TelegramBotService(
         # Free-form chat via LLM (DeepSeek/OpenAI) for unrecognized commands.
         if action == "unknown":
             api_key = getattr(self.settings, "deepseek_api_key", None) or getattr(self.settings, "openai_api_key", None)
-            if api_key:
+            is_app_topic = self._is_app_topic_message(text)
+            if api_key and is_app_topic:
                 chat_id_int = int(chat_id)
                 await self._send_message(
                     chat_id_int, "🤔 Дай подумать...", reply_markup=self._main_keyboard(),
@@ -1008,6 +1084,13 @@ class TelegramBotService(
                 if reply:
                     await self._send_message(chat_id_int, reply, reply_markup=self._main_keyboard())
                     return
+            if api_key and not is_app_topic:
+                await self._send_message(
+                    int(chat_id),
+                    self._out_of_scope_text(),
+                    reply_markup=self._main_keyboard(),
+                )
+                return
             # No LLM key or LLM failed — show helpful message.
             await self._send_message(
                 int(chat_id),
@@ -1024,6 +1107,84 @@ class TelegramBotService(
             int(chat_id),
             "Используй кнопки под сообщением.",
             reply_markup=self._main_keyboard(),
+        )
+
+    def _is_app_topic_message(self, text: str) -> bool:
+        normalized = text.strip().lower()
+        if not normalized:
+            return False
+
+        if self._extract_ticker_mentions(text):
+            return True
+
+        topic_keywords = {
+            "stock",
+            "stocks",
+            "market",
+            "markets",
+            "ticker",
+            "tickers",
+            "portfolio",
+            "watchlist",
+            "alert",
+            "alerts",
+            "scan",
+            "risk",
+            "price",
+            "earnings",
+            "dividend",
+            "filing",
+            "filings",
+            "news",
+            "analysis",
+            "analyze",
+            "score",
+            "valuation",
+            "momentum",
+            "technical",
+            "fundamental",
+            "акци",
+            "рын",
+            "тикер",
+            "портфел",
+            "вотчлист",
+            "алерт",
+            "скан",
+            "риск",
+            "цен",
+            "отчет",
+            "дивиденд",
+            "новост",
+            "анализ",
+            "оценк",
+            "мультипликатор",
+            "доходност",
+        }
+        return any(keyword in normalized for keyword in topic_keywords)
+
+    def _extract_ticker_mentions(self, text: str) -> list[str]:
+        import re
+
+        candidates = re.findall(r"\b[A-Z]{1,5}(?:[.-][A-Z]{1,2})?\b", text.upper())
+        tickers: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if candidate in _LLM_TICKER_STOPWORDS:
+                continue
+            try:
+                ticker = normalize_ticker(candidate)
+            except InvalidTickerError:
+                continue
+            if ticker not in seen:
+                tickers.append(ticker)
+                seen.add(ticker)
+        return tickers
+
+    def _out_of_scope_text(self) -> str:
+        return (
+            "Я отвечаю только по анализу акций, рынку, портфелю, watchlist, "
+            "алертам и командам этого приложения.\n"
+            "Примеры: /analyze AAPL, /scan mine, /news AAPL, /risk NVDA."
         )
 
     def _get_updates(self, offset: int, timeout_seconds: int) -> list[dict[str, Any]]:
@@ -1516,13 +1677,8 @@ class TelegramBotService(
 
         client = OpenAI(api_key=api_key, base_url=base_url)
 
-        # Detect tickers in the message
-        import re
-        ticker_candidates = re.findall(r"[A-Z]{1,5}", text.upper())
-        known_tickers = [t for t in ticker_candidates if t in {"AAPL","MSFT","NVDA","TSLA","AMD","AMZN","GOOGL","META","GOOG","NFLX","SPY","QQQ","VIX"}]
-
         context_parts = []
-        for ticker in known_tickers[:3]:
+        for ticker in self._extract_ticker_mentions(text)[:3]:
             try:
                 analysis = await self._run_blocking_with_timeout(
                     self._analyze_and_persist, ticker, timeout=60.0,
