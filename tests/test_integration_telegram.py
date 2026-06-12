@@ -202,6 +202,18 @@ class TelegramIntegrationTest(unittest.TestCase):
         self.assertIn("Я понимаю команды", final_message)
         self.assertNotIn("только по анализу акций", final_message)
 
+    def test_llm_budget_message_uses_saved_language(self):
+        self.bot.settings.openai_api_key = "sk-test"
+        self.bot.settings.openai_call_budget = 0
+        self._run(self._make_update("English"))
+        self.bot._send_message.reset_mock()
+
+        text = asyncio.run(self.bot._chat_with_llm(12345, "market outlook?"))
+
+        self.assertIsNotNone(text)
+        self.assertIn("LLM request budget is exhausted", text)
+        self.assertNotIn("Лимит LLM", text)
+
     def test_app_topic_detects_valid_tickers_outside_default_examples(self):
         self.assertTrue(self.bot._is_app_topic_message("что думаешь про IBM?"))
         self.assertEqual(self.bot._extract_ticker_mentions("IBM и BRK.B"), ["IBM", "BRK.B"])

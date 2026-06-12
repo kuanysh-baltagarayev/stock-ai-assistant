@@ -245,3 +245,32 @@ class TelegramFollowupButtonTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(send_mock.await_count, 1)
         self.assertIn("ограничен", send_mock.await_args_list[0].args[1].lower())
         self.assertIsNone(restricted_service._subscription_for_chat(101))
+
+    async def test_callback_queries_use_saved_language_for_keyboard(self) -> None:
+        self.service._upsert_subscription(
+            101,
+            username="alice",
+            active=True,
+            preferences={"language": "en"},
+        )
+        send_mock = AsyncMock()
+        answer_mock = AsyncMock()
+
+        with (
+            patch.object(self.service, "_send_message", send_mock),
+            patch.object(self.service, "_answer_callback_query", answer_mock),
+        ):
+            await self.service._handle_update(
+                {
+                    "callback_query": {
+                        "id": "cb-lang",
+                        "data": "bad-data",
+                        "message": {"chat": {"id": 101}},
+                        "from": {"username": "alice"},
+                    }
+                }
+            )
+
+        keyboard = send_mock.await_args.kwargs["reply_markup"]["keyboard"]
+        keyboard_text = " ".join(button["text"] for row in keyboard for button in row)
+        self.assertIn("Scan market", keyboard_text)

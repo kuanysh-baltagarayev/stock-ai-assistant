@@ -101,6 +101,11 @@ Implemented:
 
 ## Latest Verification
 
+- 2026-06-12: `scripts/check.sh` passed after fixing language propagation bugs:
+  Telegram scans/digests now pass the saved per-chat language into
+  `scan_tickers`, callback rendering resets language from the chat
+  subscription, localized LLM fallback messages are recognized in operation
+  notes, and LLM budget/context fallback text uses the selected language.
 - 2026-06-12: implemented per-chat Telegram language selection for Russian,
   English, and Kazakh. The selected language is stored on the subscription and
   passed into `analyze_ticker`, OpenAI explanations, and rule-based fallback

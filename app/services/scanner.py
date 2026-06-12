@@ -244,7 +244,7 @@ def _build_news(
     return _build_news_payload(ctx)
 
 
-def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
+def scan_tickers(tickers: list[str], db: Session | None = None, language: str = "ru") -> ScanResponse:
     results: list[ScanResult] = []
     errors: list[ScanError] = []
     notes: list[str] = []
@@ -269,6 +269,7 @@ def scan_tickers(tickers: list[str], db: Session | None = None) -> ScanResponse:
                 include_news=False,
                 fred_macro_context=fred_macro,
                 market_regime=regime,
+                language=language,
             )
         except MarketDataError as exc:
             errors.append(ScanError(ticker=ticker, error=str(exc)))
@@ -713,12 +714,30 @@ def _build_operation_notes(
         api_key = getattr(settings, "deepseek_api_key", None) or getattr(settings, "openai_api_key", None)
         if not api_key:
             notes.append("LLM explanation is disabled (neither OPENAI_API_KEY nor DEEPSEEK_API_KEY set), so a rule-based explanation was used.")
-        elif "Лимит LLM-вызовов исчерпан" in explanation:
+        elif _llm_budget_exhausted_explanation(explanation):
             notes.append("LLM call budget was exhausted, so a rule-based explanation was used.")
-        elif "Объяснение от LLM недоступно" in explanation:
+        elif _llm_unavailable_explanation(explanation):
             notes.append("LLM response was unavailable, so a rule-based explanation was used.")
 
     return notes
+
+
+def _llm_budget_exhausted_explanation(explanation: str) -> bool:
+    markers = (
+        "Лимит LLM-вызовов исчерпан",
+        "The LLM call budget is exhausted",
+        "LLM шақыру лимиті таусылды",
+    )
+    return any(marker in explanation for marker in markers)
+
+
+def _llm_unavailable_explanation(explanation: str) -> bool:
+    markers = (
+        "Объяснение от LLM недоступно",
+        "The LLM explanation is unavailable",
+        "LLM түсіндірмесі қолжетімсіз",
+    )
+    return any(marker in explanation for marker in markers)
 
 
 def _event_calendar_notes(ticker: str, event_calendar: Any) -> list[str]:

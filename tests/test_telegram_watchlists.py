@@ -105,8 +105,35 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-        scan_mock.assert_called_once_with(["AAPL", "NVDA"], None)
+        scan_mock.assert_called_once_with(["AAPL", "NVDA"], None, "ru")
         self.assertIn("Запускаю сканирование твоего списка", send_mock.await_args_list[0].args[1])
+
+    async def test_scan_mine_uses_saved_language(self) -> None:
+        self.service._upsert_subscription(
+            204,
+            username="eve",
+            active=True,
+            watchlist_symbols=["AAPL"],
+            preferences={"language": "en"},
+        )
+        send_mock = AsyncMock()
+        scan_response = SimpleNamespace(results=[], errors=[], summary=SimpleNamespace())
+
+        with (
+            patch.object(self.service, "_send_message", send_mock),
+            patch("app.services.telegram_bot.scan_tickers", return_value=scan_response) as scan_mock,
+        ):
+            await self.service._handle_update(
+                {
+                    "message": {
+                        "chat": {"id": 204},
+                        "from": {"username": "eve"},
+                        "text": "/scan mine",
+                    }
+                }
+            )
+
+        scan_mock.assert_called_once_with(["AAPL"], None, "en")
 
     async def test_scan_with_explicit_tickers_uses_command_arguments(self) -> None:
         send_mock = AsyncMock()
@@ -153,7 +180,7 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        scan_mock.assert_called_once_with(["AAPL", "MSFT"], None)
+        scan_mock.assert_called_once_with(["AAPL", "MSFT"], None, "ru")
         self.assertIn("Запускаю сканирование: AAPL, MSFT...", send_mock.await_args_list[0].args[1])
         self.assertIn("Порог уверенности: 0.80", send_mock.await_args_list[1].args[1])
         self.assertIn("Скрыто низкоуверенных сигналов: 1", send_mock.await_args_list[1].args[1])
@@ -237,5 +264,5 @@ class TelegramWatchlistTests(unittest.IsolatedAsyncioTestCase):
         ):
             await restricted_service._send_digest_to_active_subscribers()
 
-        scan_mock.assert_called_once_with(["AAPL"], None)
+        scan_mock.assert_called_once_with(["AAPL"], None, "ru")
         self.assertEqual(send_mock.await_count, 1)

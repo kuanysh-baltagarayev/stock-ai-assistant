@@ -528,6 +528,45 @@ class AppSmokeTests(unittest.TestCase):
             f"Expected LLM message in operation_notes, got: {response.operation_notes}"
         )
 
+    def test_analyze_ticker_detects_localized_openai_fallback_notes(self) -> None:
+        market = {
+            "ticker": "AAPL",
+            "price": 189.12,
+            "currency": "USD",
+            "history": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "info": {},
+            "data_quality": {"summary": "ok"},
+        }
+        fundamentals = Fundamentals(company_name="Apple Inc.", sector="Technology")
+        technicals = TechnicalIndicators(change_1d_pct=1.0)
+        scoring = SimpleNamespace(
+            scores=Scores(
+                momentum_score=60.0,
+                valuation_score=55.0,
+                risk_score=35.0,
+                final_score=62.5,
+            ),
+            recommendation="NEUTRAL",
+            short_reason="Neutral: sample reason.",
+            reasons=["price is above MA50"],
+        )
+
+        with (
+            patch("app.services.scanner.get_settings", return_value=SimpleNamespace(openai_api_key="sk-test", deepseek_api_key=None, llm_provider="openai", llm_api_base_url=None, analysis_snapshot_retention_count=50, analysis_snapshot_retention_days=365)),
+            patch("app.services.scanner.get_market_data", return_value=market),
+            patch("app.services.scanner.extract_fundamentals", return_value=fundamentals),
+            patch("app.services.scanner.calculate_indicators", return_value=technicals),
+            patch("app.services.scanner.score_stock", return_value=scoring),
+            patch("app.services.scanner.explain_analysis", return_value="The LLM call budget is exhausted, so the rule-based version was used."),
+            patch("app.services.scanner._build_market_session", return_value=None),
+        ):
+            response = analyze_ticker("aapl", db=None, use_ai_explanation=True, language="en")
+
+        self.assertTrue(
+            any("LLM call budget was exhausted" in note for note in response.operation_notes),
+            f"Expected localized LLM budget note, got: {response.operation_notes}",
+        )
+
     def test_analyze_ticker_recent_8k_increases_risk_score(self) -> None:
         market = {
             "ticker": "AAPL",
@@ -1009,6 +1048,15 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(len(response.results), 1)
         analyze_mock.assert_called_once()
         filings_mock.assert_not_called()
+
+    def test_scan_tickers_passes_selected_language_to_analysis(self) -> None:
+        analysis = make_analysis("AAPL", 55.0)
+
+        with patch("app.services.scanner.analyze_ticker", return_value=analysis) as analyze_mock:
+            response = scan_tickers(["AAPL"], db=None, language="en")
+
+        self.assertEqual(len(response.results), 1)
+        self.assertEqual(analyze_mock.call_args.kwargs["language"], "en")
 
     def test_scan_tickers_reuses_one_fred_collection(self) -> None:
         analysis = make_analysis("AAPL", 55.0)
