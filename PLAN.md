@@ -104,6 +104,11 @@ Implemented:
   longer report a scope error, ticker extraction supports broader valid symbols
   with stop-word filtering, and Telegram long-poll transient network errors are
   logged as recoverable warnings. The suite passed with 571 tests.
+- 2026-06-12: commit `6a37871` was deployed to the existing Hetzner production
+  bot via `rsync` under `/home/stockbot/stock-ai-assistant`; server
+  `compileall` passed, `stockbot-telegram.service` restarted active/enabled,
+  post-restart logs showed `telegram_bot_started`, Telegram live check returned
+  `status: ok`, and `avtoqyzmet.kz` still returned `HTTP/2 200`.
 - 2026-06-10: `ruff`, `compileall`, and full fast-test suite (555 tests) passed
   after applying a batch of 10 bug fixes: correlation dict contract, Telegram
   watchlist field, recommendation alert labels, /health budget snapshots,

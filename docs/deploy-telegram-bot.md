@@ -44,6 +44,22 @@ and `PLAN.md` also synced.
   yfinance `KeyError: 'exchangeTimezoneName'` on NVDA during a scan, and a
   one-off Telegram long-poll timeout); post-restart logs were clean.
 
+### Update deploy — 2026-06-12 (commit `6a37871`)
+
+Shipped the Telegram LLM routing hardening: off-topic free-form messages no
+longer call the LLM, in-scope LLM fallback no longer reports a scope error, and
+ticker extraction now supports broader valid symbols with stop-word filtering.
+
+- Method: `rsync -rlptz --delete` with the same production excludes as the
+  2026-06-10 deploy (`.env`, `.venv/`, `.git/`, `*.db*`, caches, and
+  `.telegram_offset` preserved).
+- `requirements.txt` unchanged, so no server `pip install` was required.
+- Verification passed: server `compileall` returned `compile_ok`,
+  `stockbot-telegram.service` restarted to `active` and `enabled`, post-restart
+  logs showed `database_initialized` and `telegram_bot_started` (3 tasks), the
+  Telegram live check returned `status: ok` for `@StockQ1AssistantBot`, and
+  `avtoqyzmet.kz` still returned `HTTP/2 200`.
+
 ---
 
 ## Prerequisites
