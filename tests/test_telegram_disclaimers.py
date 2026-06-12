@@ -62,6 +62,58 @@ class TelegramDisclaimerTests(unittest.TestCase):
         self.assertIn("Низкая уверенность данных", text)
         self.assertIn("Источники не совпадают", text)
 
+    def _sample_analysis(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            ticker="TSLA",
+            recommendation="HIGH_RISK",
+            price=401.27,
+            currency="USD",
+            scores=SimpleNamespace(final_score=24.0, momentum_score=30.0, valuation_score=40.0, risk_score=78.0),
+            short_reason="price is above MA50",
+            explanation="Sample explanation.",
+            source_provenance=SimpleNamespace(
+                provider_name="yfinance",
+                source_tier="Tier 2",
+                fetched_at="2026-06-08T13:00:00Z",
+                observed_at="2026-06-08T13:00:00Z",
+            ),
+            data_quality=SimpleNamespace(confidence=0.65, summary="fresh but delayed"),
+            market_session=SimpleNamespace(status="closed", freshness_state="delayed"),
+        )
+
+    def test_analysis_text_renders_in_russian(self) -> None:
+        self.service._set_render_language(language="ru")
+        text = self.service._analysis_text(self._sample_analysis())
+
+        self.assertIn("TSLA: Высокий риск", text)
+        self.assertIn("Итоговая оценка:", text)
+        self.assertIn("Кратко:", text)
+        self.assertIn("Данные:", text)
+        # Russian post-translates the English rule-based reason.
+        self.assertIn("цена выше 50-дневной", text)
+
+    def test_analysis_text_renders_in_english(self) -> None:
+        self.service._set_render_language(language="en")
+        text = self.service._analysis_text(self._sample_analysis())
+
+        self.assertIn("TSLA: High risk", text)
+        self.assertIn("Final score:", text)
+        self.assertIn("Summary:", text)
+        self.assertIn("Data:", text)
+        # English output is not force-translated into Russian.
+        self.assertIn("price is above MA50", text)
+        self.assertNotIn("Высокий риск", text)
+        self.assertNotIn("Итоговая оценка", text)
+
+    def test_analysis_text_renders_in_kazakh(self) -> None:
+        self.service._set_render_language(language="kk")
+        text = self.service._analysis_text(self._sample_analysis())
+
+        self.assertIn("TSLA: Жоғары тәуекел", text)
+        self.assertIn("Қорытынды балл:", text)
+        self.assertIn("Қысқаша:", text)
+        self.assertNotIn("Высокий риск", text)
+
     def test_digest_text_adds_contextual_disclaimer_for_risk_and_major_alerts(self) -> None:
         results = [
             SimpleNamespace(

@@ -58,16 +58,16 @@ class FormattingMixin:
             lines.extend(format_decomposition_lines(decomp))
         else:
             # Fallback: raw numeric scores
-            lines.append(f"Итоговая оценка: {analysis.scores.final_score:.2f}")
-            lines.append(f"Импульс: {analysis.scores.momentum_score:.2f}")
-            lines.append(f"Оценка стоимости: {analysis.scores.valuation_score:.2f}")
-            lines.append(f"Риск: {analysis.scores.risk_score:.2f}")
+            lines.append(f"{self._t('rep_final_score')}: {analysis.scores.final_score:.2f}")
+            lines.append(f"{self._t('rep_momentum')}: {analysis.scores.momentum_score:.2f}")
+            lines.append(f"{self._t('rep_valuation')}: {analysis.scores.valuation_score:.2f}")
+            lines.append(f"{self._t('rep_risk')}: {analysis.scores.risk_score:.2f}")
 
-        lines.append(f"Кратко: {self._translate_text(analysis.short_reason)}")
-        lines.append(f"Комментарий: {self._translate_text(analysis.explanation)}")
+        lines.append(f"{self._t('rep_short')}: {self._translate_text(analysis.short_reason)}")
+        lines.append(f"{self._t('rep_comment')}: {self._translate_text(analysis.explanation)}")
         operation_notes = getattr(analysis, "operation_notes", None) or []
         if operation_notes:
-            lines.extend(["", "Операционные заметки:"])
+            lines.extend(["", f"{self._t('rep_operation_notes')}:"])
             lines.extend(f"- {self._translate_text(note)}" for note in operation_notes)
 
         # Add correlation insight if user has watchlist
@@ -78,7 +78,7 @@ class FormattingMixin:
                 if matrix:
                     insights = correlation_insights(matrix)
                     if insights:
-                        lines.extend(["", "Диверсификация портфеля:"])
+                        lines.extend(["", f"{self._t('rep_diversification')}:"])
                         lines.extend(f"- {self._translate_text(insight)}" for insight in insights[:2])
         except Exception:
             # Silently skip correlation on error
@@ -86,12 +86,12 @@ class FormattingMixin:
 
         quality_lines = self._data_quality_warning_lines(getattr(analysis, "data_quality", None))
         if quality_lines:
-            lines.extend(["", "Качество данных:"])
+            lines.extend(["", f"{self._t('rep_data_quality')}:"])
             lines.extend(f"- {line}" for line in quality_lines)
         event_calendar = getattr(analysis, "event_calendar", None)
         event_lines = self._event_calendar_lines(event_calendar)
         if event_lines:
-            lines.extend(["", "События:"])
+            lines.extend(["", f"{self._t('rep_events')}:"])
             lines.extend(event_lines)
         filing_lines = self._sec_filing_lines(getattr(analysis, "sec_filings", None))
         if filing_lines:
@@ -149,7 +149,7 @@ class FormattingMixin:
             return "Ничего не найдено."
 
         briefing = self._enrich_briefing_items_with_deltas(briefing)
-        lines = ["Результаты скана:", *self._briefing_lines(briefing)]
+        lines = [f"{self._t('rep_scan_results')}:", *self._briefing_lines(briefing)]
         if min_confidence is not None:
             lines.append(f"Порог уверенности: {min_confidence:.2f}")
         if briefing.hidden_low_confidence_count:
@@ -435,29 +435,29 @@ class FormattingMixin:
         flags = self._source_gap_flags(provenance, quality, session)
         flag_text = f" | {'; '.join(flags)}" if flags else ""
         return (
-            f"Данные: {provider}/{tier} | session {session_status} | "
+            f"{self._t('rep_data_prefix')}: {provider}/{tier} | session {session_status} | "
             f"freshness {freshness} | confidence {confidence_text}{flag_text}"
         )
 
     def _source_gap_flags(self, provenance: Any, quality: Any, session: Any) -> list[str]:
         flags: list[str] = []
         if not self._nested_value(provenance, "provider_name"):
-            flags.append("нет provider")
+            flags.append(self._t("rep_flag_no_provider"))
         if not self._nested_value(provenance, "fetched_at") and not self._nested_value(provenance, "observed_at"):
-            flags.append("нет source timestamp")
+            flags.append(self._t("rep_flag_no_timestamp"))
         if not self._nested_value(session, "status"):
-            flags.append("нет session")
+            flags.append(self._t("rep_flag_no_session"))
         if self._nested_bool(quality, "stale"):
-            flags.append("устаревшие данные")
+            flags.append(self._t("rep_flag_stale"))
         if self._nested_bool(quality, "delayed"):
-            flags.append("задержка данных")
+            flags.append(self._t("rep_flag_delayed"))
         if self._nested_bool(quality, "missing"):
-            flags.append("неполные данные")
+            flags.append(self._t("rep_flag_missing"))
         if self._nested_bool(quality, "source_disagreed"):
-            flags.append("источники расходятся")
+            flags.append(self._t("rep_flag_disagreed"))
         confidence = self._nested_value(quality, "confidence")
         if isinstance(confidence, (int, float)) and confidence < 0.8:
-            flags.append("пониженная уверенность")
+            flags.append(self._t("rep_flag_low_conf"))
         return flags
 
     def _subject_value(self, subject: Any, key: str) -> Any:
@@ -640,9 +640,9 @@ class FormattingMixin:
     def _briefing_lines(self, briefing: BriefingSummary) -> list[str]:
         lines: list[str] = []
         sections = (
-            ("Ключевые сигналы:", briefing.key_items),
-            ("Наблюдать:", briefing.watch_items),
-            ("Риск/качество данных:", briefing.risk_items),
+            (self._t("rep_key_signals"), briefing.key_items),
+            (self._t("rep_watch"), briefing.watch_items),
+            (self._t("rep_risk_quality"), briefing.risk_items),
         )
         for heading, items in sections:
             if not items:
@@ -663,9 +663,9 @@ class FormattingMixin:
             parts.append(f"изм. {sign}{item.score_delta:.1f}")
         if item.confidence is not None:
             if item.confidence < 0.6:
-                parts.append("низкая уверенность")
+                parts.append(self._t("rep_conf_low"))
             elif item.confidence < 0.8:
-                parts.append("средняя уверенность")
+                parts.append(self._t("rep_conf_medium"))
         reason = self._translate_text(item.short_reason)
         flag_texts = [self._briefing_flag_text(f) for f in item.flags[:2]] if item.flags else []
         extra = f" ({', '.join(flag_texts)})" if flag_texts else ""
@@ -673,23 +673,24 @@ class FormattingMixin:
 
     def _briefing_flag_text(self, flag: str) -> str:
         mapping = {
-            "confidence n/a": "нет confidence",
-            "stale data": "устаревшие данные",
-            "delayed data": "задержка данных",
-            "missing data": "неполные данные",
-            "source disagreement": "источники расходятся",
-            "stale signal": "устаревший сигнал",
-            "delayed signal": "задержанный сигнал",
-            "source provider n/a": "нет provider",
-            "session n/a": "нет session",
+            "confidence n/a": "rep_bf_conf_na",
+            "stale data": "rep_flag_stale",
+            "delayed data": "rep_flag_delayed",
+            "missing data": "rep_flag_missing",
+            "source disagreement": "rep_flag_disagreed",
+            "stale signal": "rep_bf_stale_signal",
+            "delayed signal": "rep_bf_delayed_signal",
+            "source provider n/a": "rep_flag_no_provider",
+            "session n/a": "rep_flag_no_session",
         }
         if flag.startswith("low confidence "):
-            return f"низкая уверенность {flag.removeprefix('low confidence ')}"
+            return f"{self._t('rep_conf_low')} {flag.removeprefix('low confidence ')}"
         if flag.startswith("medium confidence "):
-            return f"средняя уверенность {flag.removeprefix('medium confidence ')}"
+            return f"{self._t('rep_conf_medium')} {flag.removeprefix('medium confidence ')}"
         if flag.startswith("high risk "):
-            return f"высокий риск {flag.removeprefix('high risk ')}"
-        return mapping.get(flag, self._translate_text(flag))
+            return f"{self._t('rep_conf_high_risk')} {flag.removeprefix('high risk ')}"
+        key = mapping.get(flag)
+        return self._t(key) if key else self._translate_text(flag)
 
     def _alert_rules_text(self, rules: list[Any]) -> str:
         if not rules:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.research_labels import research_label_to_russian
+from app.services.research_labels import research_label_localized
 
 
 class DisclaimerMixin:
@@ -17,16 +17,12 @@ class DisclaimerMixin:
         risk_score = getattr(scores, "risk_score", None)
 
         if recommendation == "HIGH_INTEREST" or (isinstance(final_score, (int, float)) and final_score >= 80):
-            notes.append(
-                "Крупный сигнал: перед любыми действиями проверь источники, свежесть данных и контекст события."
-            )
+            notes.append(self._t("rep_disc_big"))
 
         if recommendation in {"CAUTION", "HIGH_RISK"} or (
             isinstance(risk_score, (int, float)) and risk_score >= 70
         ):
-            notes.append(
-                "Высокий риск: не полагайся на оценку без ручной проверки данных и новостей."
-            )
+            notes.append(self._t("rep_disc_risk"))
 
         return "\n".join(notes)
 
@@ -46,18 +42,18 @@ class DisclaimerMixin:
 
         confidence = _get("confidence", 1.0)
         if isinstance(confidence, (int, float)) and confidence < 0.8:
-            lines.append(f"Низкая уверенность данных: {confidence:.2f}")
+            lines.append(f"{self._t('rep_dq_low_conf')}: {confidence:.2f}")
 
         if _get("source_disagreed"):
-            lines.append("Источники не совпадают между собой.")
+            lines.append(self._t("rep_dq_disagreed"))
         if _get("stale"):
-            lines.append("Данные выглядят устаревшими.")
+            lines.append(self._t("rep_dq_stale"))
         if _get("delayed"):
-            lines.append("Поток данных может запаздывать.")
+            lines.append(self._t("rep_dq_delayed"))
         if _get("missing"):
-            lines.append("Есть пропуски в исходных данных.")
+            lines.append(self._t("rep_dq_missing"))
         if _get("estimated"):
-            lines.append("Часть значений оценочная, а не подтверждённая.")
+            lines.append(self._t("rep_dq_estimated"))
         if _get("split_detected"):
             lines.append("Обнаружен сплит (данные в raw-close).")
         if _get("dividend_detected"):
@@ -101,7 +97,8 @@ class DisclaimerMixin:
         return "\n".join(notes)
 
     def _translate_recommendation(self, recommendation: str) -> str:
-        return research_label_to_russian(recommendation)
+        language = self._normalize_language(getattr(self, "_current_language", "ru"))
+        return research_label_localized(recommendation, language)
 
     def _translate_error(self, error_text: str) -> str:
         """Translate common English error messages to Russian."""
@@ -128,6 +125,14 @@ class DisclaimerMixin:
         return self._translate_text(translated)
 
     def _translate_text(self, text: str) -> str:
+        # The underlying rule-based reasons and LLM fallbacks are authored in
+        # English. We only post-translate them into Russian; for English and
+        # Kazakh the source text (LLM output already in the target language, or
+        # English rule-based fragments) is returned unchanged so we never
+        # corrupt non-Russian output by force-replacing English phrases.
+        language = self._normalize_language(getattr(self, "_current_language", "ru"))
+        if language != "ru":
+            return text
         replacements = {
             "analytical signal": "аналитический сигнал",
             "research signal": "исследовательский сигнал",

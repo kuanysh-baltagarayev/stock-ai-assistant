@@ -16,6 +16,28 @@ _RUSSIAN_LABELS = {
     "HIGH_RISK": "Высокий риск",
 }
 
+_ENGLISH_LABELS = {
+    "HIGH_INTEREST": "High interest",
+    "WATCH": "Watch",
+    "NEUTRAL": "Neutral",
+    "CAUTION": "Caution",
+    "HIGH_RISK": "High risk",
+}
+
+_KAZAKH_LABELS = {
+    "HIGH_INTEREST": "Жоғары қызығушылық",
+    "WATCH": "Бақылау",
+    "NEUTRAL": "Бейтарап",
+    "CAUTION": "Сақтық",
+    "HIGH_RISK": "Жоғары тәуекел",
+}
+
+_LABELS_BY_LANGUAGE = {
+    "ru": _RUSSIAN_LABELS,
+    "en": _ENGLISH_LABELS,
+    "kk": _KAZAKH_LABELS,
+}
+
 
 def research_label_for_score(final_score: float, risk_score: float) -> str:
     if final_score >= 80 and risk_score <= 55:
@@ -35,3 +57,8 @@ def research_label_to_russian(label: str) -> str:
 
 def research_label_to_title(label: str) -> str:
     return label.replace("_", " ").title()
+
+
+def research_label_localized(label: str, language: str = "ru") -> str:
+    table = _LABELS_BY_LANGUAGE.get(language, _RUSSIAN_LABELS)
+    return table.get(label, label.replace("_", " ").title())
