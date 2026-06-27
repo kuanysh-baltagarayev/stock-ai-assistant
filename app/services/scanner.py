@@ -711,9 +711,13 @@ def _build_operation_notes(
     )
 
     if used_ai_explanation:
-        api_key = getattr(settings, "deepseek_api_key", None) or getattr(settings, "openai_api_key", None)
+        api_key = (
+            getattr(settings, "anthropic_api_key", None)
+            or getattr(settings, "deepseek_api_key", None)
+            or getattr(settings, "openai_api_key", None)
+        )
         if not api_key:
-            notes.append("LLM explanation is disabled (neither OPENAI_API_KEY nor DEEPSEEK_API_KEY set), so a rule-based explanation was used.")
+            notes.append("LLM explanation is disabled (no ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY set), so a rule-based explanation was used.")
         elif _llm_budget_exhausted_explanation(explanation):
             notes.append("LLM call budget was exhausted, so a rule-based explanation was used.")
         elif _llm_unavailable_explanation(explanation):

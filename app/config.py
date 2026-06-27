@@ -24,7 +24,9 @@ class Settings(BaseModel):
     allow_remote_api: bool = Field(default=False)
     openai_api_key: str | None = Field(default=None)
     openai_model: str = Field(default="gpt-4.1-mini")
-    llm_provider: str = Field(default="openai")
+    anthropic_api_key: str | None = Field(default=None)
+    anthropic_model: str = Field(default="claude-haiku-4-5")
+    llm_provider: str = Field(default="anthropic")
     llm_api_base_url: str | None = Field(default=None)
     deepseek_api_key: str | None = Field(default=None)
     fred_api_key: str | None = Field(default=None)
@@ -169,7 +171,9 @@ def get_settings() -> Settings:
         ),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-        llm_provider=os.getenv("LLM_PROVIDER", "openai"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
+        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5"),
+        llm_provider=os.getenv("LLM_PROVIDER", "anthropic"),
         llm_api_base_url=os.getenv("LLM_API_BASE_URL") or None,
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
         fred_api_key=os.getenv("FRED_API_KEY") or None,

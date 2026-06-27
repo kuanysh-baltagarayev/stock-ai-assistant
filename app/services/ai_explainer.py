@@ -7,7 +7,7 @@ from app.services.runtime_budget import RuntimeBudgetExceeded, consume_runtime_b
 
 def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str], language: str = "ru") -> str:
     settings = get_settings()
-    api_key = settings.deepseek_api_key or settings.openai_api_key
+    api_key = _resolve_api_key(settings)
     if not api_key:
         return rule_based_explanation(analysis_payload, reasons, language=language)
 
@@ -176,26 +176,37 @@ def _fallback_note(language: str, reason: str) -> str:
     return "Объяснение от LLM недоступно, поэтому использован rule-based вариант."
 
 
+def _resolve_provider(settings: Any) -> str:
+    return (settings.llm_provider or "anthropic").lower()
+
+
+def _resolve_api_key(settings: Any) -> str | None:
+    provider = _resolve_provider(settings)
+    if provider == "anthropic":
+        return settings.anthropic_api_key
+    if provider == "deepseek":
+        return settings.deepseek_api_key or settings.openai_api_key
+    return settings.openai_api_key or settings.deepseek_api_key
+
+
+def _build_system_prompt(language_instruction: str) -> str:
+    return (
+        "Вы объясняете результаты количественного анализа акций для частного пользователя. "
+        "Используйте только JSON-данные, предоставленные приложением. Не выдумывайте, "
+        "не оценивайте и не добавляйте числа от себя. Пишите кратко. "
+        f"{language_instruction} Укажите, что это "
+        "аналитический сигнал, а не финансовый совет."
+    )
+
+
 def _llm_explanation(
     analysis_payload: dict[str, Any],
     reasons: list[str],
     api_key: str,
     language: str = "ru",
 ) -> str:
-    from openai import OpenAI
-
     settings = get_settings()
-    provider = (settings.llm_provider or "openai").lower()
-
-    # Determine base_url and model based on provider.
-    if provider == "deepseek":
-        base_url = settings.llm_api_base_url or "https://api.deepseek.com"
-        model = "deepseek-chat"
-    else:
-        base_url = settings.llm_api_base_url or "https://api.openai.com/v1"
-        model = settings.openai_model or "gpt-4.1-mini"
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    provider = _resolve_provider(settings)
     language = _normalize_language(language)
     language_instruction = {
         "ru": "Пишите на русском языке.",
@@ -215,32 +226,70 @@ def _llm_explanation(
         "calculated_reasons": reasons,
     }
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Вы объясняете результаты количественного анализа акций для частного пользователя. "
-                    "Используйте только JSON-данные, предоставленные приложением. Не выдумывайте, "
-                    "не оценивайте и не добавляйте числа от себя. Пишите кратко. "
-                    f"{language_instruction} Укажите, что это "
-                    "аналитический сигнал, а не финансовый совет."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Объясните этот анализ акции простыми словами:\n"
-                    f"{json.dumps(compact_payload, ensure_ascii=False, indent=2)}"
-                ),
-            },
-        ],
+    system_prompt = _build_system_prompt(language_instruction)
+    user_prompt = (
+        "Объясните этот анализ акции простыми словами:\n"
+        f"{json.dumps(compact_payload, ensure_ascii=False, indent=2)}"
     )
-    text = response.choices[0].message.content if response.choices else None
+
+    if provider == "anthropic":
+        text = _anthropic_completion(api_key, system_prompt, user_prompt, settings)
+    else:
+        text = _openai_completion(api_key, system_prompt, user_prompt, settings, provider)
+
     if not text:
         return rule_based_explanation(analysis_payload, reasons, language=language)
     return text.strip()
+
+
+def _anthropic_completion(
+    api_key: str,
+    system_prompt: str,
+    user_prompt: str,
+    settings: Any,
+) -> str | None:
+    import anthropic
+
+    client = anthropic.Anthropic(
+        api_key=api_key,
+        base_url=settings.llm_api_base_url or None,
+    )
+    model = settings.anthropic_model or "claude-haiku-4-5"
+    response = client.messages.create(
+        model=model,
+        max_tokens=1024,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    return next((block.text for block in response.content if block.type == "text"), None)
+
+
+def _openai_completion(
+    api_key: str,
+    system_prompt: str,
+    user_prompt: str,
+    settings: Any,
+    provider: str,
+) -> str | None:
+    from openai import OpenAI
+
+    # Determine base_url and model based on provider.
+    if provider == "deepseek":
+        base_url = settings.llm_api_base_url or "https://api.deepseek.com"
+        model = "deepseek-chat"
+    else:
+        base_url = settings.llm_api_base_url or "https://api.openai.com/v1"
+        model = settings.openai_model or "gpt-4.1-mini"
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    return response.choices[0].message.content if response.choices else None
 
 
 def _translate_reason_text(text: str) -> str:
