@@ -24,6 +24,18 @@ Deployed successfully on the existing Hetzner server for `avtoqyzmet.kz` on
   `/home/stockbot/stock-ai-assistant` tree. Nginx and `/app/frontend-quasar`
   were not changed.
 
+### Status update — 2026-06-27 (service stopped)
+
+`stockbot-telegram.service` was **stopped and disabled** (`systemctl disable
+--now`) to halt cost on the Hetzner server while the LLM provider is migrated
+to Anthropic. Service is now `inactive`/`disabled` and will not auto-start on
+reboot.
+
+To bring it back online: deploy the `feat/no-openai-roadmap` Anthropic-provider
+changes, set `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` in the server
+`.env` (it still holds the old `LLM_PROVIDER=deepseek`), then
+`sudo systemctl enable --now stockbot-telegram`.
+
 ### Update deploy — 2026-06-10 (commit `0cbca7f`)
 
 Shipped the `0cbca7f` bug-fix batch (10 fixes from deployment validation:

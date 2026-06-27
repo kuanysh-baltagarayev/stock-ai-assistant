@@ -17,7 +17,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - `GET /providers` and `GET /providers/{name}` expose provider registry entries and health.
 - CLI scanner for a default watchlist, custom tickers, JSON output, and recent-analysis reports.
 - Telegram bot with `/analyze`, `/scan`, watchlists, preferences, source-backed detail commands, and session-aware scheduled digests.
-- Telegram asks for interface language on first use, persists the per-chat language, and uses it for Telegram UI text plus OpenAI/rule-based analysis explanations.
+- Telegram asks for interface language on first use, persists the per-chat language, and uses it for Telegram UI text plus LLM/rule-based analysis explanations.
 - Telegram alert preferences include quiet hours, daily caps, minimum confidence, and market-hours-only mode via `/quiet`, `/cap`, `/confidence`, and `/markethours`.
 - Telegram `/coverage` command and API `/coverage` endpoint for supported markets, asset classes, source tiers, calendars, currencies, and known gaps.
 - Telegram analysis responses include inline follow-up buttons for sources, freshness, risk, rescan, and watchlist actions.
@@ -29,7 +29,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - SQLite instrument registry for symbol, exchange, currency, and related metadata.
 - SQLite provider registry for source tier, capability list, legal note, retry policy, and health timestamps.
 - Normalized market-data provider contract with offline fixture support for future collectors.
-- Works without `OPENAI_API_KEY`; falls back to rule-based explanations.
+- Works without any LLM API key; falls back to rule-based explanations.
 
 ## Stack
 
@@ -42,7 +42,7 @@ This is an MVP for private research. It is not a public investment advisory serv
 - pandas / numpy
 - python-dotenv
 - uvicorn
-- Optional OpenAI API
+- Optional LLM API for explanations (Anthropic by default; OpenAI / DeepSeek also supported)
 
 ## Setup
 
@@ -96,14 +96,20 @@ cp .env.example .env
 The API runs locally by default. Keep `APP_HOST=127.0.0.1` unless you have
 added the public-facing controls called out in `PLAN.md`.
 
-Optional OpenAI setup:
+Optional LLM setup (for analysis explanations):
 
 ```bash
-# Edit .env and set:
-OPENAI_API_KEY=your_key_here
+# Edit .env. Anthropic is the default provider:
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_key_here
+ANTHROPIC_MODEL=claude-haiku-4-5   # default; claude-opus-4-8 for max quality
+
+# Or use OpenAI / DeepSeek instead:
+# LLM_PROVIDER=openai
+# OPENAI_API_KEY=your_key_here
 ```
 
-If `OPENAI_API_KEY` is empty, the app still works and returns a rule-based explanation.
+If no LLM key is set, the app still works and returns a rule-based explanation.
 
 Market-data resilience settings:
 
@@ -153,7 +159,7 @@ Set `TELEGRAM_ALLOWED_CHAT_IDS` to a comma-separated list of chat IDs to restric
 
 The bot stores subscriptions, watchlists, and alert preferences in SQLite. If `TELEGRAM_ENABLED=1` and `TELEGRAM_BOT_TOKEN` are set, it starts automatically when the app runs.
 
-On first `/start`, the bot asks for a language. The selected language is stored per chat and is used for the main Telegram keyboard, help/disclaimer text, and analysis explanations sent through OpenAI or the rule-based fallback.
+On first `/start`, the bot asks for a language. The selected language is stored per chat and is used for the main Telegram keyboard, help/disclaimer text, and analysis explanations sent through the configured LLM provider or the rule-based fallback.
 
 The default SQLite database path is resolved relative to the project root, so the file stays in this repository even if you launch `uvicorn` from another directory.
 
