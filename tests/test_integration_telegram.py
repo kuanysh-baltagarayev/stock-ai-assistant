@@ -204,7 +204,7 @@ class TelegramIntegrationTest(unittest.TestCase):
 
     def test_llm_budget_message_uses_saved_language(self):
         self.bot.settings.openai_api_key = "sk-test"
-        self.bot.settings.openai_call_budget = 0
+        self.bot.settings.llm_call_budget = 0
         self._run(self._make_update("English"))
         self.bot._send_message.reset_mock()
 

@@ -418,10 +418,10 @@ class AppSmokeTests(unittest.TestCase):
                 from app.services import runtime_budget
 
                 runtime_budget.reset_runtime_budgets(clear_persistent=True)
-                first = runtime_budget.consume_runtime_budget("openai_calls", 3, amount=2)
+                first = runtime_budget.consume_runtime_budget("llm_calls", 3, amount=2)
                 runtime_budget._COUNTERS.clear()
-                snapshot = runtime_budget.runtime_budget_snapshot("openai_calls", 3)
-                second = runtime_budget.consume_runtime_budget("openai_calls", 3)
+                snapshot = runtime_budget.runtime_budget_snapshot("llm_calls", 3)
+                second = runtime_budget.consume_runtime_budget("llm_calls", 3)
 
             self.assertEqual(first.used, 2)
             self.assertEqual(first.remaining, 1)
@@ -1152,7 +1152,7 @@ class AppSmokeTests(unittest.TestCase):
         settings = SimpleNamespace(
             openai_api_key="sk-test",
             openai_model="gpt-4.1-mini",
-            openai_call_budget=0,
+            llm_call_budget=0,
             deepseek_api_key=None,
             llm_provider="openai",
             llm_api_base_url=None,
@@ -1181,7 +1181,7 @@ class AppSmokeTests(unittest.TestCase):
         settings = SimpleNamespace(
             openai_api_key="sk-test",
             openai_model="gpt-4.1-mini",
-            openai_call_budget=0,
+            llm_call_budget=0,
             deepseek_api_key=None,
             llm_provider="openai",
             llm_api_base_url=None,
@@ -1234,7 +1234,7 @@ class ConfigurationTests(unittest.TestCase):
             {
                 "MARKET_DATA_CACHE_TTL_SECONDS": "900",
                 "PROVIDER_CALL_BUDGET": "321",
-                "OPENAI_CALL_BUDGET": "12",
+                "LLM_CALL_BUDGET": "12",
                 "TELEGRAM_SEND_BUDGET": "44",
             },
             clear=False,
@@ -1244,8 +1244,28 @@ class ConfigurationTests(unittest.TestCase):
 
         self.assertEqual(settings.market_data_cache_ttl_seconds, 900)
         self.assertEqual(settings.provider_call_budget, 321)
-        self.assertEqual(settings.openai_call_budget, 12)
+        self.assertEqual(settings.llm_call_budget, 12)
         self.assertEqual(settings.telegram_send_budget, 44)
+
+    def test_get_settings_llm_call_budget_backward_compat(self) -> None:
+        # Legacy OPENAI_CALL_BUDGET is honored when LLM_CALL_BUDGET is unset.
+        with patch.dict(os.environ, {"OPENAI_CALL_BUDGET": "7"}, clear=False):
+            os.environ.pop("LLM_CALL_BUDGET", None)
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        self.assertEqual(settings.llm_call_budget, 7)
+
+        # LLM_CALL_BUDGET takes precedence when both are set.
+        with patch.dict(
+            os.environ,
+            {"OPENAI_CALL_BUDGET": "7", "LLM_CALL_BUDGET": "9"},
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        self.assertEqual(settings.llm_call_budget, 9)
 
     def test_get_settings_parses_telegram_allowlist(self) -> None:
         with patch.dict(

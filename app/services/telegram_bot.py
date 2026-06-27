@@ -1025,7 +1025,7 @@ class TelegramBotService(
                 budget_names = {
                     "provider_calls": getattr(settings, "provider_call_budget", None),
                     "telegram_sends": getattr(settings, "telegram_send_budget", None),
-                    "openai_calls": getattr(settings, "openai_call_budget", None),
+                    "llm_calls": getattr(settings, "llm_call_budget", None),
                 }
                 for name, limit in budget_names.items():
                     try:
@@ -2023,7 +2023,7 @@ class TelegramBotService(
 
         try:
             from app.services.runtime_budget import consume_runtime_budget
-            consume_runtime_budget("openai_calls", getattr(settings, "openai_call_budget", 50))
+            consume_runtime_budget("llm_calls", getattr(settings, "llm_call_budget", 50))
         except Exception:
             return self._t("llm_budget_exhausted")
 

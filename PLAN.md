@@ -326,7 +326,7 @@ Fix batch addressing 10 bugs found during deployment validation:
    still require explicit analysis (background alert loop sets `recommendation=None`).
 4. **Fixed: /health budget snapshot** — `runtime_budget_snapshot()` requires
    `(name, limit)` arguments; the health handler now passes known budget names
-   (`provider_calls`, `telegram_sends`, `openai_calls`) with limits from settings.
+   (`provider_calls`, `telegram_sends`, `llm_calls`) with limits from settings.
 5. **Fixed: _session_window closed-state routing** — removed `"closed"` from the
    `{"closed", "pre_market"}` condition so late-night closed sessions no longer
    display as `"pre-market"`. `"closed"` is now handled alongside `"holiday"`/`"weekend"`

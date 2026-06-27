@@ -12,7 +12,7 @@ def explain_analysis(analysis_payload: dict[str, Any], reasons: list[str], langu
         return rule_based_explanation(analysis_payload, reasons, language=language)
 
     try:
-        consume_runtime_budget("openai_calls", settings.openai_call_budget)
+        consume_runtime_budget("llm_calls", settings.llm_call_budget)
         return _llm_explanation(analysis_payload, reasons, api_key=api_key, language=language)
     except RuntimeBudgetExceeded:
         lang = _normalize_language(language)

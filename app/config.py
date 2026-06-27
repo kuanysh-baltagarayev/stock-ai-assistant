@@ -37,7 +37,7 @@ class Settings(BaseModel):
     market_data_retry_backoff_seconds: float = Field(default=1.5)
     market_data_cache_ttl_seconds: int = Field(default=3600)
     provider_call_budget: int = Field(default=1000)
-    openai_call_budget: int = Field(default=50)
+    llm_call_budget: int = Field(default=50)
     telegram_send_budget: int = Field(default=200)
     telegram_bot_token: str | None = Field(default=None)
     telegram_default_tickers: str = Field(
@@ -209,9 +209,11 @@ def get_settings() -> Settings:
             default=1000,
             minimum=0,
         ),
-        openai_call_budget=_parse_int(
-            os.getenv("OPENAI_CALL_BUDGET"),
-            env_name="OPENAI_CALL_BUDGET",
+        llm_call_budget=_parse_int(
+            # LLM_CALL_BUDGET is the current name; OPENAI_CALL_BUDGET kept for
+            # backward compatibility with older .env files.
+            os.getenv("LLM_CALL_BUDGET", os.getenv("OPENAI_CALL_BUDGET")),
+            env_name="LLM_CALL_BUDGET",
             default=50,
             minimum=0,
         ),

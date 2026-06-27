@@ -128,12 +128,12 @@ Runtime budgets:
 
 ```bash
 PROVIDER_CALL_BUDGET=1000
-OPENAI_CALL_BUDGET=50
+LLM_CALL_BUDGET=50
 TELEGRAM_SEND_BUDGET=200
 ```
 
 Runtime budgets are persisted in SQLite and enforced across restarts when the
-database is available. Provider calls, OpenAI explanations, and Telegram
+database is available. Provider calls, LLM explanations, and Telegram
 `sendMessage` calls stop when their configured limit is exhausted.
 
 Snapshot retention:
@@ -174,7 +174,7 @@ The default SQLite database path is resolved relative to the project root, so th
 - Analysis snapshots are cleaned up automatically to keep the latest per-ticker history within the configured retention policy.
 - Raw provider snapshots are stored separately from normalized analyses with source URLs, timestamps, parser version, confidence, and content hashes.
 - Provider health is stored in `provider_registry` and updated when market data requests succeed or fail.
-- Runtime budget counters are stored in SQLite so provider, OpenAI, and Telegram limits survive process restarts.
+- Runtime budget counters are stored in SQLite so provider, LLM, and Telegram limits survive process restarts.
 - Analysis responses include explicit data-quality flags, market session state, operation notes, and FX assumption metadata. Non-USD FX conversion is not applied yet, so values remain in the reported trading currency.
 - If `TELEGRAM_ALLOWED_CHAT_IDS` is set, only those chats can use the bot and receive digests.
 
