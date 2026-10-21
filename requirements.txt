@@ -8,3 +8,4 @@ pandas==3.0.3
 numpy==2.4.6
 anthropic==0.112.0
 openai==2.38.0
+Pillow==12.2.0

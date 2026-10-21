@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import tempfile
@@ -624,13 +624,13 @@ class AppSmokeTests(unittest.TestCase):
                     filings=[
                         EdgarFiling(
                             form_type="8-K",
-                            filing_date="2026-05-30",
+                            filing_date=(datetime.now(timezone.utc) - timedelta(days=2)).date().isoformat(),
                             accession_number="0000320193-26-000020",
                             description="Current report",
                             sec_url="https://www.sec.gov/Archives/edgar/data/320193/000032019326000020/0000320193-26-000020-index.htm",
                         )
                     ],
-                    fetched_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+                    fetched_at=datetime.now(timezone.utc),
                 ),
             ),
         ):
